@@ -1,0 +1,91 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_trade_view_form" model="ir.ui.view">
+        <field name="name">dankbit_trade.view.form</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <form string="Trade">
+                <sheet>
+                    <group>
+                        <field name="name" />
+                        <field name="option_type" />
+                        <field name="strike" />
+                        <field name="expiration" />
+                        <field name="index_price" />
+                        <field name="direction" />
+                        <field name="amount" />
+                        <field name="contracts" />
+                        <field name="iv" />
+                        <field name="deribit_ts" />
+                        <field name="price" />
+                        <field name="mark_price" />
+                        <field name="trade_seq" />
+                        <field name="deribit_trade_identifier" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_view_list" model="ir.ui.view">
+        <field name="name">dankbit_trade.view.list</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <list string="Trades">
+                <field name="name" />
+                <field name="deribit_ts" />
+                <field name="strike" />
+                <field name="amount" />
+                <field name="contracts" />
+                <field name="direction" />
+                <field name="option_type" />
+                <field name="index_price" />
+                <field name="iv" />
+                <field name="trade_seq" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_view_search" model="ir.ui.view">
+        <field name="name">dankbit.trade.view.search</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <search string="Search Trades">
+                <field name="name" string="Name"/>
+                <field name="strike" string="Strike"/>
+                <field name="option_type" string="Option Type"/>
+                <field name="direction" string="Direction"/>
+
+                <separator/>
+                <filter name="only_calls" string="Calls" domain="[('option_type', '=', 'call')]"/>
+                <filter name="only_puts" string="Puts" domain="[('option_type', '=', 'put')]"/>
+                <separator/>
+                <filter name="only_longs" string="Buys" domain="[('direction', '=', 'buy')]"/>
+                <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
+                <separator/>
+                <filter name="only_tomorrow" string="Tomorrow" domain="[
+                    ('expiration', '&lt;', datetime.datetime.combine(context_today() + relativedelta(days=1), datetime.time(10, 1, 1)))
+                ]" />
+                <filter name="only_after_tomorrow" string="After Tomorrow" domain="[
+                    ('expiration', '&gt;', datetime.datetime.combine(context_today() + relativedelta(days=1), datetime.time(10, 1, 1))),
+                    ('expiration', '&lt;', datetime.datetime.combine(context_today() + relativedelta(days=2), datetime.time(10, 1, 1)))
+                ]" />
+
+                <group expand="0" string="Group By">
+                    <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
+                    <filter string="Option Type" name="option_type" context="{'group_by':'option_type'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_action" model="ir.actions.act_window">
+        <field name="name">Trades</field>
+        <field name="res_model">dankbit.trade</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_trade_menu" name="Trades" action="dankbit_trade_action"
+        parent="dankbit_root_menu" sequence="30"/>
+</odoo>

@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <data>
+
+        <record id="dankbit_get_last_btc_trades_cron" model="ir.cron">
+            <field name="active">True</field>
+            <field name="name">Get Last Trades</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="interval_number">2</field>
+            <field name="interval_type">minutes</field>
+            <field name="state">code</field>
+            <field name="code">model.get_last_trades()</field>
+        </record>
+
+    </data>
+</odoo>

@@ -1,0 +1,31 @@
+services:
+  web:
+    user: "${UID}:${GID}"
+    build:
+      context: .
+    container_name: odoo_18
+    depends_on:
+      - db
+    ports:
+      - "80:8069"
+    volumes:
+      - odoo-web-data:/var/lib/odoo
+      - ./config/odoo.conf:/etc/odoo/odoo.conf
+      - ./my_addons:/mnt/my_addons
+      - ./screenshots:/mnt/screenshots
+      - ./help:/mnt/help
+    restart: always
+  db:
+    image: postgres:14.11
+    container_name: postgres_14
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=odoo
+      - POSTGRES_USER=odoo
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    restart: always
+    volumes:
+      - odoo-db-data:/var/lib/postgresql/data/pgdata
+volumes:
+  odoo-web-data:
+  odoo-db-data:
