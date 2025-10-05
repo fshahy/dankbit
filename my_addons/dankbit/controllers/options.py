@@ -73,7 +73,7 @@ class OptionStrat:
             ax.plot(self.STs, market_delta, color="green")
             ax.plot(self.STs, market_gammas, color="violet")
 
-        ax.set_title(f"Current: {self.S0:,.0f} | {self.name} | {now} | {veiw_type} | {hours_ago}H")
+        ax.set_title(f"at ${self.S0:,.0f} | {self.name} | {now} | {veiw_type} | {hours_ago}H")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, linestyle="--", color="blue")
         ax.set_ylabel('Profit $')
