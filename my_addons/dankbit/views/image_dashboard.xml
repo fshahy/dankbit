@@ -59,18 +59,18 @@
           <img t-att-src="'/i/%s/mm/1' % today"/>
         </div>
         <div class="cell right">
-          <img t-att-src="'/i/%s/mm/8' % today"/>
+          <img t-att-src="'/i/%s/mm/2' % today"/>
         </div>
 
         <!-- Row 2 -->
         <div class="cell left">
-          <img t-att-src="'/i/%s/mm/0' % tomorrow"/>
+          <img t-att-src="'/i/%s/mm/4' % today"/>
         </div>
         <div class="cell center">
-          <img t-att-src="'/i/%s/mm/1' % tomorrow"/>
+          <img t-att-src="'/i/%s/mm/8' % today"/>
         </div>
         <div class="cell right">
-          <img t-att-src="'/i/%s/mm/8' % tomorrow"/>
+          <img t-att-src="'/i/%s/mm/16' % today"/>
         </div>
       </body>
     </html>
