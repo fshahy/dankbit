@@ -1,6 +1,6 @@
-# controllers/main.py
 import gzip
-import os
+# import os
+import math
 
 import numpy as np
 from datetime import datetime, timedelta
@@ -19,17 +19,15 @@ import matplotlib.pyplot as plt
 _logger = logging.getLogger(__name__)
 
 class ChartController(http.Controller):
-    @http.route("/i/<string:instrument>/<string:veiw_type>/<int:hours_ago>", type="http", auth="public", website=True, csrf=False)
+    @http.route("/i/<string:instrument>/<string:veiw_type>/<int:hours_ago>", type="http", auth="public", website=True)
     def chart_png(self, instrument, veiw_type, hours_ago):
-        from_price = 110000.00
-        to_price = 130000.00
-        step = 100
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        from_price = math.floor((index_price-4000.00) / 1000.00) * 1000.00
+        to_price = math.ceil((index_price+4000.00) / 1000.00) * 1000.00
+        step = 500
         if hours_ago == 0:
             hours_ago == 24
 
-        now_ms = int(time.time() * 1000)
-        # ago_in_ms = now_ms - (hours_ago * 60 * 60 * 1000) # created in last 24 hours
         from_time = datetime.now() - timedelta(hours=hours_ago)
 
         tz = ZoneInfo("Europe/Berlin")
@@ -76,12 +74,6 @@ class ChartController(http.Controller):
         fig.savefig(buf, format="png")
         plt.close(fig)
 
-        # berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        # filename = berlin_time.strftime("%Y_%m_%d_%H_%M")
-        # os.makedirs(f"/mnt/screenshots/{instrument}", exist_ok=True)
-        # with open(f"/mnt/screenshots/{instrument}/{filename}.png", "wb") as screenshot:
-        #     screenshot.write(buf.getvalue())
-
         # compress with gzip
         png_data = buf.getvalue()
         compressed_data = gzip.compress(png_data)
@@ -94,10 +86,10 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
 
-    # @http.route('/i/clear', type='http', csrf=False)
-    # def clear_trades2(self):
-    #     request.env['dankbit.trade'].search(
-    #         domain=[]
-    #     ).unlink()
-
-    #     return request.redirect('/odoo/')
+    @http.route('/i/<string:today_instrument>/<string:tomorrow_instrument>', auth='public', type='http', website=True)
+    def iframe_dashboard(self, today_instrument, tomorrow_instrument):
+        vals = {
+            "today": today_instrument,
+            "tomorrow": tomorrow_instrument,
+        }
+        return request.render('dankbit.image_dashboard', vals)

@@ -55,13 +55,10 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    # def normalize(self, x):
-    #     return x / np.max(np.abs(x))
-
     def plot(self, index_price, market_delta, market_gammas, veiw_type, hours_ago):
-        fig, ax = plt.subplots(figsize=(18, 8))
-        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-        plt.xticks(rotation=90) 
+        fig, ax = plt.subplots(figsize=(6, 4))
+        # ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+        # plt.xticks(rotation=90) 
         ax.grid(True)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
@@ -76,45 +73,9 @@ class OptionStrat:
             ax.plot(self.STs, market_delta, color="green")
             ax.plot(self.STs, market_gammas, color="violet")
 
-        imgLC = mpimg.imread("/mnt/help/LC.png")
-        imgLP = mpimg.imread("/mnt/help/LP.png")
-        imgSC = mpimg.imread("/mnt/help/SC.png")
-        imgSP = mpimg.imread("/mnt/help/SP.png")
-
-        # Create image boxes
-        imageboxLC = OffsetImage(imgLC, zoom=0.5)
-        abLC = AnnotationBbox(imageboxLC, (0, 1), 
-                              xycoords='axes fraction', 
-                              box_alignment=(0, 1),
-                              frameon=False)
-        
-        imageboxSC = OffsetImage(imgSC, zoom=0.5)
-        abSC = AnnotationBbox(imageboxSC, (0, 0), 
-                              xycoords='axes fraction', 
-                              box_alignment=(0, 0),
-                              frameon=False)
-        
-        imageboxLP = OffsetImage(imgLP, zoom=0.5)
-        abLP = AnnotationBbox(imageboxLP, (1, 1), 
-                              xycoords='axes fraction', 
-                              box_alignment=(1, 1),
-                              frameon=False)
-        
-        imageboxSP = OffsetImage(imgSP, zoom=0.5)
-        abSP = AnnotationBbox(imageboxSP, (1, 0), 
-                              xycoords='axes fraction', 
-                              box_alignment=(1, 0),
-                              frameon=False)
-
-        ax.add_artist(abLC)
-        ax.add_artist(abSC)
-        ax.add_artist(abLP)
-        ax.add_artist(abSP)
-
-        ax.set_title(f"Dankbit | {self.name} | {now} | {veiw_type} | {hours_ago}H")
+        ax.set_title(f"Current: {self.S0:,.0f} | {self.name} | {now} | {veiw_type} | {hours_ago}H")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, linestyle="--", color="blue")
-        ax.set_xlabel(f"Current Price: {self.S0:,.0f}", fontsize=16, color="blue")
         ax.set_ylabel('Profit $')
         plt.show()
     

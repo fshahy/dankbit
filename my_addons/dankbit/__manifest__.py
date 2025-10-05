@@ -10,7 +10,7 @@
         "data/ir_rule.xml",
         "data/ir_cron.xml",
         "security/ir.model.access.csv",
-        "views/exchange_views.xml",
+        "views/image_dashboard.xml",
         "views/trade_views.xml",
     ],
     "installable": True,

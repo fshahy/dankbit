@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <odoo>
-    <data>
+    <data noupdate="1">
 
         <record id="dankbit_get_last_btc_trades_cron" model="ir.cron">
             <field name="active">True</field>
