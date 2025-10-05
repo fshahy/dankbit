@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-  <template id="image_dashboard" name="Tiled Image Dashboard (Opposite Alignments)">
+  <template id="image_dashboard" name="Tiled Image Dashboard (3 Columns)">
     <html>
       <head>
         <title>Tiled Dashboard</title>
@@ -14,32 +14,29 @@
             overflow: hidden;
           }
 
-          /* Create a 2×2 grid */
+          /* ✅ 3 columns × 2 rows grid */
           body {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             grid-template-rows: 1fr 1fr;
             gap: 0;
             background: #000;
           }
 
-          /* Each cell acts as a flex container */
+          /* Each grid cell */
           .cell {
             display: flex;
-            align-items: center; /* vertically centered */
-            justify-content: flex-start; /* default */
+            align-items: center;       /* vertical center */
+            justify-content: center;   /* default center align */
             overflow: hidden;
+            margin: 0 !important;
+            padding: 0 !important;
           }
 
-          /* Left column: align to right edge */
-          .left {
-            justify-content: flex-end;
-          }
-
-          /* Right column: align to left edge */
-          .right {
-            justify-content: flex-start;
-          }
+          /* Alignment rules per column */
+          .left   { justify-content: flex-end; }   /* align right edge */
+          .center { justify-content: center; }     /* center image */
+          .right  { justify-content: flex-start; } /* align left edge */
 
           img {
             display: block;
@@ -58,16 +55,22 @@
         <div class="cell left">
           <img t-att-src="'/i/%s/mm/0' % today"/>
         </div>
-        <div class="cell right">
+        <div class="cell center">
           <img t-att-src="'/i/%s/mm/1' % today"/>
+        </div>
+        <div class="cell right">
+          <img t-att-src="'/i/%s/mm/8' % today"/>
         </div>
 
         <!-- Row 2 -->
         <div class="cell left">
           <img t-att-src="'/i/%s/mm/0' % tomorrow"/>
         </div>
-        <div class="cell right">
+        <div class="cell center">
           <img t-att-src="'/i/%s/mm/1' % tomorrow"/>
+        </div>
+        <div class="cell right">
+          <img t-att-src="'/i/%s/mm/8' % tomorrow"/>
         </div>
       </body>
     </html>
