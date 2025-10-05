@@ -22,8 +22,8 @@ class ChartController(http.Controller):
     @http.route("/i/<string:instrument>/<string:veiw_type>/<int:hours_ago>", type="http", auth="public", website=True)
     def chart_png(self, instrument, veiw_type, hours_ago):
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
-        from_price = math.floor((index_price-4000.00) / 1000.00) * 1000.00
-        to_price = math.ceil((index_price+4000.00) / 1000.00) * 1000.00
+        from_price = math.floor((index_price-20000.00) / 1000.00) * 1000.00
+        to_price = math.ceil((index_price+20000.00) / 1000.00) * 1000.00
         step = 500
         if hours_ago == 0:
             hours_ago == 24
