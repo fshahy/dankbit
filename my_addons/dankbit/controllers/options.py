@@ -53,9 +53,9 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, veiw_type, hours_ago, total):
-        fig, ax = plt.subplots(figsize=(18, 9))
-        ax.xaxis.set_major_locator(MultipleLocator(500))  # Tick every 1000
+    def plot(self, index_price, market_delta, market_gammas, veiw_type, hours_ago):
+        fig, ax = plt.subplots(figsize=(4, 10))
+        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
         ax.grid(True)
         
@@ -71,7 +71,7 @@ class OptionStrat:
             ax.plot(self.STs, market_delta*2, color="green")
             ax.plot(self.STs, market_gammas*16000, color="violet")
 
-        ax.set_title(f"at ${self.S0:,.0f} | {self.name} | {now} | {veiw_type.upper()} | {hours_ago}H | {total} Orders")
+        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, linestyle="--", color="blue")
         # ax.set_ylabel('Profit $')

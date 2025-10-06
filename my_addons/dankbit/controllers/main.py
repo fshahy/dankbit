@@ -68,7 +68,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, hours_ago, len(trades))
+        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, hours_ago)
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
