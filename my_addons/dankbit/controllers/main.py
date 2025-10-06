@@ -89,9 +89,10 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
 
-    @http.route('/i/<string:today_instrument>', auth='public', type='http', website=True)
-    def iframe_dashboard(self, today_instrument):
+    @http.route('/i/<string:today_instrument>/<int:hours_ago>', auth='public', type='http', website=True)
+    def iframe_dashboard(self, today_instrument, hours_ago):
         vals = {
             "today": today_instrument,
+            "hours_ago": hours_ago
         }
         return request.render('dankbit.image_dashboard', vals)

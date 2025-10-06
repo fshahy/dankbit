@@ -46,12 +46,12 @@
       <body>
         <!-- Row 1 -->
         <div class="cell">
-          <img t-att-src="'/i/%s/taker/1' % today"/>
+           <img t-attf-src="/i/{{ today }}/taker/{{ hours_ago }}"/>
         </div>
 
         <!-- Row 2 -->
         <div class="cell">
-          <img t-att-src="'/i/%s/mm/1' % today"/>
+           <img t-attf-src="/i/{{ today }}/mm/{{ hours_ago }}"/>
         </div>
       </body>
     </html>
