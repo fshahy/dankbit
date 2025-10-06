@@ -30,9 +30,6 @@ class ChartController(http.Controller):
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
 
-        if hours_ago == 0:
-            hours_ago == 24
-
         from_time = datetime.now() - timedelta(hours=hours_ago)
 
         tz = ZoneInfo("Europe/Berlin")
@@ -71,7 +68,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, hours_ago)
+        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, hours_ago, len(trades))
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -90,9 +87,10 @@ class ChartController(http.Controller):
         return request.make_response(compressed_data, headers=headers)
 
 
-    @http.route('/i/<string:today_instrument>', auth='public', type='http', website=True)
-    def iframe_dashboard(self, today_instrument):
+    @http.route('/i/<string:today_instrument>/<int:hours_ago>', auth='public', type='http', website=True)
+    def iframe_dashboard(self, today_instrument, hours_ago):
         vals = {
             "today": today_instrument,
+            "hours_ago": hours_ago,
         }
         return request.render('dankbit.image_dashboard', vals)
