@@ -55,12 +55,12 @@
           <img t-att-src="'/i/%s/mm/0' % today"/>
         </div>
         <div class="cell center">
-          <img t-att-src="'/i/%s/mm/2' % today"/>
+          <img t-att-src="'/i/%s/mm/4' % today"/>
         </div>
 
         <!-- Row 2 -->
         <div class="cell left">
-          <img t-att-src="'/i/%s/mm/4' % today"/>
+          <img t-att-src="'/i/%s/mm/8' % today"/>
         </div>
         <div class="cell center">
           <img t-att-src="'/i/%s/taker/0' % today"/>
