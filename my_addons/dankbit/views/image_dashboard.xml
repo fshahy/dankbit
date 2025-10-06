@@ -63,7 +63,7 @@
           <img t-att-src="'/i/%s/mm/8' % today"/>
         </div>
         <div class="cell center">
-          <img t-att-src="'/i/%s/taker/0' % today"/>
+          <img t-att-src="'/i/%s/mm/12' % today"/>
         </div>
       </body>
     </html>
