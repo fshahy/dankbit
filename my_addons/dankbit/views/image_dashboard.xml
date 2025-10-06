@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-  <template id="image_dashboard" name="Tiled Image Dashboard (1 Column 2 Rows)">
+  <template id="image_dashboard" name="Tiled Image Dashboard (2 Columns 2 Rows)">
     <html>
       <head>
         <title>Tiled Dashboard</title>
@@ -14,10 +14,10 @@
             overflow: hidden;
           }
 
-          /* ✅ 1 column × 2 rows grid */
+          /* ✅ 2 columns × 2 rows grid */
           body {
             display: grid;
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr 1fr;
             background: #000;
           }
@@ -46,12 +46,18 @@
       <body>
         <!-- Row 1 -->
         <div class="cell">
-           <img t-attf-src="/i/{{ today }}/taker/{{ hours_ago }}"/>
+           <img t-attf-src="/i/{{ today }}/taker/4"/>
+        </div>
+        <div class="cell">
+           <img t-attf-src="/i/{{ today }}/mm/4"/>
         </div>
 
         <!-- Row 2 -->
         <div class="cell">
-           <img t-attf-src="/i/{{ today }}/mm/{{ hours_ago }}"/>
+           <img t-attf-src="/i/{{ today }}/taker/0"/>
+        </div>
+        <div class="cell">
+           <img t-attf-src="/i/{{ today }}/mm/0"/>
         </div>
       </body>
     </html>
