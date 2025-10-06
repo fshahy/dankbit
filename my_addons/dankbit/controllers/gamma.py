@@ -33,6 +33,6 @@ def portfolio_gamma(S, trades, r=0.0):
         sign   = _infer_sign(trd)
         qty    = trd.amount
         gamma  = bs_gamma(S, trd.strike, T, r, sigma)
-        total += sign * qty * gamma * 4000
+        total += sign * qty * gamma
     return total
 

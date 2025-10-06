@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-  <template id="image_dashboard" name="Tiled Image Dashboard (2 Columns)">
+  <template id="image_dashboard" name="Tiled Image Dashboard (1 Column 2 Rows)">
     <html>
       <head>
         <title>Tiled Dashboard</title>
@@ -14,28 +14,22 @@
             overflow: hidden;
           }
 
-          /* ✅ 2 columns × 2 rows grid */
+          /* ✅ 1 column × 2 rows grid */
           body {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
             grid-template-rows: 1fr 1fr;
-            gap: 0;
             background: #000;
           }
 
-          /* Each grid cell */
           .cell {
             display: flex;
             align-items: center;       /* vertical center */
-            justify-content: center;   /* default center align */
+            justify-content: center;   /* horizontal center */
             overflow: hidden;
             margin: 0 !important;
             padding: 0 !important;
           }
-
-          /* Alignment rules per column */
-          .left   { justify-content: flex-end; }   /* align right edge */
-          .center { justify-content: flex-start; } /* align left edge */
 
           img {
             display: block;
@@ -51,19 +45,13 @@
 
       <body>
         <!-- Row 1 -->
-        <div class="cell left">
-          <img t-att-src="'/i/%s/mm/1' % today"/>
-        </div>
-        <div class="cell center">
-          <img t-att-src="'/i/%s/mm/2' % today"/>
+        <div class="cell">
+          <img t-att-src="'/i/%s/taker/1' % today"/>
         </div>
 
         <!-- Row 2 -->
-        <div class="cell left">
-          <img t-att-src="'/i/%s/mm/4' % today"/>
-        </div>
-        <div class="cell center">
-          <img t-att-src="'/i/%s/mm/8' % today"/>
+        <div class="cell">
+          <img t-att-src="'/i/%s/mm/1' % today"/>
         </div>
       </body>
     </html>

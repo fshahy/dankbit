@@ -92,7 +92,6 @@ class Trade(models.Model):
                     trades = resp["result"]["trades"]
                     
                     for trd in trades:
-                        # _logger.info(trd)
                         self._create_new_trade(trd, inst["expiration_timestamp"])
                 
                 # commit to db before going to next instrument
