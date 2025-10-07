@@ -19,13 +19,12 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr;
-            background: #000;
+            background: lightgray;
           }
 
           .cell {
             display: flex;
             align-items: center;       /* vertical center */
-            justify-content: center;   /* horizontal center */
             overflow: hidden;
             margin: 0 !important;
             padding: 0 !important;
@@ -45,12 +44,12 @@
 
       <body>
         <!-- Column 1 -->
-        <div class="cell">
-           <img t-attf-src="/i/{{ today }}/taker/{{ hours_ago }}"/>
+        <div class="cell" style="justify-content: flex-end;">
+           <img t-attf-src="/{{ today }}/taker/{{ hours_ago }}"/>
         </div>
         <!-- Column 2 -->
-        <div class="cell">
-           <img t-attf-src="/i/{{ today }}/mm/{{ hours_ago }}"/>
+        <div class="cell" style="justify-content: flex-start;">
+           <img t-attf-src="/{{ today }}/mm/{{ hours_ago }}"/>
         </div>
       </body>
     </html>

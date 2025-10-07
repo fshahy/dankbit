@@ -21,3 +21,8 @@ class ResConfigSettings(models.TransientModel):
         string="Refresh Interval",
         config_parameter="dankbit.refresh_interval"
     )
+
+    last_hedging_time = fields.Datetime(
+        string="Last Hedging Time",
+        config_parameter="dankbit.last_hedging_time"
+    )
