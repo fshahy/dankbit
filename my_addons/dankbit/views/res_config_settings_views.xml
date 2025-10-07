@@ -23,6 +23,12 @@
                         <setting>
                             <field name="last_hedging_time" placeholder="Last Hedging Time"/>
                         </setting>
+                        <setting>
+                            <field name="day_from_price" placeholder="Day From Price"/>
+                        </setting>
+                        <setting>
+                            <field name="day_to_price" placeholder="Day To Price"/>
+                        </setting>
                     </block>
 
                     <!-- <block title="Exchange Setting" id="dankbit_exchange_settings" groups="base.group_no_one">

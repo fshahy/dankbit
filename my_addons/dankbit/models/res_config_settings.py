@@ -26,3 +26,13 @@ class ResConfigSettings(models.TransientModel):
         string="Last Hedging Time",
         config_parameter="dankbit.last_hedging_time"
     )
+
+    day_from_price = fields.Float(
+        string="Day From Price",
+        config_parameter="dankbit.day_from_price"
+    )
+
+    day_to_price = fields.Float(
+        string="Day To Price",
+        config_parameter="dankbit.day_to_price"
+    )
