@@ -32,7 +32,7 @@ class ChartController(http.Controller):
 
         from_time = datetime.now() - timedelta(hours=hours_ago)
 
-        tz = ZoneInfo("Europe/Berlin")
+        tz = ZoneInfo("UTC")
         now = datetime.now(tz)
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         # midnight_yesterday = midnight - timedelta(days=1)
@@ -171,7 +171,7 @@ class ChartController(http.Controller):
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
 
-        tz = ZoneInfo("Europe/Berlin")
+        tz = ZoneInfo("UTC")
         now = datetime.now(tz)
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -233,7 +233,7 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
-        tz = ZoneInfo("Europe/Berlin")
+        tz = ZoneInfo("UTC")
         now = datetime.now(tz)
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
