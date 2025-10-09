@@ -22,11 +22,6 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.refresh_interval"
     )
 
-    last_hedging_time = fields.Datetime(
-        string="Last Hedging Time",
-        config_parameter="dankbit.last_hedging_time"
-    )
-
     day_from_price = fields.Float(
         string="Day From Price",
         config_parameter="dankbit.day_from_price"
@@ -35,4 +30,19 @@ class ResConfigSettings(models.TransientModel):
     day_to_price = fields.Float(
         string="Day To Price",
         config_parameter="dankbit.day_to_price"
+    )
+
+    show_red_line = fields.Boolean(
+        string="Show Red Line",
+        config_parameter="dankbit.show_red_line"
+    )
+
+    start_from_ts = fields.Selection(
+        [
+            ("today_midnight", "Today Midnight"),
+            ("yesterday_midnight", "Yesterday Midnight"),
+        ],
+        string="Download Data Starting From",
+        default="yesterday_midnight",
+        config_parameter="dankbit.start_from_ts",
     )

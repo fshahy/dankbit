@@ -15,27 +15,25 @@
                             <field name="to_price" placeholder="To Price"/>
                         </setting>
                         <setting>
+                            <field name="day_from_price" placeholder="Day From Price"/>
+                        </setting>
+                        <setting>
+                            <field name="day_to_price" placeholder="Day To Price"/>
+                        </setting>
+                        <setting>
                             <field name="steps" placeholder="Steps"/>
                         </setting>
                         <setting>
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
-                            <field name="last_hedging_time" placeholder="Last Hedging Time"/>
+                            <field name="start_from_ts"/>
                         </setting>
                         <setting>
-                            <field name="day_from_price" placeholder="Day From Price"/>
-                        </setting>
-                        <setting>
-                            <field name="day_to_price" placeholder="Day To Price"/>
+                            <field name="show_red_line" placeholder="Show Red Line"/>
                         </setting>
                     </block>
 
-                    <!-- <block title="Exchange Setting" id="dankbit_exchange_settings" groups="base.group_no_one">
-                        <setting>
-                            <field name="data_download_interval" placeholder="Data Download Interval"/>
-                        </setting>
-                    </block> -->
                  </app>
             </xpath>
         </field>

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import pytz
-import datetime
+from datetime import datetime, timezone, timedelta
 import logging
 import requests, time
 
@@ -68,14 +68,20 @@ class Trade(models.Model):
             if inst["kind"] == "option"
         ]
 
+        icp = self.env['ir.config_parameter'].sudo()
+        start_from_ts = icp.get_param("dankbit.start_from_ts")
+
         latest_trade_ts = self._get_latest_trade_ts()
         now_ts = int(time.time() * 1000)
         start_ts = None
         if latest_trade_ts:
             start_ts = int(latest_trade_ts.deribit_ts.timestamp())
         else:
-            start_ts = now_ts - 48 * 60 * 60 * 1000
-
+            if start_from_ts == "today_midnight":
+                start_ts = self._get_today_midnight_ts()
+            if start_from_ts == "yesterday_midnight":
+                start_ts = self._get_yesterday_midnight_ts()
+            # start_ts = now_ts - 48 * 60 * 60 * 1000
         if start_ts:
             URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
             for inst in option_instruments:
@@ -99,13 +105,13 @@ class Trade(models.Model):
 
     def _get_tomorrows_ts(self):
         # Current UTC time
-        now = datetime.datetime.now(pytz.utc)
+        now = datetime.now(pytz.utc)
 
         # Tomorrow's date
         tomorrow = now.date() + datetime.timedelta(days=1)
 
         # Tomorrow at 08:00 GMT
-        target = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=datetime.timezone.utc)
+        target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=datetime.timezone.utc)
 
         # Convert to milliseconds since epoch
         return int(target.timestamp() * 1000)
@@ -130,16 +136,16 @@ class Trade(models.Model):
             limit=1
         )
 
-        # Current date in UTC
-        today = datetime.datetime.now(datetime.timezone.utc).date()
+        icp = self.env['ir.config_parameter'].sudo()
+        start_from_ts = icp.get_param("dankbit.start_from_ts")
 
-        # Midnight today in UTC
-        midnight = datetime.datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start_ts = None
+        if start_from_ts == "today_midnight":
+            start_ts = self._get_today_midnight_ts()
+        if start_from_ts == "yesterday_midnight":
+            start_ts = self._get_yesterday_midnight_ts()
 
-        # Unix timestamp
-        midnight_timestamp = int(midnight.timestamp()) * 1000
-
-        if not exists and trade["timestamp"] > midnight_timestamp:
+        if not exists and trade["timestamp"] > start_ts:
             self.env["dankbit.trade"].create({
                 "name": trade["instrument_name"],
                 "iv": trade["iv"],
@@ -151,70 +157,32 @@ class Trade(models.Model):
                 "deribit_trade_identifier": trade["trade_id"],
                 "amount": trade["amount"],
                 "contracts": trade["contracts"],
-                "deribit_ts": datetime.datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                "expiration": datetime.datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                "deribit_ts": datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                "expiration": datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S'),
             })
             _logger.info(f"*** Trade Created: {trade["instrument_name"]} ***")
 
-    @api.model
-    def get_market_summary(self):
-        tomorrows_ts = self._get_tomorrows_ts()
-        expiration = datetime.datetime.fromtimestamp(tomorrows_ts/1000).strftime('%Y-%m-%d %H:%M:%S')
+    @staticmethod
+    def _get_today_midnight_ts():
+        # Current date in UTC
+        today = datetime.now(timezone.utc).date()
 
-        total = self.env["dankbit.trade"].search_count([
-            ("expiration", "=", expiration)
-        ])
+        # Midnight today in UTC
+        midnight = datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=timezone.utc)
 
-        calls = self.env["dankbit.trade"].search_count([
-            ("option_type", "=", "call"),
-            ("expiration", "=", expiration)
-        ])
+        # Unix timestamp
+        return int(midnight.timestamp()) * 1000    
 
-        puts = self.env["dankbit.trade"].search_count([
-            ("option_type", "=", "put"),
-            ("expiration", "=", expiration)
-        ])
+    @staticmethod
+    def _get_yesterday_midnight_ts():
+        # Current UTC date
+        today = datetime.now(timezone.utc).date()
 
-        buys = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "buy"),
-            ("expiration", "=", expiration)
-        ])
+        # Yesterday’s date
+        yesterday = today - timedelta(days=1)
 
-        sells = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "sell"),
-            ("expiration", "=", expiration)
-        ])
+        # Build yesterday’s midnight in UTC
+        midnight = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=timezone.utc)
 
-        buy_calls = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "buy"),
-            ("option_type", "=", "call"),
-            ("expiration", "=", expiration)
-        ])
-        sell_calls = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "sell"),
-            ("option_type", "=", "call"),
-            ("expiration", "=", expiration)
-        ])
-        buy_puts = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "buy"),
-            ("option_type", "=", "put"),
-            ("expiration", "=", expiration)
-        ])
-        sell_puts = self.env["dankbit.trade"].search_count([
-            ("direction", "=", "sell"),
-            ("option_type", "=", "put"),
-            ("expiration", "=", expiration)
-        ])
-
-        return {
-            "total": total,
-            "calls": calls,
-            "puts": puts,
-            "buys": buys,
-            "sells": sells,
-            "buy_calls": buy_calls,
-            "sell_calls": sell_calls,
-            "buy_puts": buy_puts,
-            "sell_puts": sell_puts,
-            "delta": sell_calls+buy_puts-buy_calls-sell_puts
-        }
+        # Return Unix timestamp in milliseconds
+        return int(midnight.timestamp() * 1000)
