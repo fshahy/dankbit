@@ -45,7 +45,7 @@ class ChartController(http.Controller):
     def help_page(self):
         return request.render('dankbit.dankbit_help')
 
-    @http.route("/<string:instrument>/<string:veiw_type>/day", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/<string:veiw_type>", type="http", auth="public", website=True)
     def chart_png_day(self, instrument, veiw_type):
         icp = request.env['ir.config_parameter'].sudo()
 

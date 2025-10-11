@@ -88,18 +88,19 @@ class OptionStrat:
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
         if veiw_type == "mm": # for market maker
-            ax.plot(self.STs, -market_delta*1000, color="green")
-            ax.plot(self.STs, -market_gammas*10000000, color="violet")
+            ax.plot(self.STs, -market_delta*1000, color="green", label="Delta")
+            ax.plot(self.STs, -market_gammas*10000000, color="violet", label="Gamma")
         elif veiw_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs*2, color="red")
-            ax.plot(self.STs, market_delta*10000, color="green")
-            ax.plot(self.STs, market_gammas*100000000, color="violet")
+                ax.plot(self.STs, self.payoffs*2, color="red", label="P&L")
+            ax.plot(self.STs, market_delta*10000, color="green", label="Delta")
+            ax.plot(self.STs, market_gammas*100000000, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
+        plt.legend()
         plt.show()
     
         return fig
@@ -113,13 +114,14 @@ class OptionStrat:
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
-        ax.plot(self.STs, self.longs, color="green")
-        ax.plot(self.STs, self.shorts, color="red")
+        ax.plot(self.STs, self.longs, color="green", label="Longs")
+        ax.plot(self.STs, self.shorts, color="red", label="Shorts")
 
         ax.set_title(f"{self.name} | {now} | Zones")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
+        plt.legend()
         plt.show()
     
         return fig
