@@ -28,6 +28,23 @@ class Trade(models.Model):
     deribit_ts = fields.Datetime()
     deribit_trade_identifier = fields.Float(digits=(15, 0), string="Deribit Trade ID", required=True)
     trade_seq = fields.Float(digits=(15, 0), required=True)
+    days_to_expiry = fields.Integer(
+        string="Days to Expiry",
+        compute="_compute_days_to_expiry",
+        store=True
+    )
+
+    @api.depends('expiration')
+    def _compute_days_to_expiry(self):
+        """Compute remaining days until expiration from current UTC date."""
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        for rec in self:
+            if rec.expiration:
+                expiry_date = rec.expiration.astimezone(timezone.utc).date()
+                rec.days_to_expiry = (expiry_date - today).days
+            else:
+                rec.days_to_expiry = 0
 
     _sql_constraints = [
         ("deribit_trade_identifier_uniqe", "unique (deribit_trade_identifier)",
@@ -133,7 +150,7 @@ class Trade(models.Model):
             domain=[("deribit_trade_identifier", "=", trade["trade_id"])],
             limit=1
         )
-        
+
         icp = self.env['ir.config_parameter'].sudo()
         start_from_ts = int(icp.get_param("dankbit.from_days_ago", default=2))
 
@@ -169,3 +186,8 @@ class Trade(models.Model):
         now = datetime.now(timezone.utc)
         midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
         return int((midnight + timedelta(days=-days_offset)).timestamp()) * 1000
+
+    def delete_old_trades(self):
+        self.env['dankbit.trade'].search(
+            domain=[]
+        ).unlink()

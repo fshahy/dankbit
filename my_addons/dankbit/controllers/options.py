@@ -92,9 +92,9 @@ class OptionStrat:
             ax.plot(self.STs, -market_gammas*10000000, color="violet", label="Gamma")
         elif veiw_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/50, color="red", label="P&L")
-            ax.plot(self.STs, market_delta*100, color="green", label="Delta")
-            ax.plot(self.STs, market_gammas*1000000, color="violet", label="Gamma")
+                ax.plot(self.STs, self.payoffs/5000, color="red", label="P&L")
+            ax.plot(self.STs, market_delta, color="green", label="Delta")
+            ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')

@@ -28,7 +28,7 @@ def _infer_sign(trd):
 def portfolio_gamma(S, trades, r=0.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
     for trd in trades:
-        T      = 1/365
+        T      = trd.days_to_expiry/365
         sigma  = trd.iv/100
         sign   = _infer_sign(trd)
         qty    = trd.amount

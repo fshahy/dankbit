@@ -12,6 +12,7 @@
                         <field name="option_type" />
                         <field name="strike" />
                         <field name="expiration" />
+                        <field name="days_to_expiry" />
                         <field name="index_price" />
                         <field name="direction" />
                         <field name="amount" />
