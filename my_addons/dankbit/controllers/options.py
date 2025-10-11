@@ -88,13 +88,13 @@ class OptionStrat:
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
         if veiw_type == "mm": # for market maker
-            ax.plot(self.STs, -market_delta*1000, color="green", label="Delta")
+            ax.plot(self.STs, -market_delta, color="green", label="Delta")
             ax.plot(self.STs, -market_gammas*10000000, color="violet", label="Gamma")
         elif veiw_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs*2, color="red", label="P&L")
-            ax.plot(self.STs, market_delta*10000, color="green", label="Delta")
-            ax.plot(self.STs, market_gammas*100000000, color="violet", label="Gamma")
+                ax.plot(self.STs, self.payoffs/50, color="red", label="P&L")
+            ax.plot(self.STs, market_delta*100, color="green", label="Delta")
+            ax.plot(self.STs, market_gammas*1000000, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
