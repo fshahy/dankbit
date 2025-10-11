@@ -15,10 +15,10 @@
                             <field name="to_price" placeholder="To Price"/>
                         </setting>
                         <setting>
-                            <field name="day_from_price" placeholder="Day From Price"/>
+                            <field name="zone_from_price" placeholder="Day From Price"/>
                         </setting>
                         <setting>
-                            <field name="day_to_price" placeholder="Day To Price"/>
+                            <field name="zone_to_price" placeholder="Day To Price"/>
                         </setting>
                         <setting>
                             <field name="steps" placeholder="Steps"/>
@@ -27,7 +27,7 @@
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
-                            <field name="start_from_ts"/>
+                            <field name="from_days_ago"/>
                         </setting>
                         <setting>
                             <field name="show_red_line" placeholder="Show Red Line"/>

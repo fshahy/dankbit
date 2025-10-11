@@ -69,19 +69,17 @@ class Trade(models.Model):
         ]
 
         icp = self.env['ir.config_parameter'].sudo()
-        start_from_ts = icp.get_param("dankbit.start_from_ts")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         latest_trade_ts = self._get_latest_trade_ts()
         now_ts = int(time.time() * 1000)
         start_ts = None
-        if latest_trade_ts:
+        # I do not want to fetch unwanted data
+        if latest_trade_ts: # we have some data
             start_ts = int(latest_trade_ts.deribit_ts.timestamp())
-        else:
-            if start_from_ts == "today_midnight":
-                start_ts = self._get_today_midnight_ts()
-            if start_from_ts == "yesterday_midnight":
-                start_ts = self._get_yesterday_midnight_ts()
-            # start_ts = now_ts - 48 * 60 * 60 * 1000
+        else: # db is empty
+            start_ts = self._get_midnight_dt(start_from_ts)
+
         if start_ts:
             URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
             for inst in option_instruments:
@@ -135,15 +133,11 @@ class Trade(models.Model):
             domain=[("deribit_trade_identifier", "=", trade["trade_id"])],
             limit=1
         )
-
+        
         icp = self.env['ir.config_parameter'].sudo()
-        start_from_ts = icp.get_param("dankbit.start_from_ts")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago", default=2))
 
-        start_ts = None
-        if start_from_ts == "today_midnight":
-            start_ts = self._get_today_midnight_ts()
-        if start_from_ts == "yesterday_midnight":
-            start_ts = self._get_yesterday_midnight_ts()
+        start_ts = self._get_midnight_dt(start_from_ts)
 
         if not exists and trade["timestamp"] > start_ts:
             self.env["dankbit.trade"].create({
@@ -163,26 +157,15 @@ class Trade(models.Model):
             _logger.info(f"*** Trade Created: {trade["instrument_name"]} ***")
 
     @staticmethod
-    def _get_today_midnight_ts():
-        # Current date in UTC
-        today = datetime.now(timezone.utc).date()
-
-        # Midnight today in UTC
-        midnight = datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=timezone.utc)
-
-        # Unix timestamp
-        return int(midnight.timestamp()) * 1000    
-
-    @staticmethod
-    def _get_yesterday_midnight_ts():
-        # Current UTC date
-        today = datetime.now(timezone.utc).date()
-
-        # Yesterday’s date
-        yesterday = today - timedelta(days=1)
-
-        # Build yesterday’s midnight in UTC
-        midnight = datetime(yesterday.year, yesterday.month, yesterday.day, tzinfo=timezone.utc)
-
-        # Return Unix timestamp in milliseconds
-        return int(midnight.timestamp() * 1000)
+    def _get_midnight_dt(days_offset=0):
+        """
+        Return a timezone-aware datetime (UTC) for midnight with optional day offset.
+        Compatible with PostgreSQL and Odoo domains.
+        
+        Example:
+            _get_midnight_dt()    → today's midnight UTC
+            _get_midnight_dt(-1)  → yesterday's midnight UTC
+        """
+        now = datetime.now(timezone.utc)
+        midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
+        return int((midnight + timedelta(days=-days_offset)).timestamp()) * 1000

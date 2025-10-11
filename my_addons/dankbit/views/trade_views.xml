@@ -64,14 +64,7 @@
                 <filter name="only_longs" string="Buys" domain="[('direction', '=', 'buy')]"/>
                 <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
                 <separator/>
-                <filter name="only_tomorrow" string="Tomorrow" domain="[
-                    ('expiration', '&lt;', datetime.datetime.combine(context_today() + relativedelta(days=1), datetime.time(10, 1, 1)))
-                ]" />
-                <filter name="only_after_tomorrow" string="After Tomorrow" domain="[
-                    ('expiration', '&gt;', datetime.datetime.combine(context_today() + relativedelta(days=1), datetime.time(10, 1, 1))),
-                    ('expiration', '&lt;', datetime.datetime.combine(context_today() + relativedelta(days=2), datetime.time(10, 1, 1)))
-                ]" />
-
+                
                 <group expand="0" string="Group By">
                     <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
                     <filter string="Option Type" name="option_type" context="{'group_by':'option_type'}"/>

@@ -54,14 +54,10 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
-        start_from_ts = icp.get_param("dankbit.start_from_ts", default="yesterday_midnight")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
-        start_ts = None
-        if start_from_ts == "today_midnight":
-            start_ts = self.get_midnight_ts()
-        if start_from_ts == "yesterday_midnight":
-            start_ts = self.get_midnight_ts(days_offset=-1)
-        
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
@@ -113,17 +109,13 @@ class ChartController(http.Controller):
     def chart_png_zones(self, instrument):
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.day_from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.day_to_price", default=150000))
+        zone_from_price = float(icp.get_param("dankbit.zone_from_price", default=100000))
+        zone_to_price = float(icp.get_param("dankbit.zone_to_price", default=150000))
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        start_from_ts = icp.get_param("dankbit.start_from_ts", default="yesterday_midnight")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
-        start_ts = None
-        if start_from_ts == "today_midnight":
-            start_ts = self.get_midnight_ts()
-        if start_from_ts == "yesterday_midnight":
-            start_ts = self.get_midnight_ts(days_offset=-1)
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         long_trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -142,7 +134,7 @@ class ChartController(http.Controller):
         )
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
-        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        obj = options.OptionStrat(instrument, index_price, zone_from_price, zone_to_price, steps)
         is_call = []
 
         for trade in long_trades:
@@ -183,6 +175,6 @@ class ChartController(http.Controller):
     def get_midnight_ts(days_offset=0):
         tz = ZoneInfo("UTC")
         now = datetime.now(tz)
-        target_day = now + timedelta(days=days_offset)
+        target_day = now + timedelta(days=-days_offset)
         midnight = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
         return midnight

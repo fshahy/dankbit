@@ -4,12 +4,12 @@ class ResConfigSettings(models.TransientModel):
     _inherit = 'res.config.settings'
 
     from_price = fields.Float(
-        string="From Price",
+        string="From price",
         config_parameter="dankbit.from_price"
     )
 
     to_price = fields.Float(
-        string="To Price",
+        string="To price",
         config_parameter="dankbit.to_price"
     )
 
@@ -18,31 +18,26 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.steps"
     )
     refresh_interval = fields.Integer(
-        string="Refresh Interval",
+        string="Refresh interval",
         config_parameter="dankbit.refresh_interval"
     )
 
-    day_from_price = fields.Float(
-        string="Day From Price",
-        config_parameter="dankbit.day_from_price"
+    zone_from_price = fields.Float(
+        string="Zone from price",
+        config_parameter="dankbit.zone_from_price"
     )
 
-    day_to_price = fields.Float(
-        string="Day To Price",
-        config_parameter="dankbit.day_to_price"
+    zone_to_price = fields.Float(
+        string="Zone to price",
+        config_parameter="dankbit.zone_to_price"
     )
 
     show_red_line = fields.Boolean(
-        string="Show Red Line",
+        string="Show red line",
         config_parameter="dankbit.show_red_line"
     )
 
-    start_from_ts = fields.Selection(
-        [
-            ("today_midnight", "Today Midnight"),
-            ("yesterday_midnight", "Yesterday Midnight"),
-        ],
-        string="Download Data Starting From",
-        default="yesterday_midnight",
-        config_parameter="dankbit.start_from_ts",
+    from_days_ago = fields.Integer(
+        string="Data from days ago",
+        config_parameter="dankbit.from_days_ago",
     )
