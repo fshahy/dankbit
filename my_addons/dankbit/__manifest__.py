@@ -12,6 +12,7 @@
         "security/ir.model.access.csv",
         "views/res_config_settings_views.xml",
         "views/trade_views.xml",
+        "views/screenshot_views.xml",
         "views/help_templates.xml",
     ],
     "installable": True,

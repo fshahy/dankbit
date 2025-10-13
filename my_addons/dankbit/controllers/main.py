@@ -1,10 +1,11 @@
 import gzip
+import base64
 import numpy as np
 import os
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 import logging
-from odoo import http
+from odoo import fields, http
 from odoo.http import request
 from . import options
 from . import delta
@@ -88,19 +89,20 @@ class ChartController(http.Controller):
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, show_red_line, width=18, height=8)
-
+        
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
 
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         minute = berlin_time.minute
-        # Check if minute divisible by 10
-        if minute % 10 == 0 or minute == 0:
-            filename = berlin_time.strftime("%Y_%m_%d_%H_%M")
-            os.makedirs(f"/mnt/screenshots/{instrument}", exist_ok=True)
-            with open(f"/mnt/screenshots/{instrument}/{filename}.png", "wb") as screenshot:
-                screenshot.write(buf.getvalue())
+        if minute % 5 == 0 or minute == 0:
+            request.env["dankbit.screenshot"].sudo().create({
+                "name": instrument,
+                "timestamp": fields.Datetime.now(),
+                "image_png": base64.b64encode(buf.read()),
+            })
 
         # compress with gzip
         png_data = buf.getvalue()

@@ -191,3 +191,12 @@ class Trade(models.Model):
         self.env['dankbit.trade'].search(
             domain=[]
         ).unlink()
+
+class DankbitScreenshot(models.Model):
+    _name = "dankbit.screenshot"
+    _description = "Dankbit Screenshot"
+    _order = "timestamp asc"
+
+    name = fields.Char(required=True)
+    timestamp = fields.Datetime(string="Timestamp", default=lambda self: fields.Datetime.now())
+    image_png = fields.Binary(string="Chart Image", attachment=True)
