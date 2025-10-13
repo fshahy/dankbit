@@ -1,6 +1,6 @@
 import gzip
 import numpy as np
-import pytz
+import os
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 import logging
@@ -92,6 +92,15 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+
+        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
+        minute = berlin_time.minute
+        # Check if minute divisible by 10
+        if minute % 10 == 0 or minute == 0:
+            filename = berlin_time.strftime("%Y_%m_%d_%H_%M")
+            os.makedirs(f"/mnt/screenshots/{instrument}", exist_ok=True)
+            with open(f"/mnt/screenshots/{instrument}/{filename}.png", "wb") as screenshot:
+                screenshot.write(buf.getvalue())
 
         # compress with gzip
         png_data = buf.getvalue()
