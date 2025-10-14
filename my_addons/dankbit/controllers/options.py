@@ -72,7 +72,6 @@ class OptionStrat:
         self.shorts += shorts
         self._add_to_self('put', K, P, -1, Q)
     # --------------------------------------------------------------
-    
     def _add_to_self(self, type_, K, price, direction, Q):
         o = Option(type_, K, price, direction)
         for _ in range(Q):
@@ -82,6 +81,7 @@ class OptionStrat:
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
+        plt.yticks(list(range(-2000, 2001, 100))) 
         ax.grid(True)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
@@ -89,16 +89,18 @@ class OptionStrat:
 
         if veiw_type == "mm": # for market maker
             ax.plot(self.STs, -market_delta, color="green", label="Delta")
-            ax.plot(self.STs, -market_gammas["up_gamma"]*10000, color="violet", label="Up-Gamma")
-            ax.plot(self.STs, -market_gammas["down_gamma"]*10000, color="orange", label="Down-Gamma")
+            ax.plot(self.STs, -market_gammas["gamma"]*10000, color="violet", label="Gamma")
         elif veiw_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/5000, color="red", label="P&L")
+                ax.plot(self.STs, self.payoffs/10000, color="red", label="P&L")
             ax.plot(self.STs, market_delta, color="green", label="Delta")
-            ax.plot(self.STs, market_gammas["up_gamma"]*10000, color="violet", label="Up-Gamma")
-            ax.plot(self.STs, market_gammas["down_gamma"]*10000, color="orange", label="Down-Gamma")
+            ax.plot(self.STs, market_gammas["gamma"]*10000, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
+
+        ymax = np.max(np.abs(plt.ylim()))
+        plt.ylim(-ymax, ymax)
+        
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
