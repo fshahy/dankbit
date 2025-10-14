@@ -5,12 +5,22 @@
 
         <record id="dankbit_get_last_btc_trades_cron" model="ir.cron">
             <field name="active">False</field>
-            <field name="name">Get Last Trades</field>
+            <field name="name">Dankbit - Get Last Trades</field>
             <field name="model_id" ref="model_dankbit_trade"/>
             <field name="interval_number">1</field>
             <field name="interval_type">minutes</field>
             <field name="state">code</field>
             <field name="code">model.get_last_trades()</field>
+        </record>
+
+        <record id="dankbit_take_screenshot_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Take Screenshot</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="interval_number">10</field>
+            <field name="interval_type">minutes</field>
+            <field name="state">code</field>
+            <field name="code">model._take_screenshot()</field>
         </record>
 
     </data>

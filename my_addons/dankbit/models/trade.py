@@ -4,6 +4,7 @@ import pytz
 from datetime import datetime, timezone, timedelta
 import logging
 import requests, time
+import requests
 
 from odoo import api, fields, models
 
@@ -187,10 +188,40 @@ class Trade(models.Model):
         midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
         return int((midnight + timedelta(days=-days_offset)).timestamp()) * 1000
 
-    def delete_old_trades(self):
-        self.env['dankbit.trade'].search(
-            domain=[]
-        ).unlink()
+    # def delete_old_trades(self):
+    #     self.env['dankbit.trade'].search(
+    #         domain=[]
+    #     ).unlink()
+
+    def get_btc_option_name_for_today(self):
+        tomorrow = datetime.now() + timedelta(days=1)
+        instrument = f"BTC-{tomorrow.day:02d}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
+        return instrument
+    
+    def _take_screenshot(self):
+        btc_today = self.get_btc_option_name_for_today()
+        base_url = self.env['ir.config_parameter'].sudo().get_base_url()
+        full_url = f"https://dankbit.com/{btc_today}/taker/y"
+        _logger.info(full_url)
+        try:
+            response = requests.get(full_url, timeout=1)
+            response.raise_for_status()
+            self.env.cr.commit()
+            _msg = f"✅ Called {full_url} — {response.status_code}"
+        except Exception as e:
+            _msg = f"❌ Error calling {full_url}: {e}"
+
+        self.env['ir.logging'].sudo().create({
+            'name': 'Dankbit Screenshot Taker',
+            'type': 'server',
+            'dbname': self._cr.dbname,
+            'level': 'info',
+            'message': _msg,
+            'path': __name__,
+            'func': '_take_screenshot',
+            'line': '0',
+        })
+        return True
 
 class DankbitScreenshot(models.Model):
     _name = "dankbit.screenshot"

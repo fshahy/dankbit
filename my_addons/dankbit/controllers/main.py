@@ -46,8 +46,11 @@ class ChartController(http.Controller):
     def help_page(self):
         return request.render('dankbit.dankbit_help')
 
-    @http.route("/<string:instrument>/<string:veiw_type>", type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, veiw_type):
+    @http.route([
+        "/<string:instrument>/<string:veiw_type>", 
+        "/<string:instrument>/<string:veiw_type>/<string:take_screenshot>"
+    ], type="http", auth="public", website=True)
+    def chart_png_day(self, instrument, veiw_type, take_screenshot=None):
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -95,9 +98,7 @@ class ChartController(http.Controller):
         plt.close(fig)
         buf.seek(0) 
 
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        minute = berlin_time.minute
-        if minute % 5 == 0 or minute == 0:
+        if take_screenshot and take_screenshot in ["y", "Y"]:
             request.env["dankbit.screenshot"].sudo().create({
                 "name": instrument,
                 "timestamp": fields.Datetime.now(),
