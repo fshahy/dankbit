@@ -13,7 +13,7 @@ def bs_delta(S, K, T, r, sigma, option_type="call"):
     S = np.asarray(S, dtype=float)
     if T <= 0 or sigma <= 0:
         return np.zeros_like(S, dtype=float)
-    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d1 = (np.log(S / K) + (r + 0.044 * sigma**2) * T) / (sigma * np.sqrt(T))
     return norm.cdf(d1) if option_type == "call" else norm.cdf(d1) - 1
 
 def _infer_sign(trd):
