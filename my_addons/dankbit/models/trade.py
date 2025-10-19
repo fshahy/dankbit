@@ -204,7 +204,7 @@ class Trade(models.Model):
         full_url = f"https://dankbit.com/{btc_today}/y"
         _logger.info(full_url)
         try:
-            response = requests.get(full_url, timeout=60)
+            response = requests.get(full_url, timeout=1)
             response.raise_for_status()
             self.env.cr.commit()
             _msg = f"✅ Called {full_url} — {response.status_code}"
