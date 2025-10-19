@@ -65,7 +65,6 @@ class Trade(models.Model):
         for rec in self:
             rec.strike = rec.name.split("-")[2]
 
-    # @api.model
     def get_index_price(self):
         URL = "https://www.deribit.com/api/v2/public/get_index_price"
         params = {
@@ -188,16 +187,18 @@ class Trade(models.Model):
         midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
         return int((midnight + timedelta(days=-days_offset)).timestamp()) * 1000
 
-    # def delete_old_trades(self):
-    #     self.env['dankbit.trade'].search(
-    #         domain=[]
-    #     ).unlink()
+    # run by scheduled action
+    def _delete_expired_trades(self):
+        self.env['dankbit.trade'].search(
+            domain=[("expiration", "<", fields.Datetime.now())]
+        ).unlink()
 
     def get_btc_option_name_for_today(self):
         tomorrow = datetime.now() + timedelta(days=1)
         instrument = f"BTC-{tomorrow.day:02d}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
     
+    # run by scheduled action
     def _take_screenshot(self):
         btc_today = self.get_btc_option_name_for_today()
         base_url = self.env['ir.config_parameter'].sudo().get_base_url()
