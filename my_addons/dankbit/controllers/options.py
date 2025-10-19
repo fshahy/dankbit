@@ -77,7 +77,11 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, timeframe=None, width=18, height=8):
+        if timeframe:
+            timeframe = str(timeframe) + "H"
+        else:
+            timeframe = "Daily"
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
@@ -88,6 +92,8 @@ class OptionStrat:
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
         if veiw_type == "mm": # for market maker
+            if show_red_line:
+                ax.plot(self.STs, self.payoffs/10000, color="red", label="Taker P&L")
             ax.plot(self.STs, -market_delta, color="green", label="Delta")
             ax.plot(self.STs, -market_gammas*10000, color="violet", label="Gamma")
         elif veiw_type == "taker":
@@ -96,7 +102,7 @@ class OptionStrat:
             ax.plot(self.STs, market_delta, color="green", label="Delta")
             ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
 
-        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
+        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()} {timeframe}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)

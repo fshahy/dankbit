@@ -48,9 +48,10 @@ class ChartController(http.Controller):
 
     @http.route([
         "/<string:instrument>/<string:veiw_type>", 
+        "/<string:instrument>/<string:veiw_type>/<int:hours_ago>",
         "/<string:instrument>/<string:veiw_type>/<string:take_screenshot>"
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, veiw_type, take_screenshot=None):
+    def chart_png_day(self, instrument, veiw_type, hours_ago=None, take_screenshot=None):
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -61,6 +62,9 @@ class ChartController(http.Controller):
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if hours_ago:
+            start_ts = datetime.now() - timedelta(hours=hours_ago)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -91,7 +95,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, show_red_line, width=18, height=8)
+        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, show_red_line, hours_ago, width=18, height=8)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
