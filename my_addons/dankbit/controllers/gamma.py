@@ -7,7 +7,7 @@ def bs_gamma(S, K, T, r, sigma):
     if T <= 0 or sigma <= 0:
         return np.zeros_like(S, dtype=float)
     eps = 1e-12
-    d1 = (np.log((S + eps) / (K + eps)) + (r + 0.044 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d1 = (np.log((S + eps) / (K + eps)) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     return norm.pdf(d1) / (S * sigma * np.sqrt(T))
 
 # --- Infer trade direction ---

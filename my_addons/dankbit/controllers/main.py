@@ -47,10 +47,10 @@ class ChartController(http.Controller):
         return request.render('dankbit.dankbit_help')
 
     @http.route([
-        "/<string:instrument>",
-        "/<string:instrument>/<string:take_screenshot>"
+        "/<string:instrument>/<string:veiw_type>", 
+        "/<string:instrument>/<string:veiw_type>/<string:take_screenshot>"
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, take_screenshot=None):
+    def chart_png_day(self, instrument, veiw_type, take_screenshot=None):
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -88,10 +88,10 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.044)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.044)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot_tv_mmv_combined(index_price, market_deltas, market_gammas["gamma"], show_red_line)
+        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, show_red_line, width=18, height=8)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")

@@ -3,7 +3,6 @@
     "name": "Dankbit",
     "version": "0.1",
     "category": "Options Greeks",
-    "author": "Farid Shahy",
     "summary": "",
     "description": "",
     "depends": ["website"],
