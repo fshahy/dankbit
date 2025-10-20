@@ -224,6 +224,30 @@ class Trade(models.Model):
         })
         return True
 
+    def open_plot_wizard_taker(self):
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "dankbit.plot_wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
+            "target": "new",
+            'context': {
+                "dankbit_view_type": "be_taker",
+            }
+        }
+    
+    def open_plot_wizard_mm(self):
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "dankbit.plot_wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
+            "target": "new",
+            'context': {
+                "dankbit_view_type": "be_mm",
+            }
+        }
+
 class DankbitScreenshot(models.Model):
     _name = "dankbit.screenshot"
     _description = "Dankbit Screenshot"

@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <data>
+
+        <record model="ir.actions.server" id="action_dankbit_plot_taker">
+            <field name="name">Plot Taker View</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="binding_model_id" ref="model_dankbit_trade" />
+            <field name="binding_view_types">list,form</field>
+            <field name="state">code</field>
+            <field name="code">
+if records:
+    action = records.open_plot_wizard_taker()
+            </field>
+        </record>
+
+        <record model="ir.actions.server" id="action_dankbit_plot_mm">
+            <field name="name">Plot MM View</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="binding_model_id" ref="model_dankbit_trade" />
+            <field name="binding_view_types">list,form</field>
+            <field name="state">code</field>
+            <field name="code">
+if records:
+    action = records.open_plot_wizard_mm()
+            </field>
+        </record>
+
+    </data>
+</odoo>

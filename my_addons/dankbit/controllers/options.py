@@ -85,7 +85,7 @@ class OptionStrat:
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-2000, 2001, 100))) 
+        plt.yticks(list(range(-4000, 4001, 200))) 
         ax.grid(True)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
@@ -101,6 +101,16 @@ class OptionStrat:
                 ax.plot(self.STs, self.payoffs/10000, color="red", label="P&L")
             ax.plot(self.STs, market_delta, color="green", label="Delta")
             ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
+        elif veiw_type == "be_taker":
+            if show_red_line:
+                ax.plot(self.STs, self.payoffs/10000, color="red", label="P&L")
+            ax.plot(self.STs, market_delta, color="green", label="Delta")
+            ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
+        elif veiw_type == "be_mm":
+            if show_red_line:
+                ax.plot(self.STs, self.payoffs/10000, color="red", label="Taker P&L")
+            ax.plot(self.STs, -market_delta, color="green", label="Delta")
+            ax.plot(self.STs, -market_gammas*10000, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()} {timeframe}")
 
