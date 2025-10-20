@@ -59,12 +59,15 @@
                 <field name="direction" string="Direction"/>
 
                 <separator/>
+                <filter name="created_today" string="Created Today" domain="[
+                    ('deribit_ts', '&gt;', datetime.datetime.combine(context_today(), datetime.time(0, 0, 0)))
+                ]" />
+                <separator/>
                 <filter name="only_calls" string="Calls" domain="[('option_type', '=', 'call')]"/>
                 <filter name="only_puts" string="Puts" domain="[('option_type', '=', 'put')]"/>
                 <separator/>
                 <filter name="only_longs" string="Buys" domain="[('direction', '=', 'buy')]"/>
                 <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
-                <separator/>
                 
                 <group expand="0" string="Group By">
                     <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
