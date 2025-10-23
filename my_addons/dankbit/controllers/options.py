@@ -78,10 +78,6 @@ class OptionStrat:
             self.instruments.append(o)
 
     def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, timeframe=None, width=18, height=8):
-        if timeframe:
-            timeframe = str(timeframe) + "H"
-        else:
-            timeframe = "Daily"
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
