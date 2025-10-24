@@ -46,6 +46,224 @@ class ChartController(http.Controller):
     def help_page(self):
         return request.render('dankbit.dankbit_help')
 
+    @http.route("/<string:instrument>/calls", type="http", auth="public", website=True)
+    def chart_png_calls(self, instrument):
+        icp = request.env['ir.config_parameter'].sudo()
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        trades = request.env['dankbit.trade'].sudo().search(
+            domain=[
+                ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
+                ("option_type", "=", "call"),
+            ]
+        )
+
+        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            is_call.append(True)
+            if trade.direction == "buy":
+                obj.long_call(trade.strike, trade.price * trade.index_price)
+            elif trade.direction == "sell":
+                obj.short_call(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+
+        fig = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, "Calls", width=18, height=8)
+        
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+
+        # compress with gzip
+        png_data = buf.getvalue()
+        compressed_data = gzip.compress(png_data)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Encoding", "gzip"),
+            ("Refresh", refresh_interval),
+        ]
+        return request.make_response(compressed_data, headers=headers)
+
+    @http.route("/<string:instrument>/puts", type="http", auth="public", website=True)
+    def chart_png_puts(self, instrument):
+        icp = request.env['ir.config_parameter'].sudo()
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        trades = request.env['dankbit.trade'].sudo().search(
+            domain=[
+                ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
+                ("option_type", "=", "put")
+            ]
+        )
+
+        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            is_call.append(False)
+            if trade.direction == "buy":
+                obj.long_put(trade.strike, trade.price * trade.index_price)
+            elif trade.direction == "sell":
+                obj.short_put(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+
+        fig = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, "Puts", width=18, height=8)
+        
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+
+        # compress with gzip
+        png_data = buf.getvalue()
+        compressed_data = gzip.compress(png_data)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Encoding", "gzip"),
+            ("Refresh", refresh_interval),
+        ]
+        return request.make_response(compressed_data, headers=headers)
+    
+    @http.route("/<string:instrument>/buys", type="http", auth="public", website=True)
+    def chart_png_buys(self, instrument):
+        icp = request.env['ir.config_parameter'].sudo()
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        trades = request.env['dankbit.trade'].sudo().search(
+            domain=[
+                ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
+                ("direction", "=", "buy")
+            ]
+        )
+
+        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            if trade.option_type == "call":
+                is_call.append(True)
+                obj.long_call(trade.strike, trade.price * trade.index_price)
+            elif trade.option_type == "put":
+                is_call.append(False)
+                obj.long_put(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+
+        fig = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, "Buys", width=18, height=8)
+        
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        
+        # compress with gzip
+        png_data = buf.getvalue()
+        compressed_data = gzip.compress(png_data)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Encoding", "gzip"),
+            ("Refresh", refresh_interval),
+        ]
+        return request.make_response(compressed_data, headers=headers)
+    
+    @http.route("/<string:instrument>/sells", type="http", auth="public", website=True)
+    def chart_png_sells(self, instrument):
+        icp = request.env['ir.config_parameter'].sudo()
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        trades = request.env['dankbit.trade'].sudo().search(
+            domain=[
+                ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
+                ("direction", "=", "sell")
+            ]
+        )
+
+        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            if trade.option_type == "call":
+                is_call.append(True)
+                obj.short_call(trade.strike, trade.price * trade.index_price)
+            elif trade.option_type == "put":
+                is_call.append(False)
+                obj.short_put(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+
+        fig = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, "Sells", width=18, height=8)
+        
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+
+        # compress with gzip
+        png_data = buf.getvalue()
+        compressed_data = gzip.compress(png_data)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Encoding", "gzip"),
+            ("Refresh", refresh_interval),
+        ]
+        return request.make_response(compressed_data, headers=headers)
+
     @http.route([
         "/<string:instrument>/<string:veiw_type>", 
         "/<string:instrument>/<string:veiw_type>/<int:hours_ago>",
