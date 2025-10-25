@@ -10,6 +10,7 @@ from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
+from . import oi
 from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 
@@ -41,6 +42,14 @@ class ChartController(http.Controller):
 
         # Return Unix timestamp in milliseconds
         return int(midnight.timestamp() * 1000)
+
+    @staticmethod
+    def get_midnight_ts(days_offset=0):
+        tz = ZoneInfo("UTC")
+        now = datetime.now(tz)
+        target_day = now + timedelta(days=-days_offset)
+        midnight = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
+        return midnight
 
     @http.route('/help', auth='public', type='http', website=True)
     def help_page(self):
@@ -471,10 +480,48 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
 
-    @staticmethod
-    def get_midnight_ts(days_offset=0):
-        tz = ZoneInfo("UTC")
-        now = datetime.now(tz)
-        target_day = now + timedelta(days=-days_offset)
-        midnight = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
-        return midnight
+    @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
+    def chart_png_oi(self, instrument):
+        icp = request.env['ir.config_parameter'].sudo()
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) + 10000.0 # +1000 to have more space in oi view
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        oi_data = []
+        for strike in range(int(day_from_price), int(day_to_price), 1000):
+            trades = request.env['dankbit.trade'].sudo().search(
+                domain=[
+                    ("name", "ilike", f"{instrument}"),
+                    ("deribit_ts", ">=", start_ts),
+                    ("strike", "=", strike),
+                ]
+            )
+            oi_call, oi_put = oi.calculate_oi(strike, trades)
+            oi_data.append([strike, oi_call, oi_put])
+
+
+        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+
+        fig = obj.plot_oi(index_price, oi_data)
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+
+        # compress with gzip
+        png_data = buf.getvalue()
+        compressed_data = gzip.compress(png_data)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Encoding", "gzip"),
+            ("Refresh", refresh_interval),
+        ]
+        return request.make_response(compressed_data, headers=headers)
