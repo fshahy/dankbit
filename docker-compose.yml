@@ -9,10 +9,13 @@ services:
     ports:
       - "8069:8069"
     volumes:
-      - odoo-web-data:/var/lib/odoo
+      # Persist the full Odoo data directory (includes filestore)
+      - odoo-filestore:/var/lib/odoo/.local/share/Odoo/filestore
+      # Mount your config file and custom addons
       - ./config/odoo.conf:/etc/odoo/odoo.conf
       - ./my_addons:/mnt/my_addons
     restart: always
+
   db:
     image: postgres:14.11
     container_name: postgres_14
@@ -24,6 +27,7 @@ services:
     restart: always
     volumes:
       - odoo-db-data:/var/lib/postgresql/data/pgdata
+
 volumes:
-  odoo-web-data:
+  odoo-filestore:
   odoo-db-data:
