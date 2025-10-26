@@ -202,7 +202,7 @@ class Trade(models.Model):
     def _take_screenshot(self):
         btc_today = self.get_btc_option_name_for_today()
         base_url = self.env['ir.config_parameter'].sudo().get_base_url()
-        full_url = f"https://dankbit.com/{btc_today}/taker/y"
+        full_url = f"https://dankbit.com/{btc_today}/mm/y"
         _logger.info(full_url)
         try:
             response = requests.get(full_url, timeout=1)
