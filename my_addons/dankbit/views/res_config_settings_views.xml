@@ -32,6 +32,9 @@
                         <setting>
                             <field name="show_red_line" placeholder="Show Red Line"/>
                         </setting>
+                        <setting>
+                            <field name="last_hedging_time" placeholder="Last Hedging Time"/>
+                        </setting>
                     </block>
 
                  </app>

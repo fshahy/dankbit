@@ -41,3 +41,8 @@ class ResConfigSettings(models.TransientModel):
         string="Data from days ago",
         config_parameter="dankbit.from_days_ago",
     )
+
+    last_hedging_time = fields.Datetime(
+        string="Last Hedging Time",
+        config_parameter="dankbit.last_hedging_time"
+    )

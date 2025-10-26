@@ -286,12 +286,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if hours_ago:
             start_ts = datetime.now() - timedelta(hours=hours_ago)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -362,9 +366,13 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -422,9 +430,13 @@ class ChartController(http.Controller):
         zone_to_price = float(icp.get_param("dankbit.zone_to_price", default=150000))
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         long_trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -488,9 +500,13 @@ class ChartController(http.Controller):
         day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), 1000):
