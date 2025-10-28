@@ -1,7 +1,7 @@
 import gzip
 import base64
 import numpy as np
-import os
+import time
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 import logging
@@ -16,6 +16,13 @@ import matplotlib.pyplot as plt
 
 
 _logger = logging.getLogger(__name__)
+
+_INDEX_CACHE = {
+    "timestamp": 0,
+    "price": None,
+}
+
+_CACHE_TTL = 120 # in seconds
 
 class ChartController(http.Controller):
     @staticmethod
@@ -382,7 +389,14 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        now = time.time()
+        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
+            index_price = _INDEX_CACHE["price"]
+        else:
+            index_price = request.env['dankbit.trade'].sudo().get_index_price()
+            _INDEX_CACHE["price"] = index_price
+            _INDEX_CACHE["timestamp"] = now
+
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -418,7 +432,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
-            ("Refresh", refresh_interval),
+            ("Refresh", refresh_interval*10),
         ]
         return request.make_response(compressed_data, headers=headers)
 
@@ -541,3 +555,142 @@ class ChartController(http.Controller):
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
+
+    @http.route("/<string:instrument>/sts", type="http", auth="public")
+    def plot_scrollable_strikes_auto(self, instrument):
+        """
+        Fullscreen strike viewer that starts from the *lower strike*
+        relative to the current index price.
+        Example: /BTC-29OCT25/sts
+        """
+        env = request.env
+        Trade = env["dankbit.trade"].sudo()
+
+        # --- gather all unique strikes for this instrument ---
+        strikes = sorted(set(Trade.search([("name", "ilike", instrument)]).mapped("strike")))
+        if not strikes:
+            return f"<h3>No strikes found for {instrument}</h3>"
+
+        # --- get current underlying price ---
+        now = time.time()
+        if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
+            index_price = _INDEX_CACHE["price"]
+        else:
+            index_price = Trade.get_index_price()
+            _INDEX_CACHE["price"] = index_price
+            _INDEX_CACHE["timestamp"] = now
+
+        # --- find the nearest LOWER strike (not the closest one) ---
+        lower_strikes = [s for s in strikes if s <= index_price]
+        if lower_strikes:
+            start_strike = max(lower_strikes)
+        else:
+            # if all strikes are higher, start from the smallest one
+            start_strike = strikes[0]
+
+        start_index = strikes.index(start_strike)
+        img_urls = [f"/{instrument}/strike/{s}" for s in strikes]
+
+        html = f"""
+        <html>
+            <head>
+                <title>{instrument} Strike Viewer (start {start_strike})</title>
+                <style>
+                    html, body {{
+                        margin: 0;
+                        padding: 0;
+                        height: 100%;
+                        width: 100%;
+                        background-color: #e6e6e6;
+                        overflow: hidden;
+                        font-family: Arial, sans-serif;
+                        color: #333;
+                    }}
+                    .viewer {{
+                        position: relative;
+                        width: 100%;
+                        height: 100%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }}
+                    .viewer img {{
+                        max-width: 100%;
+                        max-height: 100%;
+                        object-fit: contain;
+                        border: none;
+                        transition: opacity 0.3s ease-in-out;
+                    }}
+                    .label {{
+                        position: absolute;
+                        top: 10px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: rgba(255,255,255,0.8);
+                        padding: 6px 14px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        font-size: 18px;
+                    }}
+                    .help {{
+                        position: absolute;
+                        bottom: 10px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        font-size: 14px;
+                        color: #444;
+                        opacity: 0.7;
+                        background: rgba(255,255,255,0.5);
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="viewer">
+                    <img id="strikeImage" src="{img_urls[start_index]}" alt="strike image" />
+                    <div class="label" id="strikeLabel">{strikes[start_index]}</div>
+                    <div class="help">Scroll ↑↓ or press ← → to switch strike</div>
+                </div>
+
+                <script>
+                    const strikes = {strikes};
+                    const urls = {img_urls};
+                    let index = {start_index};
+                    const img = document.getElementById('strikeImage');
+                    const label = document.getElementById('strikeLabel');
+
+                    function showStrike(newIndex) {{
+                        if (newIndex < 0) newIndex = urls.length - 1;
+                        if (newIndex >= urls.length) newIndex = 0;
+                        img.style.opacity = 0;
+                        setTimeout(() => {{
+                            img.src = urls[newIndex];
+                            label.textContent = strikes[newIndex];
+                            img.style.opacity = 1;
+                            index = newIndex;
+                        }}, 150);
+                    }}
+
+                    // mouse wheel: up → larger strike, down → smaller
+                    window.addEventListener('wheel', (event) => {{
+                        if (event.deltaY < 0) {{
+                            showStrike(index + 1);
+                        }} else if (event.deltaY > 0) {{
+                            showStrike(index - 1);
+                        }}
+                    }});
+
+                    // keyboard arrows
+                    window.addEventListener('keydown', (event) => {{
+                        if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {{
+                            showStrike(index + 1);
+                        }} else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {{
+                            showStrike(index - 1);
+                        }}
+                    }});
+                </script>
+            </body>
+        </html>
+        """
+        return html

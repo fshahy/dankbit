@@ -81,7 +81,7 @@ class OptionStrat:
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-4000, 4001, 200))) 
+        plt.yticks(list(range(-4000, 4001, 100))) 
         ax.grid(True)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))

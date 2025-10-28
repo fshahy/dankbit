@@ -66,6 +66,7 @@ class Trade(models.Model):
             rec.strike = rec.name.split("-")[2]
 
     def get_index_price(self):
+        _logger.info("------------------- get_index_price -------------------")
         URL = "https://www.deribit.com/api/v2/public/get_index_price"
         params = {
             "index_name": "btc_usdt",
