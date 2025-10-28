@@ -677,7 +677,7 @@ class ChartController(http.Controller):
                     window.addEventListener('wheel', (e) => {{
                         if (e.deltaY < 0) showStrike(index + 1);
                         else if (e.deltaY > 0) showStrike(index - 1);
-                    }}, {passive: true});
+                    }}, {{ passive: true }});
 
                     // Keyboard
                     window.addEventListener('keydown', (e) => {{
@@ -685,7 +685,7 @@ class ChartController(http.Controller):
                         if (['ArrowLeft', 'ArrowDown'].includes(e.key)) showStrike(index - 1);
                     }});
 
-                    // --- Touch gestures (swipe left/right/up/down) ---
+                    // Touch gestures
                     let touchStartX = 0, touchStartY = 0;
                     let touchEndX = 0, touchEndY = 0;
 
@@ -693,11 +693,9 @@ class ChartController(http.Controller):
                         const dx = touchEndX - touchStartX;
                         const dy = touchEndY - touchStartY;
                         if (Math.abs(dx) > Math.abs(dy)) {{
-                            // horizontal swipe
                             if (dx > 30) showStrike(index - 1);   // swipe right → prev
                             else if (dx < -30) showStrike(index + 1);  // swipe left → next
                         }} else {{
-                            // vertical swipe
                             if (dy > 30) showStrike(index - 1);   // swipe down → prev
                             else if (dy < -30) showStrike(index + 1);  // swipe up → next
                         }}
@@ -707,14 +705,14 @@ class ChartController(http.Controller):
                         const t = e.changedTouches[0];
                         touchStartX = t.screenX;
                         touchStartY = t.screenY;
-                    }}, {passive: true});
+                    }}, {{ passive: true }});
 
                     img.addEventListener('touchend', (e) => {{
                         const t = e.changedTouches[0];
                         touchEndX = t.screenX;
                         touchEndY = t.screenY;
                         handleSwipe();
-                    }}, {passive: true});
+                    }}, {{ passive: true }});
                 </script>
             </body>
         </html>
