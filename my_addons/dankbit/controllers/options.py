@@ -77,7 +77,7 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, timeframe=None, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, timeframe=None, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
@@ -115,6 +115,8 @@ class OptionStrat:
         
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
+        if strike:
+            ax.axvline(x=strike, color="orange")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         plt.legend()
         plt.show()
