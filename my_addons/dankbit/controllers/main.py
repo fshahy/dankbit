@@ -559,19 +559,19 @@ class ChartController(http.Controller):
     @http.route("/<string:instrument>/sts", type="http", auth="public")
     def plot_scrollable_strikes_auto(self, instrument):
         """
-        Fullscreen strike viewer that starts from the *lower strike*
-        relative to the current index price.
-        Example: /BTC-29OCT25/sts
+        Fullscreen strike viewer — supports:
+        - Mouse wheel
+        - Keyboard arrows
+        - Touch swipe (left/right or up/down)
         """
         env = request.env
         Trade = env["dankbit.trade"].sudo()
 
-        # --- gather all unique strikes for this instrument ---
         strikes = sorted(set(Trade.search([("name", "ilike", instrument)]).mapped("strike")))
         if not strikes:
             return f"<h3>No strikes found for {instrument}</h3>"
 
-        # --- get current underlying price ---
+        # Cache and index price
         now = time.time()
         if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
             index_price = _INDEX_CACHE["price"]
@@ -580,14 +580,9 @@ class ChartController(http.Controller):
             _INDEX_CACHE["price"] = index_price
             _INDEX_CACHE["timestamp"] = now
 
-        # --- find the nearest LOWER strike (not the closest one) ---
+        # Find starting strike (lowest below index)
         lower_strikes = [s for s in strikes if s <= index_price]
-        if lower_strikes:
-            start_strike = max(lower_strikes)
-        else:
-            # if all strikes are higher, start from the smallest one
-            start_strike = strikes[0]
-
+        start_strike = max(lower_strikes) if lower_strikes else strikes[0]
         start_index = strikes.index(start_strike)
         img_urls = [f"/{instrument}/strike/{s}" for s in strikes]
 
@@ -605,6 +600,10 @@ class ChartController(http.Controller):
                         overflow: hidden;
                         font-family: Arial, sans-serif;
                         color: #333;
+                        -webkit-user-select: none;
+                        -ms-user-select: none;
+                        user-select: none;
+                        touch-action: pan-y pinch-zoom;
                     }}
                     .viewer {{
                         position: relative;
@@ -613,13 +612,15 @@ class ChartController(http.Controller):
                         display: flex;
                         align-items: center;
                         justify-content: center;
+                        overflow: hidden;
                     }}
                     .viewer img {{
                         max-width: 100%;
                         max-height: 100%;
                         object-fit: contain;
                         border: none;
-                        transition: opacity 0.3s ease-in-out;
+                        transition: opacity 0.25s ease-in-out;
+                        touch-action: none;
                     }}
                     .label {{
                         position: absolute;
@@ -650,7 +651,7 @@ class ChartController(http.Controller):
                 <div class="viewer">
                     <img id="strikeImage" src="{img_urls[start_index]}" alt="strike image" />
                     <div class="label" id="strikeLabel">{strikes[start_index]}</div>
-                    <div class="help">Scroll ↑↓ or press ← → to switch strike</div>
+                    <div class="help">Swipe ◀▶ or scroll ↑↓ or use ← → keys</div>
                 </div>
 
                 <script>
@@ -672,23 +673,48 @@ class ChartController(http.Controller):
                         }}, 150);
                     }}
 
-                    // mouse wheel: up → larger strike, down → smaller
-                    window.addEventListener('wheel', (event) => {{
-                        if (event.deltaY < 0) {{
-                            showStrike(index + 1);
-                        }} else if (event.deltaY > 0) {{
-                            showStrike(index - 1);
-                        }}
+                    // Mouse wheel
+                    window.addEventListener('wheel', (e) => {{
+                        if (e.deltaY < 0) showStrike(index + 1);
+                        else if (e.deltaY > 0) showStrike(index - 1);
+                    }}, {passive: true});
+
+                    // Keyboard
+                    window.addEventListener('keydown', (e) => {{
+                        if (['ArrowRight', 'ArrowUp'].includes(e.key)) showStrike(index + 1);
+                        if (['ArrowLeft', 'ArrowDown'].includes(e.key)) showStrike(index - 1);
                     }});
 
-                    // keyboard arrows
-                    window.addEventListener('keydown', (event) => {{
-                        if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {{
-                            showStrike(index + 1);
-                        }} else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {{
-                            showStrike(index - 1);
+                    // --- Touch gestures (swipe left/right/up/down) ---
+                    let touchStartX = 0, touchStartY = 0;
+                    let touchEndX = 0, touchEndY = 0;
+
+                    function handleSwipe() {{
+                        const dx = touchEndX - touchStartX;
+                        const dy = touchEndY - touchStartY;
+                        if (Math.abs(dx) > Math.abs(dy)) {{
+                            // horizontal swipe
+                            if (dx > 30) showStrike(index - 1);   // swipe right → prev
+                            else if (dx < -30) showStrike(index + 1);  // swipe left → next
+                        }} else {{
+                            // vertical swipe
+                            if (dy > 30) showStrike(index - 1);   // swipe down → prev
+                            else if (dy < -30) showStrike(index + 1);  // swipe up → next
                         }}
-                    }});
+                    }}
+
+                    img.addEventListener('touchstart', (e) => {{
+                        const t = e.changedTouches[0];
+                        touchStartX = t.screenX;
+                        touchStartY = t.screenY;
+                    }}, {passive: true});
+
+                    img.addEventListener('touchend', (e) => {{
+                        const t = e.changedTouches[0];
+                        touchEndX = t.screenX;
+                        touchEndY = t.screenY;
+                        handleSwipe();
+                    }}, {passive: true});
                 </script>
             </body>
         </html>
