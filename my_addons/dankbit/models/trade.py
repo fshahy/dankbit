@@ -196,7 +196,7 @@ class Trade(models.Model):
 
     def get_btc_option_name_for_today(self):
         tomorrow = datetime.now() + timedelta(days=1)
-        instrument = f"BTC-{tomorrow.day:02d}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
+        instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
     
     # run by scheduled action
