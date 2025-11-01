@@ -5,6 +5,9 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
+import matplotlib.image as mpimg
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+import matplotlib.patheffects as path_effects
 
 
 _logger = logging.getLogger(__name__)
@@ -83,6 +86,8 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         plt.yticks(list(range(-4000, 4001, 200))) 
         ax.grid(True)
+
+        self.add_dankbit_signature(ax)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -131,6 +136,8 @@ class OptionStrat:
         ax.xaxis.set_major_locator(MultipleLocator(500))  # Tick every 500
         plt.xticks(rotation=90) 
         ax.grid(True)
+
+        self.add_dankbit_signature(ax)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -152,6 +159,8 @@ class OptionStrat:
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
         ax.grid(True)
+
+        self.add_dankbit_signature(ax)
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -168,3 +177,74 @@ class OptionStrat:
         plt.show()
     
         return fig
+                
+    def add_dankbit_signature(sellf, ax, logo_path=None, alpha=0.5, fontsize=18):
+        """
+        Adds a Dankbit™ watermark or logo in a clean corner (axes-relative, never outside frame).
+        Chooses the quietest corner by measuring data density.
+        """
+        # --- get plotted data ---
+        lines = [l for l in ax.lines if l.get_visible()]
+        if not lines:
+            all_x = np.array([0, 1])
+            all_y = np.array([0, 1])
+        else:
+            all_x = np.concatenate([l.get_xdata() for l in lines if len(l.get_xdata())])
+            all_y = np.concatenate([l.get_ydata() for l in lines if len(l.get_ydata())])
+
+        # normalize to [0,1] (axes coords) to compare regions
+        x_norm = (all_x - np.min(all_x)) / (np.ptp(all_x) + 1e-9)
+        y_norm = (all_y - np.min(all_y)) / (np.ptp(all_y) + 1e-9)
+
+        # estimate density in each corner region
+        def corner_density(x0, x1, y0, y1):
+            mask = (x_norm >= x0) & (x_norm <= x1) & (y_norm >= y0) & (y_norm <= y1)
+            return np.count_nonzero(mask)
+
+        corners = {
+            "bottom left":  (0.00, 0.25, 0.00, 0.25),
+            "bottom right": (0.75, 1.00, 0.00, 0.25),
+            "top left":     (0.00, 0.25, 0.75, 1.00),
+            "top right":    (0.75, 1.00, 0.75, 1.00),
+        }
+        densities = {k: corner_density(*v) for k, v in corners.items()}
+        corner = min(densities, key=densities.get)
+
+        # assign position in axes coordinates
+        x, y, ha, va = {
+            "bottom left":  (0.03, 0.03, "left", "bottom"),
+            "bottom right": (0.97, 0.03, "right", "bottom"),
+            "top left":     (0.03, 0.97, "left", "top"),
+            "top right":    (0.97, 0.97, "right", "top"),
+        }[corner]
+
+        # --- draw logo or text ---
+        if logo_path:
+            try:
+                img = mpimg.imread(logo_path)
+                imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
+                ab = AnnotationBbox(
+                    imagebox, (x, y),
+                    xycoords="axes fraction",
+                    frameon=False,
+                    box_alignment=(1 if ha == "right" else 0, 1 if va == "top" else 0),
+                )
+                ax.add_artist(ab)
+            except Exception as e:
+                ax.text(0.5, 0.02, f"Dankbit™ (logo missing: {e})",
+                        transform=ax.transAxes, ha="center", va="bottom", fontsize=8, color="gray", alpha=0.5)
+        else:
+            color = "#6c2bd9"
+            t = ax.text(x, y, "Dankbit™",
+                        transform=ax.transAxes,
+                        fontsize=fontsize,
+                        color=color,
+                        alpha=alpha,
+                        ha=ha,
+                        va=va,
+                        fontweight="bold",
+                        family="monospace")
+            t.set_path_effects([
+                path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
+            ])
+            
