@@ -283,9 +283,10 @@ class ChartController(http.Controller):
     @http.route([
         "/<string:instrument>/<string:veiw_type>", 
         "/<string:instrument>/<string:veiw_type>/<int:hours_ago>",
+        "/<string:instrument>/<string:veiw_type>/from/<int:from_hour>",
         "/<string:instrument>/<string:veiw_type>/<string:take_screenshot>"
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, veiw_type, hours_ago=None, take_screenshot=None):
+    def chart_png_day(self, instrument, veiw_type, hours_ago=None, from_hour=None, take_screenshot=None):
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -298,9 +299,12 @@ class ChartController(http.Controller):
 
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
+        tz = ZoneInfo("Europe/Berlin")
+        now = datetime.now(tz)
         if hours_ago:
-            start_ts = datetime.now() - timedelta(hours=hours_ago)
-
+            start_ts = now - timedelta(hours=hours_ago)
+        if from_hour:
+            start_ts = now.replace(hour=int(from_hour), minute=0, second=0, microsecond=0)
         if last_hedging_time:
             start_ts = last_hedging_time
 
