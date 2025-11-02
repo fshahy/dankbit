@@ -91,27 +91,57 @@ class OptionStrat:
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
+        # compute plotting arrays for delta/gamma and scaled payoff
+        try:
+            md_arr = np.array(market_delta, dtype=float)
+        except Exception:
+            md_arr = np.array([0.0])
+        try:
+            mg_arr = np.array(market_gammas, dtype=float)
+        except Exception:
+            mg_arr = np.array([0.0])
+
+        md_max = np.max(np.abs(md_arr)) if md_arr.size else 0.0
+        mg_max = np.max(np.abs(mg_arr)) if mg_arr.size else 0.0
+
+        if mg_max > 0:
+            gamma_scale = max(md_max, 1.0) / mg_max
+        else:
+            gamma_scale = 1.0
+
+        md_plot = md_arr.copy()
+        mg_plot = mg_arr * gamma_scale
+
+        max_signal = max(np.max(np.abs(md_plot)) if md_plot.size else 0.0,
+                         np.max(np.abs(mg_plot)) if mg_plot.size else 0.0,
+                         1.0)
+
+        payoff_abs_max = np.max(np.abs(self.payoffs)) if self.payoffs.size else 0.0
+        if payoff_abs_max > 0:
+            payoff_scaled = self.payoffs * (max_signal / payoff_abs_max)
+        else:
+            payoff_scaled = self.payoffs
 
         if veiw_type == "mm": # for market maker
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/10000, color="red", label="Taker P&L")
-            ax.plot(self.STs, -market_delta*3, color="green", label="Delta")
-            ax.plot(self.STs, -market_gammas*10000, color="violet", label="Gamma")
+                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
+            ax.plot(self.STs, -md_plot, color="green", label="Delta")
+            ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
         elif veiw_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/10000, color="red", label="P&L")
-            ax.plot(self.STs, market_delta*3, color="green", label="Delta")
-            ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
+                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
+            ax.plot(self.STs, md_plot, color="green", label="Delta")
+            ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
         elif veiw_type == "be_taker":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/10000, color="red", label="P&L")
-            ax.plot(self.STs, market_delta*3, color="green", label="Delta")
-            ax.plot(self.STs, market_gammas*10000, color="violet", label="Gamma")
+                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
+            ax.plot(self.STs, md_plot, color="green", label="Delta")
+            ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
         elif veiw_type == "be_mm":
             if show_red_line:
-                ax.plot(self.STs, self.payoffs/10000, color="red", label="Taker P&L")
-            ax.plot(self.STs, -market_delta*3, color="green", label="Delta")
-            ax.plot(self.STs, -market_gammas*10000, color="violet", label="Gamma")
+                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
+            ax.plot(self.STs, -md_plot, color="green", label="Delta")
+            ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()} {timeframe}")
 
