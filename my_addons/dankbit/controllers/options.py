@@ -87,7 +87,8 @@ class OptionStrat:
         plt.yticks(list(range(-4000, 4001, 200))) 
         ax.grid(True)
 
-        self.add_dankbit_signature(ax)
+    # NOTE: signature is added after legend creation to allow placing it
+    # next to the legend (see add_dankbit_signature implementation).
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -156,9 +157,12 @@ class OptionStrat:
         if strike:
             ax.axvline(x=strike, color="orange")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        plt.legend()
+        # Draw legend first so we can place the Dankbit signature beside it
+        legend = ax.legend()
+        # add signature beside legend (or fallback to quiet corner)
+        self.add_dankbit_signature(ax)
         plt.show()
-    
+
         return fig
 
     def plot_zones(self, index_price):
@@ -167,7 +171,7 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-        self.add_dankbit_signature(ax)
+    # signature will be placed after legend so that it can sit next to it
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -179,9 +183,10 @@ class OptionStrat:
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        plt.legend()
+        legend = plt.legend()
+        self.add_dankbit_signature(ax)
         plt.show()
-    
+
         return fig
     
     def plot_oi(self, index_price, oi_data):
@@ -190,7 +195,7 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-        self.add_dankbit_signature(ax)
+    # place signature after plotting bars so it can choose a clean area
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -204,8 +209,10 @@ class OptionStrat:
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
+        # no legend here by default, but keep signature placement logic
+        self.add_dankbit_signature(ax)
         plt.show()
-    
+
         return fig
                 
     def add_dankbit_signature(sellf, ax, logo_path=None, alpha=0.5, fontsize=18):
@@ -213,6 +220,69 @@ class OptionStrat:
         Adds a Dankbit™ watermark or logo in a clean corner (axes-relative, never outside frame).
         Chooses the quietest corner by measuring data density.
         """
+        # If a legend exists, place the signature beside it so they stay together
+        try:
+            fig = ax.figure
+            # force a draw to compute legend bbox correctly
+            fig.canvas.draw()
+            legend = ax.get_legend()
+        except Exception:
+            legend = None
+
+        if legend is not None:
+            try:
+                renderer = fig.canvas.get_renderer()
+                lbbox = legend.get_window_extent(renderer)
+                # convert to axes fraction coords
+                lbbox_axes = ax.transAxes.inverted().transform_bbox(lbbox)
+                # approximate signature size in axes fraction
+                sig_w = 0.14
+                sig_h = 0.06
+                # prefer to place signature to the right of legend if it fits
+                if lbbox_axes.x1 + sig_w + 0.01 < 1.0:
+                    x = lbbox_axes.x1 + 0.01
+                    ha = 'left'
+                else:
+                    x = lbbox_axes.x0 - 0.01
+                    ha = 'right'
+                # align vertically with top of legend
+                y = min(max(lbbox_axes.y1 - 0.01, 0.05), 0.95)
+                va = 'top'
+
+                if logo_path:
+                    try:
+                        img = mpimg.imread(logo_path)
+                        imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
+                        ab = AnnotationBbox(
+                            imagebox, (x, y),
+                            xycoords="axes fraction",
+                            frameon=False,
+                            box_alignment=(1 if ha == "right" else 0, 1 if va == "top" else 0),
+                        )
+                        ax.add_artist(ab)
+                        return
+                    except Exception:
+                        # fallback to text if logo fails
+                        pass
+
+                color = "#6c2bd9"
+                t = ax.text(x, y, "Dankbit™",
+                            transform=ax.transAxes,
+                            fontsize=fontsize,
+                            color=color,
+                            alpha=alpha,
+                            ha=ha,
+                            va=va,
+                            fontweight="bold",
+                            family="monospace")
+                t.set_path_effects([
+                    path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
+                ])
+                return
+            except Exception:
+                # fall through to density-based corner placement on any error
+                pass
+
         # --- get plotted data ---
         lines = [l for l in ax.lines if l.get_visible()]
         if not lines:
