@@ -147,8 +147,22 @@ class Trade(models.Model):
         now_ts = int(time.time() * 1000)
         start_ts = None
         # I do not want to fetch unwanted data
-        if latest_trade_ts: # we have some data
-            start_ts = int(latest_trade_ts.deribit_ts.timestamp())
+        if latest_trade_ts and latest_trade_ts.deribit_ts: # we have some data
+            # Ensure start_ts is milliseconds since epoch (Deribit expects ms).
+            # latest_trade_ts.deribit_ts may be a datetime or string; handle both.
+            dt_val = latest_trade_ts.deribit_ts
+            try:
+                start_ts = int(dt_val.timestamp() * 1000)
+            except Exception:
+                try:
+                    # parse string to datetime using Odoo helper
+                    dt_obj = fields.Datetime.from_string(dt_val) if isinstance(dt_val, str) else dt_val
+                    if dt_obj.tzinfo is None:
+                        dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+                    start_ts = int(dt_obj.timestamp() * 1000)
+                except Exception:
+                    # fallback to midnight-based window
+                    start_ts = self._get_midnight_dt(start_from_ts)
         else: # db is empty
             start_ts = self._get_midnight_dt(start_from_ts)
 
@@ -235,6 +249,17 @@ class Trade(models.Model):
         start_ts = self._get_midnight_dt(start_from_ts)
 
         if not exists and trade["timestamp"] > start_ts:
+            # convert timestamps to timezone-aware UTC datetimes and store
+            try:
+                deribit_dt = datetime.fromtimestamp(trade["timestamp"]/1000, tz=timezone.utc)
+                exp_dt = datetime.fromtimestamp(expiration_ts/1000, tz=timezone.utc)
+                deribit_str = fields.Datetime.to_string(deribit_dt)
+                exp_str = fields.Datetime.to_string(exp_dt)
+            except Exception:
+                # fallback to raw string format if conversion fails
+                deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
+                exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S')
+
             self.env["dankbit.trade"].create({
                 "name": trade["instrument_name"],
                 "iv": trade["iv"],
@@ -246,8 +271,8 @@ class Trade(models.Model):
                 "deribit_trade_identifier": trade["trade_id"],
                 "amount": trade["amount"],
                 "contracts": trade["contracts"],
-                "deribit_ts": datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S'),
-                "expiration": datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S'),
+                "deribit_ts": deribit_str,
+                "expiration": exp_str,
             })
             _logger.info(f'*** Trade Created: {trade["instrument_name"]} ***')
 
@@ -279,14 +304,39 @@ class Trade(models.Model):
     # run by scheduled action
     def _take_screenshot(self):
         btc_today = self.get_btc_option_name_for_today()
-        base_url = self.env['ir.config_parameter'].sudo().get_base_url()
-        full_url = f"https://dankbit.com/{btc_today}/mm/y"
-        _logger.info(full_url)
+        # Use configured base URL so this works both on dankbit.com and locally.
+        icp = self.env['ir.config_parameter'].sudo()
         try:
-            response = requests.get(full_url, timeout=1)
+            base_url = icp.get_base_url()
+        except Exception:
+            # fallback to param (older Odoo versions)
+            base_url = icp.get_param('web.base.url', default='http://localhost:8069')
+
+        # Build the URL robustly and allow local hosts.
+        full_url = f"{base_url.rstrip('/')}/{btc_today}/mm/y"
+        _logger.info("Taking screenshot using URL: %s", full_url)
+
+        # timeout configurable (seconds)
+        try:
+            timeout = float(icp.get_param('dankbit.screenshot_timeout', default=3.0))
+        except Exception:
+            timeout = 3.0
+
+        try:
+            response = requests.get(full_url, timeout=timeout)
             response.raise_for_status()
             self.env.cr.commit()
             _msg = f"✅ Called {full_url} — {response.status_code}"
+        except requests.exceptions.SSLError as e:
+            # Retry without SSL verification for local dev servers with self-signed certs
+            _logger.warning("SSL error when calling %s: %s — retrying with verify=False", full_url, e)
+            try:
+                response = requests.get(full_url, timeout=timeout, verify=False)
+                response.raise_for_status()
+                self.env.cr.commit()
+                _msg = f"✅ Called {full_url} (insecure) — {response.status_code}"
+            except Exception as e2:
+                _msg = f"❌ Error calling {full_url} (insecure retry): {e2}"
         except Exception as e:
             _msg = f"❌ Error calling {full_url}: {e}"
 
