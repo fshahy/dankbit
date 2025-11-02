@@ -94,7 +94,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, "Calls")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Calls")
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -144,7 +144,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, "Puts")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Puts")
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -195,7 +195,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, "Buys")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Buys")
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -246,7 +246,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, "Sells")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Sells")
         
         buf = BytesIO()
         fig.savefig(buf, format="png")

@@ -163,6 +163,12 @@ class OptionStrat:
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
+        if strike is not None and isinstance(strike, str):
+            veiw_type = f"{veiw_type} {strike}"
+        if strike is not None and isinstance(strike, (int, float)):
+            ax.axvline(x=strike, color="orange")
+            veiw_type = f"MM Strike {strike}"
+
         ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
 
         ymax = np.max(np.abs(plt.ylim()))
@@ -173,8 +179,7 @@ class OptionStrat:
             
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
-        if strike is not None:
-            ax.axvline(x=strike, color="orange")
+
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # Draw legend first so we can place the Dankbit signature beside it
         legend = ax.legend()
