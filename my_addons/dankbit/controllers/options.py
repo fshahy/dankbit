@@ -173,8 +173,8 @@ class OptionStrat:
         
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
-        # if strike:
-        #     ax.axvline(x=strike, color="orange")
+        if strike is not None:
+            ax.axvline(x=strike, color="orange")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # Draw legend first so we can place the Dankbit signature beside it
         legend = ax.legend()
