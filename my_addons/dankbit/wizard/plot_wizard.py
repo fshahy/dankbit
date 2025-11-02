@@ -63,7 +63,16 @@ class PlotWizard(models.TransientModel):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, show_red_line, width=18, height=8)
+        # map backend 'be_*' view types to the public-facing ones so
+        # wizard-generated plots match the URL-rendered charts.
+        view_type = dankbit_view_type
+        if isinstance(view_type, str):
+            if view_type == 'be_taker':
+                view_type = 'taker'
+            elif view_type == 'be_mm':
+                view_type = 'mm'
+
+        fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, width=18, height=8)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
