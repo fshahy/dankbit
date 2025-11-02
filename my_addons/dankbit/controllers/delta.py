@@ -1,13 +1,6 @@
 import numpy as np
-import scipy.stats as si
 from scipy.stats import norm
 
-from scipy.stats import norm
-import numpy as np
-
-from scipy.stats import norm
-import numpy as np
-from datetime import datetime
 
 def bs_delta(S, K, T, r, sigma, option_type="call"):
     S = np.asarray(S, dtype=float)

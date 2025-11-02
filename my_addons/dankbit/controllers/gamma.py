@@ -1,10 +1,6 @@
 import numpy as np
-from math import exp, log, sqrt
 from scipy.stats import norm
 
-from scipy.stats import norm
-import numpy as np
-from datetime import datetime
 
 # --- Black-Scholes Gamma ---
 def bs_gamma(S, K, T, r, sigma):

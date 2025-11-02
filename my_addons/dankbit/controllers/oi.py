@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 def calculate_oi(strike, trades):
     oi_call = 0
     oi_put = 0

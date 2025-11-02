@@ -4,7 +4,6 @@ import pytz
 from datetime import datetime, timezone, timedelta
 import logging
 import requests, time
-import requests
 
 from odoo import api, fields, models
 
@@ -124,10 +123,10 @@ class Trade(models.Model):
         now = datetime.now(pytz.utc)
 
         # Tomorrow's date
-        tomorrow = now.date() + datetime.timedelta(days=1)
+        tomorrow = now.date() + timedelta(days=1)
 
         # Tomorrow at 08:00 GMT
-        target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=datetime.timezone.utc)
+        target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=timezone.utc)
 
         # Convert to milliseconds since epoch
         return int(target.timestamp() * 1000)
@@ -172,7 +171,7 @@ class Trade(models.Model):
                 "deribit_ts": datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S'),
                 "expiration": datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S'),
             })
-            _logger.info(f"*** Trade Created: {trade["instrument_name"]} ***")
+            _logger.info(f'*** Trade Created: {trade["instrument_name"]} ***')
 
     @staticmethod
     def _get_midnight_dt(days_offset=0):
