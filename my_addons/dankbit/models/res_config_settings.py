@@ -46,3 +46,22 @@ class ResConfigSettings(models.TransientModel):
         string="Last Hedging Time",
         config_parameter="dankbit.last_hedging_time"
     )
+
+    # plotting and API tuning
+    gamma_plot_scale = fields.Float(
+        string="Gamma plot scale (0 = auto)",
+        config_parameter="dankbit.gamma_plot_scale",
+        help="If 0 (default) the gamma plotting magnification is computed automatically."
+    )
+
+    deribit_timeout = fields.Float(
+        string="Deribit API timeout (s)",
+        config_parameter="dankbit.deribit_timeout",
+        help="Timeout in seconds for calls to Deribit public APIs."
+    )
+
+    deribit_cache_ttl = fields.Float(
+        string="Deribit cache TTL (s)",
+        config_parameter="dankbit.deribit_cache_ttl",
+        help="Time-to-live in seconds for cached Deribit responses (index/instruments)."
+    )

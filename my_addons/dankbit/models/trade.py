@@ -10,6 +10,29 @@ from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
+# Simple in-memory cache to avoid hitting Deribit too often.
+# Keys: 'index_price', 'instruments', optionally others.
+_DERIBIT_CACHE = {
+    'index_price': {'ts': 0, 'value': None},
+    'instruments': {'ts': 0, 'value': None},
+}
+
+def _safe_deribit_request(url, params, timeout=5.0, retries=2, backoff=0.5):
+    """Make a requests.get call with retries and exponential backoff.
+    Returns parsed JSON on success, or None on persistent failure.
+    """
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            _logger.warning("Deribit request failed (attempt %d/%d) %s %s: %s", attempt + 1, retries + 1, url, params, e)
+            if attempt < retries:
+                time.sleep(backoff * (2 ** attempt))
+            else:
+                return None
+
 class Trade(models.Model):
     _name = "dankbit.trade"
     _order = "deribit_ts desc"
@@ -70,8 +93,33 @@ class Trade(models.Model):
         params = {
             "index_name": "btc_usdt",
         }
-        resp = requests.get(URL, params=params).json()
-        return resp["result"]["index_price"]
+        # read timeout from config (seconds)
+        timeout = 5.0
+        try:
+            icp = self.env['ir.config_parameter'].sudo()
+            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
+            cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=30.0))
+        except Exception:
+            cache_ttl = 30.0
+        # consult cache first
+        now_ts = time.time()
+        cached = _DERIBIT_CACHE.get('index_price', {})
+        if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
+            return cached.get('value')
+
+        # perform request with retries/backoff
+        data = _safe_deribit_request(URL, params=params, timeout=timeout)
+        if data and isinstance(data, dict):
+            val = data.get("result", {}).get("index_price", 0.0)
+            _DERIBIT_CACHE['index_price'] = {'ts': now_ts, 'value': val}
+            return val
+        else:
+            # on failure, fall back to last cached value if available
+            if cached and cached.get('value') is not None:
+                _logger.warning("get_index_price: using stale cached value")
+                return cached.get('value')
+            _logger.exception("get_index_price failed and no cache available")
+            return 0.0
 
     def _get_latest_trade_ts(self):
         return self.search([], order="deribit_ts desc", limit=1)
@@ -87,6 +135,13 @@ class Trade(models.Model):
 
         icp = self.env['ir.config_parameter'].sudo()
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+
+        # read timeout config
+        timeout = 5.0
+        try:
+            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
+        except Exception:
+            timeout = 5.0
 
         latest_trade_ts = self._get_latest_trade_ts()
         now_ts = int(time.time() * 1000)
@@ -107,11 +162,17 @@ class Trade(models.Model):
                     "end_timestamp": now_ts,
                     "sorting": "desc"
                 }
-                resp = requests.get(URL, params=params).json()
+                try:
+                    data = _safe_deribit_request(URL, params=params, timeout=timeout)
+                except Exception as e:
+                    _logger.exception("get_last_trades: request failed for %s: %s", inst.get('instrument_name'), e)
+                    data = None
 
-                if "result" in resp:
-                    trades = resp["result"]["trades"]
-                    
+                # small sleep to avoid hammering the API in a tight loop
+                time.sleep(0.05)
+
+                if "result" in data:
+                    trades = data["result"].get("trades", [])
                     for trd in trades:
                         self._create_new_trade(trd, inst["expiration_timestamp"])
                 
@@ -140,10 +201,27 @@ class Trade(models.Model):
             "expired": "false"
         }
 
-        resp = requests.get(URL, params=params).json()
-        instruments = resp["result"]
+        timeout = 5.0
+        try:
+            icp = self.env['ir.config_parameter'].sudo()
+            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
+            cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=300.0))
+        except Exception:
+            cache_ttl = 300.0
+        # consult cache
+        now_ts = time.time()
+        cached = _DERIBIT_CACHE.get('instruments', {})
+        if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
+            return cached.get('value')
 
-        return instruments
+        data = _safe_deribit_request(URL, params=params, timeout=timeout)
+        if data and isinstance(data, dict):
+            instruments = data.get("result", [])
+            _DERIBIT_CACHE['instruments'] = {'ts': now_ts, 'value': instruments}
+            return instruments
+        else:
+            _logger.exception("_get_instruments failed and no cache available")
+            return cached.get('value', [])
 
     def _create_new_trade(self, trade, expiration_ts):
         exists = self.env["dankbit.trade"].search(

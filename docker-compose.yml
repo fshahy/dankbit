@@ -9,12 +9,20 @@ services:
     ports:
       - "8069:8069"
     volumes:
-      # Persist the full Odoo data directory (includes filestore)
-      - odoo-filestore:/var/lib/odoo/.local/share/Odoo/filestore
+      # Persist the full Odoo Odoo data directory (includes filestore and meta)
+      # Use a named volume for durability across restarts and rebuilds.
+      # Use a host bind so files live on your project tree and are easy to inspect/backup.
+      # WARNING: binding a host directory will hide any content that lived in the image
+      # at this path. If you have an existing named volume, migrate it first (see README).
+      - ./odoo_filestore:/var/lib/odoo/.local/share/Odoo
       # Mount your config file and custom addons
       - ./config/odoo.conf:/etc/odoo/odoo.conf
       - ./my_addons:/mnt/my_addons
     restart: always
+    # Ensure the filestore volume is writable by the container user when
+    # the container starts. This runs a quick chown (no-op if ownership is
+    # already correct) and then executes the image entrypoint.
+    command: bash -c "chown -R ${UID:-1000}:${GID:-1000} /var/lib/odoo/.local/share/Odoo || true; /entrypoint.sh odoo"
 
   db:
     image: postgres:14.11
@@ -29,5 +37,4 @@ services:
       - odoo-db-data:/var/lib/postgresql/data/pgdata
 
 volumes:
-  odoo-filestore:
   odoo-db-data:

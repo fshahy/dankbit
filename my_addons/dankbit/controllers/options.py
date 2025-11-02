@@ -8,6 +8,7 @@ from matplotlib.ticker import MultipleLocator
 import matplotlib.image as mpimg
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import matplotlib.patheffects as path_effects
+from odoo.http import request as _odoo_request
 
 
 _logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, timeframe=None, strike=None, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
@@ -105,10 +106,28 @@ class OptionStrat:
         md_max = np.max(np.abs(md_arr)) if md_arr.size else 0.0
         mg_max = np.max(np.abs(mg_arr)) if mg_arr.size else 0.0
 
-        if mg_max > 0:
-            gamma_scale = max(md_max, 1.0) / mg_max
+        # Config-driven gamma plotting magnification. If the config value
+        # is missing or 0, fall back to automatic scaling derived from md/mg.
+        gamma_scale = 1.0
+        cfg_val = None
+        try:
+            icp = _odoo_request.env['ir.config_parameter'].sudo()
+            cfg = icp.get_param('dankbit.gamma_plot_scale', default=None)
+            if cfg is not None:
+                try:
+                    cfg_val = float(cfg)
+                except Exception:
+                    cfg_val = None
+        except Exception:
+            cfg_val = None
+
+        if cfg_val and cfg_val > 0:
+            gamma_scale = cfg_val
         else:
-            gamma_scale = 1.0
+            if mg_max > 0:
+                gamma_scale = max(md_max, 1.0) / mg_max
+            else:
+                gamma_scale = 1.0
 
         md_plot = md_arr.copy()
         mg_plot = mg_arr * gamma_scale
@@ -144,7 +163,7 @@ class OptionStrat:
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
-        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()} {timeframe}")
+        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
@@ -154,8 +173,8 @@ class OptionStrat:
         
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
-        if strike:
-            ax.axvline(x=strike, color="orange")
+        # if strike:
+        #     ax.axvline(x=strike, color="orange")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # Draw legend first so we can place the Dankbit signature beside it
         legend = ax.legend()

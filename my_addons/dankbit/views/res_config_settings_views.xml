@@ -35,6 +35,15 @@
                         <setting>
                             <field name="last_hedging_time" placeholder="Last Hedging Time"/>
                         </setting>
+                        <setting>
+                            <field name="gamma_plot_scale" placeholder="Gamma plot scale (0=auto)"/>
+                        </setting>
+                        <setting>
+                            <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
+                        </setting>
+                        <setting>
+                            <field name="deribit_cache_ttl" placeholder="Deribit cache TTL (s)"/>
+                        </setting>
                     </block>
 
                  </app>
