@@ -168,9 +168,9 @@ class OptionStrat:
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
 
-        # --- Highlight weak-delta band between -50 and +50 ---
-        ax.axhspan(-50, 50, color="yellow", alpha=0.15)
-        
+        # --- Highlight weak-delta band between -20 and +20 ---
+        ax.axhspan(-20, 20, color="yellow", alpha=0.15)
+            
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         if strike is not None:
