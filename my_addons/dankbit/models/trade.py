@@ -7,7 +7,6 @@ import requests, time
 
 from odoo import api, fields, models
 
-
 _logger = logging.getLogger(__name__)
 
 # Simple in-memory cache to avoid hitting Deribit too often.
@@ -27,7 +26,8 @@ def _safe_deribit_request(url, params, timeout=5.0, retries=2, backoff=0.5):
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            _logger.warning("Deribit request failed (attempt %d/%d) %s %s: %s", attempt + 1, retries + 1, url, params, e)
+            _logger.warning("Deribit request failed (attempt %d/%d) %s %s: %s",
+                            attempt + 1, retries + 1, url, params, e)
             if attempt < retries:
                 time.sleep(backoff * (2 ** attempt))
             else:
@@ -71,28 +71,36 @@ class Trade(models.Model):
 
     _sql_constraints = [
         ("deribit_trade_identifier_uniqe", "unique (deribit_trade_identifier)",
-            "The Deribit trade ID must be unique!")
+         "The Deribit trade ID must be unique!")
     ]
 
     @api.depends("name")
     def _compute_type(self):
         for rec in self:
-            if rec.name[-1] == "P":
-                rec.option_type = "put"
-            elif rec.name[-1] == "C":
-                rec.option_type = "call"
+            if rec.name:
+                if rec.name[-1] == "P":
+                    rec.option_type = "put"
+                elif rec.name[-1] == "C":
+                    rec.option_type = "call"
+                else:
+                    rec.option_type = False
+            else:
+                rec.option_type = False
 
     @api.depends("name")
     def _compute_strike(self):
         for rec in self:
-            rec.strike = rec.name.split("-")[2]
+            try:
+                # Deribit format: BTC-29NOV24-98000-P
+                rec.strike = int(str(rec.name).split("-")[2]) if rec.name else 0
+            except Exception:
+                rec.strike = 0
 
     def get_index_price(self):
         _logger.info("------------------- get_index_price -------------------")
         URL = "https://www.deribit.com/api/v2/public/get_index_price"
-        params = {
-            "index_name": "btc_usdt",
-        }
+        params = {"index_name": "btc_usdt"}
+
         # read timeout from config (seconds)
         timeout = 5.0
         try:
@@ -101,13 +109,13 @@ class Trade(models.Model):
             cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=30.0))
         except Exception:
             cache_ttl = 30.0
+
         # consult cache first
         now_ts = time.time()
         cached = _DERIBIT_CACHE.get('index_price', {})
         if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
             return cached.get('value')
 
-        # perform request with retries/backoff
         data = _safe_deribit_request(URL, params=params, timeout=timeout)
         if data and isinstance(data, dict):
             val = data.get("result", {}).get("index_price", 0.0)
@@ -121,94 +129,108 @@ class Trade(models.Model):
             _logger.exception("get_index_price failed and no cache available")
             return 0.0
 
+    # (kept for compatibility: global latest; useful elsewhere)
     def _get_latest_trade_ts(self):
         return self.search([], order="deribit_ts desc", limit=1)
 
+    # NEW: per-instrument latest trade timestamp (fixes missing inactive strikes)
+    def _get_latest_trade_ts_for_instrument(self, instrument_name: str):
+        return self.search([("name", "=", instrument_name)], order="deribit_ts desc", limit=1)
+
+    # ========== FETCHING & INGESTION ==========
+
     # run by scheduled action
     def get_last_trades(self):
-        all_instruments = self._get_instruments()
-        
+        """
+        Robust fetcher:
+        - Resumes per-instrument from its own latest deribit_ts (ms).
+        - Paginates with sorting=asc, advancing start_timestamp by last_ts+1.
+        """
         option_instruments = [
-            inst for inst in all_instruments 
-            if inst["kind"] == "option"
+            inst for inst in self._get_instruments() if inst.get("kind") == "option"
         ]
-
         icp = self.env['ir.config_parameter'].sudo()
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-
-        # read timeout config
-        timeout = 5.0
         try:
             timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
         except Exception:
             timeout = 5.0
+        try:
+            start_from_days = int(icp.get_param("dankbit.from_days_ago", default=1))
+        except Exception:
+            start_from_days = 1
 
-        latest_trade_ts = self._get_latest_trade_ts()
         now_ts = int(time.time() * 1000)
-        start_ts = None
-        # I do not want to fetch unwanted data
-        if latest_trade_ts and latest_trade_ts.deribit_ts: # we have some data
-            # Ensure start_ts is milliseconds since epoch (Deribit expects ms).
-            # latest_trade_ts.deribit_ts may be a datetime or string; handle both.
-            dt_val = latest_trade_ts.deribit_ts
-            try:
-                start_ts = int(dt_val.timestamp() * 1000)
-            except Exception:
-                try:
-                    # parse string to datetime using Odoo helper
-                    dt_obj = fields.Datetime.from_string(dt_val) if isinstance(dt_val, str) else dt_val
-                    if dt_obj.tzinfo is None:
-                        dt_obj = dt_obj.replace(tzinfo=timezone.utc)
-                    start_ts = int(dt_obj.timestamp() * 1000)
-                except Exception:
-                    # fallback to midnight-based window
-                    start_ts = self._get_midnight_dt(start_from_ts)
-        else: # db is empty
-            start_ts = self._get_midnight_dt(start_from_ts)
+        base_start = self._get_midnight_dt(start_from_days)  # ms
 
-        if start_ts:
-            URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
-            for inst in option_instruments:
+        URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
+
+        for inst in option_instruments:
+            inst_name = inst.get("instrument_name")
+            if not inst_name:
+                continue
+
+            latest_trade = self._get_latest_trade_ts_for_instrument(inst_name)
+
+            # Convert Odoo datetime to ms safely
+            if latest_trade and latest_trade.deribit_ts:
+                dt_val = latest_trade.deribit_ts
+                if isinstance(dt_val, str):
+                    dt_obj = fields.Datetime.from_string(dt_val)
+                else:
+                    dt_obj = dt_val
+                if dt_obj.tzinfo is None:
+                    dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+                start_ts = int(dt_obj.timestamp() * 1000)
+            else:
+                start_ts = base_start
+
+            _logger.info("Fetching trades for %s from %s → %s",
+                         inst_name, start_ts, now_ts)
+
+            while True:
                 params = {
-                    "instrument_name": inst["instrument_name"],
+                    "instrument_name": inst_name,
                     "count": 1000,
                     "start_timestamp": start_ts,
                     "end_timestamp": now_ts,
-                    "sorting": "desc"
+                    "sorting": "asc",
                 }
-                try:
-                    data = _safe_deribit_request(URL, params=params, timeout=timeout)
-                except Exception as e:
-                    _logger.exception("get_last_trades: request failed for %s: %s", inst.get('instrument_name'), e)
-                    data = None
+                data = _safe_deribit_request(URL, params=params, timeout=timeout)
+                if not data or "result" not in data:
+                    _logger.warning("No result for %s (params=%s)", inst_name, params)
+                    break
 
-                # small sleep to avoid hammering the API in a tight loop
+                trades = data["result"].get("trades", [])
+                if not trades:
+                    break
+
+                for trd in trades:
+                    self._create_new_trade(trd, inst.get("expiration_timestamp"))
+
+                # advance start to just after last trade
+                start_ts = trades[-1]["timestamp"] + 1
+
+                if not data["result"].get("has_more"):
+                    break
+
+                # gentle pacing
                 time.sleep(0.05)
 
-                if "result" in data:
-                    trades = data["result"].get("trades", [])
-                    for trd in trades:
-                        self._create_new_trade(trd, inst["expiration_timestamp"])
-                
-                # commit to db before going to next instrument
-                self.env.cr.commit()
+            # commit per instrument to avoid partial loss
+            self.env.cr.commit()
 
     def _get_tomorrows_ts(self):
         # Current UTC time
         now = datetime.now(pytz.utc)
-
         # Tomorrow's date
         tomorrow = now.date() + timedelta(days=1)
-
         # Tomorrow at 08:00 GMT
         target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=timezone.utc)
-
-        # Convert to milliseconds since epoch
+        # Milliseconds since epoch
         return int(target.timestamp() * 1000)
 
     def _get_instruments(self):
         URL = "https://www.deribit.com/api/v2/public/get_instruments"
-
         params = {
             "currency": "BTC",
             "kind": "option",
@@ -222,7 +244,7 @@ class Trade(models.Model):
             cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=300.0))
         except Exception:
             cache_ttl = 300.0
-        # consult cache
+
         now_ts = time.time()
         cached = _DERIBIT_CACHE.get('instruments', {})
         if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
@@ -239,56 +261,62 @@ class Trade(models.Model):
 
     def _create_new_trade(self, trade, expiration_ts):
         exists = self.env["dankbit.trade"].search(
-            domain=[("deribit_trade_identifier", "=", trade["trade_id"])],
+            domain=[("deribit_trade_identifier", "=", trade.get("trade_id"))],
             limit=1
         )
 
         icp = self.env['ir.config_parameter'].sudo()
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago", default=2))
+        try:
+            start_from_ts = int(icp.get_param("dankbit.from_days_ago", default=2))
+        except Exception:
+            start_from_ts = 2
 
         start_ts = self._get_midnight_dt(start_from_ts)
 
-        if not exists and trade["timestamp"] > start_ts:
-            # convert timestamps to timezone-aware UTC datetimes and store
-            try:
-                deribit_dt = datetime.fromtimestamp(trade["timestamp"]/1000, tz=timezone.utc)
-                exp_dt = datetime.fromtimestamp(expiration_ts/1000, tz=timezone.utc)
-                deribit_str = fields.Datetime.to_string(deribit_dt)
-                exp_str = fields.Datetime.to_string(exp_dt)
-            except Exception:
-                # fallback to raw string format if conversion fails
-                deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
-                exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S')
+        # skip anything older than our configured window
+        if exists or trade.get("timestamp", 0) <= start_ts:
+            return
 
-            self.env["dankbit.trade"].create({
-                "name": trade["instrument_name"],
-                "iv": trade["iv"],
-                "index_price": trade["index_price"],
-                "price": trade["price"],
-                "mark_price": trade["mark_price"],
-                "direction": trade["direction"],
-                "trade_seq": trade["trade_seq"],
-                "deribit_trade_identifier": trade["trade_id"],
-                "amount": trade["amount"],
-                "contracts": trade["contracts"],
-                "deribit_ts": deribit_str,
-                "expiration": exp_str,
-            })
-            _logger.info(f'*** Trade Created: {trade["instrument_name"]} ***')
+        # convert timestamps to timezone-aware UTC datetimes and store
+        try:
+            deribit_dt = datetime.fromtimestamp(trade["timestamp"]/1000, tz=timezone.utc)
+            exp_dt = datetime.fromtimestamp(expiration_ts/1000, tz=timezone.utc) if expiration_ts else None
+            deribit_str = fields.Datetime.to_string(deribit_dt)
+            exp_str = fields.Datetime.to_string(exp_dt) if exp_dt else False
+        except Exception:
+            # fallback to raw string format if conversion fails
+            deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
+            exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S') if expiration_ts else False
+
+        vals = {
+            "name": trade.get("instrument_name"),
+            "iv": trade.get("iv"),
+            "index_price": trade.get("index_price"),
+            "price": trade.get("price"),
+            "mark_price": trade.get("mark_price"),
+            "direction": trade.get("direction"),
+            "trade_seq": trade.get("trade_seq"),
+            "deribit_trade_identifier": trade.get("trade_id"),
+            "amount": trade.get("amount"),
+            "contracts": trade.get("contracts", trade.get("amount")),  # fallback to amount
+            "deribit_ts": deribit_str,
+            "expiration": exp_str,
+        }
+        self.env["dankbit.trade"].create(vals)
+        _logger.info('*** Trade Created: %s (trade_id=%s) ***',
+                    trade.get("instrument_name"), trade.get("trade_id"))
 
     @staticmethod
     def _get_midnight_dt(days_offset=0):
         """
-        Return a timezone-aware datetime (UTC) for midnight with optional day offset.
-        Compatible with PostgreSQL and Odoo domains.
-        
+        Return midnight UTC minus 'days_offset' days, in milliseconds since epoch.
         Example:
-            _get_midnight_dt()    → today's midnight UTC
-            _get_midnight_dt(-1)  → yesterday's midnight UTC
+            _get_midnight_dt(0)  → today's midnight UTC (ms)
+            _get_midnight_dt(1)  → yesterday's midnight UTC (ms)
         """
         now = datetime.now(timezone.utc)
         midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
-        return int((midnight + timedelta(days=-days_offset)).timestamp()) * 1000
+        return int((midnight - timedelta(days=days_offset)).timestamp() * 1000)
 
     # run by scheduled action
     def _delete_expired_trades(self):
@@ -300,7 +328,7 @@ class Trade(models.Model):
         tomorrow = datetime.now() + timedelta(days=1)
         instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
-    
+
     # run by scheduled action
     def _take_screenshot(self):
         btc_today = self.get_btc_option_name_for_today()
@@ -363,7 +391,7 @@ class Trade(models.Model):
                 "dankbit_view_type": "be_taker",
             }
         }
-    
+
     def open_plot_wizard_mm(self):
         return {
             "type": "ir.actions.act_window",
