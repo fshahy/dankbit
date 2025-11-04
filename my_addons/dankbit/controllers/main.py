@@ -71,11 +71,14 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("option_type", "=", "call"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -121,11 +124,14 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
-                ("option_type", "=", "put")
+                ("option_type", "=", "put"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -171,11 +177,14 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
-                ("direction", "=", "buy")
+                ("direction", "=", "buy"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -222,11 +231,14 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
-                ("direction", "=", "sell")
+                ("direction", "=", "sell"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -273,11 +285,14 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("strike", "=", int(strike)),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -324,7 +339,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
-            ("Refresh", refresh_interval*10),
+            ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
 
@@ -340,10 +355,13 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -403,11 +421,14 @@ class ChartController(http.Controller):
         zone_to_price = float(icp.get_param("dankbit.zone_to_price", default=150000))
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         long_trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("direction", "=", "buy"),
                 ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -415,6 +436,7 @@ class ChartController(http.Controller):
             domain=[
                 ("direction", "=", "sell"),
                 ("name", "ilike", f"{instrument}"),
+                ("deribit_ts", ">=", start_ts),
             ]
         )
 
@@ -464,6 +486,8 @@ class ChartController(http.Controller):
         day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), 1000):
@@ -471,6 +495,7 @@ class ChartController(http.Controller):
                 domain=[
                     ("name", "ilike", f"{instrument}"),
                     ("strike", "=", strike),
+                    ("deribit_ts", ">=", start_ts),
                 ]
             )
             oi_call, oi_put = oi.calculate_oi(strike, trades)
@@ -507,9 +532,16 @@ class ChartController(http.Controller):
         - Touch swipe (left/right or up/down)
         """
         env = request.env
+        icp = env['ir.config_parameter'].sudo()
         Trade = env["dankbit.trade"].sudo()
+        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
-        strikes = sorted(set(Trade.search([("name", "ilike", instrument)]).mapped("strike")))
+        strikes = sorted(set(Trade.search([
+            ("name", "ilike", instrument),
+            ("deribit_ts", ">=", start_ts),
+        ]).mapped("strike")))
+
         if not strikes:
             return f"<h3>No strikes found for {instrument}</h3>"
 
