@@ -41,9 +41,9 @@
                 <field name="contracts" />
                 <field name="direction" />
                 <field name="option_type" />
-                <field name="index_price" />
+                <field name="days_to_expiry" />
                 <field name="iv" />
-                <field name="trade_seq" />
+                <field name="index_price" />
             </list>
         </field>
     </record>
