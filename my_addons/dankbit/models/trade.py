@@ -53,8 +53,7 @@ class Trade(models.Model):
     trade_seq = fields.Float(digits=(15, 0), required=True)
     days_to_expiry = fields.Integer(
         string="Days to Expiry",
-        compute="_compute_days_to_expiry",
-        store=True
+        compute="_compute_days_to_expiry"
     )
 
     @api.depends('expiration')
