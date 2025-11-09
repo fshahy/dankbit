@@ -88,8 +88,8 @@ class OptionStrat:
         plt.yticks(list(range(-4000, 4001, 100))) 
         ax.grid(True)
 
-    # NOTE: signature is added after legend creation to allow placing it
-    # next to the legend (see add_dankbit_signature implementation).
+        # NOTE: signature is added after legend creation to allow placing it
+        # next to the legend (see add_dankbit_signature implementation).
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -164,12 +164,12 @@ class OptionStrat:
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
         if strike is not None and isinstance(strike, str):
-            veiw_type = f"{veiw_type} {strike}"
+            veiw_type = strike
         if strike is not None and isinstance(strike, (int, float)):
             ax.axvline(x=strike, color="orange")
             veiw_type = f"MM Strike {strike}"
 
-        ax.set_title(f"{self.name} | {now} | {veiw_type.upper()}")
+        ax.set_title(f"{self.name} | {now} | {veiw_type}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
@@ -213,13 +213,13 @@ class OptionStrat:
 
         return fig
     
-    def plot_oi(self, index_price, oi_data):
+    def plot_oi(self, index_price, oi_data, plot_title):
         fig, ax = plt.subplots(figsize=(18, 8))
         ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-    # place signature after plotting bars so it can choose a clean area
+        # place signature after plotting bars so it can choose a clean area
         
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
@@ -229,7 +229,7 @@ class OptionStrat:
             plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
 
 
-        ax.set_title(f"{self.name} | {now} | Open Interest")
+        ax.set_title(f"{self.name} | {now} | {plot_title}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")

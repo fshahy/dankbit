@@ -57,13 +57,24 @@ class ChartController(http.Controller):
         target_day = now + timedelta(days=-days_offset)
         midnight = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
         return midnight
+    
+    @staticmethod
+    def get_ts_from_hour(from_hour):
+        tz = ZoneInfo("UTC")
+        now = datetime.now(tz)
+        from_hour_ts = now.replace(hour=from_hour, minute=0, second=0, microsecond=0)
+        return from_hour_ts
 
     @http.route('/help', auth='public', type='http', website=True)
     def help_page(self):
         return request.render('dankbit.dankbit_help')
 
-    @http.route("/<string:instrument>/calls", type="http", auth="public", website=True)
-    def chart_png_calls(self, instrument):
+    @http.route([
+        "/<string:instrument>/c",
+        "/<string:instrument>/c/<int:from_hour>",
+        ], type="http", auth="public", website=True)
+    def chart_png_calls(self, instrument, from_hour=0):
+        plot_title = "calls"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -71,8 +82,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -97,7 +116,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Calls")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -115,8 +134,12 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
 
-    @http.route("/<string:instrument>/puts", type="http", auth="public", website=True)
-    def chart_png_puts(self, instrument):
+    @http.route([
+        "/<string:instrument>/p",
+        "/<string:instrument>/p/<int:from_hour>",
+        ], type="http", auth="public", website=True)
+    def chart_png_puts(self, instrument, from_hour=0):
+        plot_title = "puts"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -124,8 +147,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -150,7 +181,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Puts")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -168,8 +199,12 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
     
-    @http.route("/<string:instrument>/buys", type="http", auth="public", website=True)
-    def chart_png_buys(self, instrument):
+    @http.route([
+        "/<string:instrument>/b",
+        "/<string:instrument>/b/<int:from_hour>",
+        ], type="http", auth="public", website=True)
+    def chart_png_buys(self, instrument, from_hour=0):
+        plot_title = "buys"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -177,8 +212,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -204,7 +247,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Buys")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -222,8 +265,12 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
     
-    @http.route("/<string:instrument>/sells", type="http", auth="public", website=True)
-    def chart_png_sells(self, instrument):
+    @http.route([
+        "/<string:instrument>/s",
+        "/<string:instrument>/s/<int:from_hour>",
+        ], type="http", auth="public", website=True)
+    def chart_png_sells(self, instrument, from_hour=0):
+        plot_title = "sells"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -231,8 +278,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -258,7 +313,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike="Sells")
+        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -285,8 +340,12 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -344,10 +403,12 @@ class ChartController(http.Controller):
         return request.make_response(compressed_data, headers=headers)
 
     @http.route([
-        "/<string:instrument>/<string:veiw_type>", 
-        "/<string:instrument>/<string:veiw_type>/<string:take_screenshot>"
+        "/<string:instrument>/<string:view_type>", 
+        "/<string:instrument>/<string:view_type>/<int:from_hour>", 
+        "/<string:instrument>/<string:view_type>/<string:take_screenshot>"
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, veiw_type, take_screenshot=None):
+    def chart_png_day(self, instrument, view_type, from_hour=0, take_screenshot=None):
+        plot_title = "mm"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -355,8 +416,16 @@ class ChartController(http.Controller):
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -364,6 +433,9 @@ class ChartController(http.Controller):
                 ("deribit_ts", ">=", start_ts),
             ]
         )
+
+        _logger.info("++++++++++++++++++++++++++")
+        _logger.info(len(trades))
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -387,7 +459,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, veiw_type, show_red_line, strike=None)
+        fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -421,8 +493,12 @@ class ChartController(http.Controller):
         zone_to_price = float(icp.get_param("dankbit.zone_to_price", default=150000))
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
 
         long_trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -478,16 +554,28 @@ class ChartController(http.Controller):
         ]
         return request.make_response(compressed_data, headers=headers)
 
-    @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
-    def chart_png_oi(self, instrument):
+    @http.route([
+        "/<string:instrument>/oi",
+        "/<string:instrument>/oi/<int:from_hour>",
+        ], type="http", auth="public", website=True)
+    def chart_png_oi(self, instrument, from_hour=0):
+        plot_title = "OI"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) + 10000.0 # +1000 to have more space in oi view
         day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
+
+        if last_hedging_time:
+            start_ts = last_hedging_time
+
+        if from_hour:
+            start_ts = self.get_ts_from_hour(from_hour)
+            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), 1000):
@@ -505,7 +593,7 @@ class ChartController(http.Controller):
         index_price = request.env['dankbit.trade'].sudo().get_index_price()
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
 
-        fig = obj.plot_oi(index_price, oi_data)
+        fig = obj.plot_oi(index_price, oi_data, plot_title)
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
