@@ -83,9 +83,9 @@ class OptionStrat:
 
     def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
-        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+        ax.xaxis.set_major_locator(MultipleLocator(2000))  # Tick every 2000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-4000, 4001, 100))) 
+        plt.yticks(list(range(-4000, 4001, 200))) 
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it
@@ -174,8 +174,8 @@ class OptionStrat:
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
 
-        # --- Highlight weak-delta band between -70 and +70 ---
-        ax.axhspan(-70, 70, color="yellow", alpha=0.15)
+        # --- Highlight weak-delta band between -100 and +100 ---
+        ax.axhspan(-100, 100, color="yellow", alpha=0.20)
             
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
