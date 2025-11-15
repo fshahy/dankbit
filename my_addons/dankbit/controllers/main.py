@@ -131,6 +131,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_calls.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -197,6 +198,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_puts.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -264,6 +266,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_buys.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -331,6 +334,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_sells.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -402,6 +406,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_{strike}.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -483,6 +488,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_{from_hour}H_day.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -542,6 +548,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_all.png"'),
             ("Refresh", refresh_interval*5),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -611,6 +618,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_zones.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)
@@ -668,6 +676,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Encoding", "gzip"),
+            ("Content-Disposition", f'inline; filename="{instrument}_oi.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(compressed_data, headers=headers)

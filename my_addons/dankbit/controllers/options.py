@@ -195,8 +195,6 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-    # signature will be placed after legend so that it can sit next to it
-        
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
