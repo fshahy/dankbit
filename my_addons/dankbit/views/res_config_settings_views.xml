@@ -44,6 +44,9 @@
                         <setting>
                             <field name="deribit_cache_ttl" placeholder="Deribit cache TTL (s)"/>
                         </setting>
+                        <setting>
+                            <field name="mock_0dte" placeholder="Mock 0DTE"/>
+                        </setting>
                     </block>
 
                  </app>

@@ -36,10 +36,12 @@ def _infer_sign(trd):
     return 1.0 if amt >= 0 else -1.0
 
 # --- Portfolio Gamma ---
-def portfolio_gamma(S, trades, r=0.0):
+def portfolio_gamma(S, trades, r=0.0, mock_0dte=False):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
     for trd in trades:
         T      = trd.days_to_expiry/365
+        if mock_0dte == "True":
+            T = 0
         sigma  = trd.iv/100
         sign   = _infer_sign(trd)
         qty    = trd.amount

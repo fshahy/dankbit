@@ -83,6 +83,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
@@ -113,8 +114,8 @@ class ChartController(http.Controller):
                 obj.short_call(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
@@ -148,6 +149,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
@@ -178,8 +180,8 @@ class ChartController(http.Controller):
                 obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
@@ -213,6 +215,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
@@ -244,8 +247,8 @@ class ChartController(http.Controller):
                 obj.long_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
@@ -279,6 +282,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
@@ -310,8 +314,8 @@ class ChartController(http.Controller):
                 obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
@@ -417,6 +421,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
@@ -453,8 +458,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
@@ -491,6 +496,7 @@ class ChartController(http.Controller):
         day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        mock_0dte = icp.get_param('dankbit.mock_0dte')
         show_red_line = icp.get_param("dankbit.show_red_line")
 
         trades = request.env['dankbit.trade'].sudo().search(
@@ -518,8 +524,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
         fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         

@@ -65,3 +65,9 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.deribit_cache_ttl",
         help="Time-to-live in seconds for cached Deribit responses (index/instruments)."
     )
+
+    mock_0dte = fields.Boolean(
+        string="Mock 0DTE",
+        config_parameter="dankbit.mock_0dte"
+    )
+    
