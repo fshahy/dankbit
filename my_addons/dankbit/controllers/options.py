@@ -81,11 +81,11 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, veiw_type, show_red_line, strike=None, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
         ax.xaxis.set_major_locator(MultipleLocator(2000))  # Tick every 2000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-4000, 4001, 200))) 
+        plt.yticks(list(range(-6000, 6001, 200))) 
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it
@@ -142,40 +142,43 @@ class OptionStrat:
         else:
             payoff_scaled = self.payoffs
 
-        if veiw_type == "mm": # for market maker
+        if view_type == "mm": # for market maker
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
-        elif veiw_type == "taker":
+        elif view_type == "taker":
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
-        elif veiw_type == "be_taker":
+        elif view_type == "be_taker":
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
-        elif veiw_type == "be_mm":
+        elif view_type == "be_mm":
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
         if strike is not None and isinstance(strike, str):
-            veiw_type = strike
+            view_type = strike
         if strike is not None and isinstance(strike, (int, float)):
             ax.axvline(x=strike, color="orange")
-            veiw_type = f"MM Strike {strike}"
+            view_type = f"MM Strike {strike}"
 
-        ax.set_title(f"{self.name} | {now} | {veiw_type}")
+        ax.set_title(f"{self.name} | {now} | {view_type}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
 
-        # --- Highlight weak-delta band between -100 and +100 ---
-        ax.axhspan(-100, 100, color="yellow", alpha=0.20)
+        # --- Highlight market maker zone where gamma is negative
+        if view_type in ["mm", "be_mm"] or (isinstance(strike, str) and "mm" in strike):
+            ax.axhspan(-6000, 0, color="red", alpha=0.20)
+            # --- Highlight weak-delta band between 0 and +50 ---
+            ax.axhspan(0, 50, color="yellow", alpha=0.20)
             
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
