@@ -117,8 +117,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -184,8 +191,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -252,8 +266,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -320,8 +341,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -392,7 +420,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, strike=int(strike))
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, strike=int(strike))
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -466,8 +494,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -533,8 +568,15 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -604,7 +646,14 @@ class ChartController(http.Controller):
                 is_call.append(False)
                 obj.add_put_to_shorts(trade.strike, trade.price * trade.index_price)
 
-        fig = obj.plot_zones(index_price)
+        fig, ax = obj.plot_zones(index_price)
+
+        ax.text(
+            0.01, 0.02,
+            f"{len(long_trades)} longs - {len(short_trades)} shorts",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
 
         buf = BytesIO()
         fig.savefig(buf, format="png")

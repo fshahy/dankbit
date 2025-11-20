@@ -83,9 +83,9 @@ class OptionStrat:
 
     def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
-        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+        ax.xaxis.set_major_locator(MultipleLocator(2000))  # Tick every 2000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-6000, 6001, 200))) 
+        plt.yticks(list(range(-10000, 10001, 500))) 
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it
@@ -174,11 +174,8 @@ class OptionStrat:
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
 
-        # --- Highlight market maker zone where gamma is negative
-        if view_type in ["mm", "be_mm"] or (isinstance(strike, str) and "mm" in strike):
-            ax.axhspan(-6000, 0, color="red", alpha=0.20)
-            # --- Highlight weak-delta band between 0 and +50 ---
-            ax.axhspan(0, 50, color="yellow", alpha=0.20)
+        # --- Highlight weak-delta band between -50 and +50 ---
+        ax.axhspan(-50, 50, color="yellow", alpha=0.20)
             
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
@@ -190,7 +187,7 @@ class OptionStrat:
         self.add_dankbit_signature(ax)
         plt.show()
 
-        return fig
+        return fig,ax
 
     def plot_zones(self, index_price):
         fig, ax = plt.subplots(figsize=(18, 8))
@@ -212,7 +209,7 @@ class OptionStrat:
         self.add_dankbit_signature(ax)
         plt.show()
 
-        return fig
+        return fig, ax
     
     def plot_oi(self, index_price, oi_data, plot_title):
         fig, ax = plt.subplots(figsize=(18, 8))
@@ -239,137 +236,98 @@ class OptionStrat:
         plt.show()
 
         return fig
-                
-    def add_dankbit_signature(sellf, ax, logo_path=None, alpha=0.5, fontsize=18):
+            
+    def add_dankbit_signature(self, ax, logo_path=None, alpha=0.5, fontsize=16, trade_count=None):
         """
-        Adds a Dankbit™ watermark or logo in a clean corner (axes-relative, never outside frame).
-        Chooses the quietest corner by measuring data density.
+        Legend stays top-right.
+        Dankbit™ signature sits immediately to the LEFT of the legend, with minimal spacing.
+        Zero overlap, minimal distance.
         """
-        # If a legend exists, place the signature beside it so they stay together
-        try:
-            fig = ax.figure
-            # force a draw to compute legend bbox correctly
-            fig.canvas.draw()
-            legend = ax.get_legend()
-        except Exception:
-            legend = None
+        import matplotlib.image as mpimg
+        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-        if legend is not None:
-            try:
-                renderer = fig.canvas.get_renderer()
-                lbbox = legend.get_window_extent(renderer)
-                # convert to axes fraction coords
-                lbbox_axes = ax.transAxes.inverted().transform_bbox(lbbox)
-                # approximate signature size in axes fraction
-                sig_w = 0.14
-                sig_h = 0.06
-                # prefer to place signature to the right of legend if it fits
-                if lbbox_axes.x1 + sig_w + 0.01 < 1.0:
-                    x = lbbox_axes.x1 + 0.01
-                    ha = 'left'
-                else:
-                    x = lbbox_axes.x0 - 0.01
-                    ha = 'right'
-                # align vertically with top of legend
-                y = min(max(lbbox_axes.y1 - 0.01, 0.05), 0.95)
-                va = 'top'
+        fig = ax.figure
 
-                if logo_path:
-                    try:
-                        img = mpimg.imread(logo_path)
-                        imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
-                        ab = AnnotationBbox(
-                            imagebox, (x, y),
-                            xycoords="axes fraction",
-                            frameon=False,
-                            box_alignment=(1 if ha == "right" else 0, 1 if va == "top" else 0),
-                        )
-                        ax.add_artist(ab)
-                        return
-                    except Exception:
-                        # fallback to text if logo fails
-                        pass
-
-                color = "#6c2bd9"
-                t = ax.text(x, y, "Dankbit™",
-                            transform=ax.transAxes,
-                            fontsize=fontsize,
-                            color=color,
-                            alpha=alpha,
-                            ha=ha,
-                            va=va,
-                            fontweight="bold",
-                            family="monospace")
-                t.set_path_effects([
-                    path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
-                ])
-                return
-            except Exception:
-                # fall through to density-based corner placement on any error
-                pass
-
-        # --- get plotted data ---
-        lines = [l for l in ax.lines if l.get_visible()]
-        if not lines:
-            all_x = np.array([0, 1])
-            all_y = np.array([0, 1])
+        # --- Force legend into top-right ---
+        old_legend = ax.get_legend()
+        if old_legend:
+            handles, labels = old_legend.legendHandles, [t.get_text() for t in old_legend.texts]
+            legend = ax.legend(handles, labels,
+                            loc="upper right",
+                            framealpha=0.85)
         else:
-            all_x = np.concatenate([l.get_xdata() for l in lines if len(l.get_xdata())])
-            all_y = np.concatenate([l.get_ydata() for l in lines if len(l.get_ydata())])
+            legend = ax.legend(loc="upper right", framealpha=0.85)
 
-        # normalize to [0,1] (axes coords) to compare regions
-        x_norm = (all_x - np.min(all_x)) / (np.ptp(all_x) + 1e-9)
-        y_norm = (all_y - np.min(all_y)) / (np.ptp(all_y) + 1e-9)
+        legend.get_frame().set_alpha(0.85)
 
-        # estimate density in each corner region
-        def corner_density(x0, x1, y0, y1):
-            mask = (x_norm >= x0) & (x_norm <= x1) & (y_norm >= y0) & (y_norm <= y1)
-            return np.count_nonzero(mask)
+        # draw now so we can measure bbox
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
 
-        corners = {
-            "bottom left":  (0.00, 0.25, 0.00, 0.25),
-            "bottom right": (0.75, 1.00, 0.00, 0.25),
-            "top left":     (0.00, 0.25, 0.75, 1.00),
-            "top right":    (0.75, 1.00, 0.75, 1.00),
-        }
-        densities = {k: corner_density(*v) for k, v in corners.items()}
-        corner = min(densities, key=densities.get)
+        # --- Legend bbox in axes coords ---
+        lbbox = legend.get_window_extent(renderer)
+        lbbox_axes = ax.transAxes.inverted().transform_bbox(lbbox)
 
-        # assign position in axes coordinates
-        x, y, ha, va = {
-            "bottom left":  (0.03, 0.03, "left", "bottom"),
-            "bottom right": (0.97, 0.03, "right", "bottom"),
-            "top left":     (0.03, 0.97, "left", "top"),
-            "top right":    (0.97, 0.97, "right", "top"),
-        }[corner]
+        # legend right edge (axes fraction)
+        legend_left_x  = lbbox_axes.x0
+        legend_top_y   = lbbox_axes.y1
 
-        # --- draw logo or text ---
+        # --- signature position: slightly left of legend ---
+        pad = 0.015    # small space between signature + legend
+        sig_x = legend_left_x - pad
+        sig_y = legend_top_y - 0.01
+
+        # clamp inside plot
+        if sig_x < 0.02:
+            sig_x = 0.02
+
+        # --- Draw logo ---
         if logo_path:
             try:
                 img = mpimg.imread(logo_path)
                 imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
                 ab = AnnotationBbox(
-                    imagebox, (x, y),
+                    imagebox,
+                    (sig_x, sig_y),
                     xycoords="axes fraction",
                     frameon=False,
-                    box_alignment=(1 if ha == "right" else 0, 1 if va == "top" else 0),
+                    box_alignment=(1, 1),
                 )
                 ax.add_artist(ab)
-            except Exception as e:
-                ax.text(0.5, 0.02, f"Dankbit™ (logo missing: {e})",
-                        transform=ax.transAxes, ha="center", va="bottom", fontsize=8, color="gray", alpha=0.5)
-        else:
-            color = "#6c2bd9"
-            t = ax.text(x, y, "Dankbit™",
-                        transform=ax.transAxes,
-                        fontsize=fontsize,
-                        color=color,
-                        alpha=alpha,
-                        ha=ha,
-                        va=va,
-                        fontweight="bold",
-                        family="monospace")
-            t.set_path_effects([
-                path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
-            ])
-            
+                return
+            except Exception:
+                pass
+
+        # --- Signature text ---
+        color = "#6c2bd9"
+
+        t = ax.text(
+            sig_x, sig_y,
+            "Dankbit™",
+            transform=ax.transAxes,
+            fontsize=fontsize,
+            color=color,
+            alpha=alpha,
+            ha="right",
+            va="top",
+            fontweight="bold",
+            family="monospace",
+        )
+        t.set_path_effects([
+            path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
+        ])
+
+        # --- Trade count under signature ---
+        if trade_count is not None:
+            ax.text(
+                sig_x,
+                sig_y - 0.045,
+                f"{trade_count} trades",
+                transform=ax.transAxes,
+                fontsize=fontsize * 0.55,
+                color=color,
+                alpha=alpha * 0.8,
+                ha="right",
+                va="top",
+                family="monospace",
+            )
