@@ -83,9 +83,9 @@ class OptionStrat:
 
     def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
-        ax.xaxis.set_major_locator(MultipleLocator(2000))  # Tick every 2000
+        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-10000, 10001, 500))) 
+        plt.yticks(list(range(-10000, 10001, 20))) 
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it
