@@ -23,6 +23,8 @@
                         <field name="mark_price" />
                         <field name="trade_seq" />
                         <field name="deribit_trade_identifier" />
+                        <field name="is_block_trade" />
+                        <field name="block_trade_id" />
                     </group>
                 </sheet>
             </form>
@@ -44,6 +46,8 @@
                 <field name="days_to_expiry" />
                 <field name="iv" />
                 <field name="index_price" />
+                <field name="is_block_trade" />
+                <field name="block_trade_id" />
             </list>
         </field>
     </record>
@@ -68,10 +72,13 @@
                 <separator/>
                 <filter name="only_longs" string="Buys" domain="[('direction', '=', 'buy')]"/>
                 <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
+                <separator/>
+                <filter name="only_block_trades" string="Only Block Trades" domain="[('is_block_trade', '=', True)]"/>
                 
                 <group expand="0" string="Group By">
                     <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
                     <filter string="Option Type" name="option_type" context="{'group_by':'option_type'}"/>
+                    <filter string="Block Trade" name="is_block_trade" context="{'group_by':'block_trade_id'}"/>
                 </group>
             </search>
         </field>

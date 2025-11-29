@@ -98,6 +98,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("option_type", "=", "call"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -167,6 +168,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("option_type", "=", "put"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -236,6 +238,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("direction", "=", "buy"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -306,6 +309,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("direction", "=", "sell"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -367,6 +371,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("strike", "=", int(strike)),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -443,6 +448,7 @@ class ChartController(http.Controller):
             domain=[
                 ("name", "ilike", f"{instrument}"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -512,6 +518,7 @@ class ChartController(http.Controller):
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
                 ("name", "ilike", f"{instrument}"),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -579,6 +586,7 @@ class ChartController(http.Controller):
                 ("direction", "=", "buy"),
                 ("name", "ilike", f"{instrument}"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -587,6 +595,7 @@ class ChartController(http.Controller):
                 ("direction", "=", "sell"),
                 ("name", "ilike", f"{instrument}"),
                 ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
             ]
         )
 
@@ -661,6 +670,7 @@ class ChartController(http.Controller):
                     ("name", "ilike", f"{instrument}"),
                     ("strike", "=", strike),
                     ("deribit_ts", ">=", start_ts),
+                    ("is_block_trade", "=", False),
                 ]
             )
             oi_call, oi_put = oi.calculate_oi(strike, trades)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import random
 import pytz
 from datetime import datetime, timezone, timedelta
 import logging
@@ -54,6 +55,16 @@ class Trade(models.Model):
     days_to_expiry = fields.Integer(
         string="Days to Expiry",
         compute="_compute_days_to_expiry"
+    )
+    block_trade_id = fields.Char(
+        string="Block Trade ID",
+        help="Deribit-assigned ID if this trade was executed as a block trade."
+    )
+
+    is_block_trade = fields.Boolean(
+        string="Is Block Trade",
+        default=False,
+        help="True if this trade came from a Deribit block trade event."
     )
 
     @api.depends('expiration')
@@ -141,27 +152,30 @@ class Trade(models.Model):
     # run by scheduled action
     def get_last_trades(self):
         """
-        Robust fetcher:
-        - Resumes per-instrument from its own latest deribit_ts (ms).
-        - Paginates with sorting=asc, advancing start_timestamp by last_ts+1.
+        Hardened REST-only trade importer.
+        - Full history already exists → incremental fetch per instrument.
+        - Uses timestamp-based pagination (Deribit REST's only supported method).
+        - Ensures no gaps, no flooding, no duplicate inserts.
+        - Gracefully handles Deribit rate-limit, empty responses, and pagination quirks.
         """
+
         option_instruments = [
-            inst for inst in self._get_instruments() if inst.get("kind") == "option"
+            inst for inst in self._get_instruments()
+            if inst.get("kind") == "option"
         ]
+
         icp = self.env['ir.config_parameter'].sudo()
         try:
-            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
+            timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
         except Exception:
             timeout = 5.0
-        try:
-            start_from_days = int(icp.get_param("dankbit.from_days_ago", default=1))
-        except Exception:
-            start_from_days = 1
-
-        now_ts = int(time.time() * 1000)
-        base_start = self._get_midnight_dt(start_from_days)  # ms
 
         URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
+        now_ts = int(time.time() * 1000)
+
+        # critical: if DB already contains full history → always start from last trade timestamp
+        # NEVER limit by "days ago" again
+        base_start = 0  # REST can only return what it still retains internally
 
         for inst in option_instruments:
             inst_name = inst.get("instrument_name")
@@ -170,7 +184,7 @@ class Trade(models.Model):
 
             latest_trade = self._get_latest_trade_ts_for_instrument(inst_name)
 
-            # Convert Odoo datetime to ms safely
+            # choose correct starting point
             if latest_trade and latest_trade.deribit_ts:
                 dt_val = latest_trade.deribit_ts
                 if isinstance(dt_val, str):
@@ -179,14 +193,33 @@ class Trade(models.Model):
                     dt_obj = dt_val
                 if dt_obj.tzinfo is None:
                     dt_obj = dt_obj.replace(tzinfo=timezone.utc)
-                start_ts = int(dt_obj.timestamp() * 1000)
+
+                # pick up exactly after the last known trade
+                start_ts = int(dt_obj.timestamp() * 1000) + 1
             else:
+                # fallback (fresh DB case, or an instrument with zero trades)
                 start_ts = base_start
 
-            _logger.info("Fetching trades for %s from %s → %s",
-                         inst_name, start_ts, now_ts)
+            _logger.info(
+                "Fetching trades for %s from %s → %s",
+                inst_name, start_ts, now_ts
+            )
 
-            while True:
+            #
+            # Pagination loop
+            #
+            # Deribit REST pagination works ONLY via timestamp windows.
+            # “has_more” sometimes appears even when “trades=[]”, so we need safety exits.
+            #
+            empty_pages = 0
+            max_empty_pages = 3       # prevent infinite loops
+            max_pages = 5000          # safety guard
+
+            pages = 0
+
+            while pages < max_pages:
+                pages += 1
+
                 params = {
                     "instrument_name": inst_name,
                     "count": 1000,
@@ -194,29 +227,77 @@ class Trade(models.Model):
                     "end_timestamp": now_ts,
                     "sorting": "asc",
                 }
-                data = _safe_deribit_request(URL, params=params, timeout=timeout)
+
+                #
+                # Robust request with backoff
+                #
+                backoff = 0.2
+                for attempt in range(5):
+                    try:
+                        data = _safe_deribit_request(URL, params=params, timeout=timeout)
+                        break
+                    except Exception as e:
+                        _logger.warning(
+                            "Deribit request failed (%s/%s) %s params=%s: %s",
+                            attempt+1, 5, URL, params, e
+                        )
+                        time.sleep(backoff)
+                        backoff *= 2
+                else:
+                    _logger.error("Giving up on %s after repeated errors.", inst_name)
+                    break
+
                 if not data or "result" not in data:
-                    _logger.warning("No result for %s (params=%s)", inst_name, params)
+                    _logger.warning("No valid result for %s", inst_name)
                     break
 
                 trades = data["result"].get("trades", [])
+
+                #
+                # Handle empty page
+                #
                 if not trades:
-                    break
+                    empty_pages += 1
 
+                    # if Deribit signals more but gives nothing — bail
+                    if empty_pages >= max_empty_pages:
+                        _logger.warning(
+                            "Stopping early for %s due to repeated empty pages.",
+                            inst_name
+                        )
+                        break
+
+                    # chill and try next cycle
+                    time.sleep(0.05)
+                    continue
+
+                #
+                # Insert all trades in chronological order
+                #
                 for trd in trades:
-                    self._create_new_trade(trd, inst.get("expiration_timestamp"))
+                    self._create_new_trade(
+                        trd,
+                        inst.get("expiration_timestamp")
+                    )
 
-                # advance start to just after last trade
+                # advance pagination timestamp
                 start_ts = trades[-1]["timestamp"] + 1
+                empty_pages = 0
 
+                #
+                # break if no more pages
+                #
                 if not data["result"].get("has_more"):
                     break
 
-                # gentle pacing
-                time.sleep(0.05)
+                # polite pacing
+                time.sleep(0.05 + random.random() * 0.02)
 
-            # commit per instrument to avoid partial loss
+            # per-instrument commit
             self.env.cr.commit()
+
+            _logger.info("Finished fetching trades for %s", inst_name)
+
 
     def _get_tomorrows_ts(self):
         # Current UTC time
@@ -287,6 +368,13 @@ class Trade(models.Model):
             deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
             exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S') if expiration_ts else False
 
+        block_trade_id = trade.get("block_trade_id")
+        is_block_trade = (
+            trade.get("is_block_trade")
+            or trade.get("block_trade")
+            or bool(block_trade_id)
+        )
+
         vals = {
             "name": trade.get("instrument_name"),
             "iv": trade.get("iv"),
@@ -300,6 +388,8 @@ class Trade(models.Model):
             "contracts": trade.get("contracts", trade.get("amount")),  # fallback to amount
             "deribit_ts": deribit_str,
             "expiration": exp_str,
+            "is_block_trade": is_block_trade,
+            "block_trade_id": block_trade_id if block_trade_id else None,
         }
         self.env["dankbit.trade"].create(vals)
         _logger.info('*** Trade Created: %s (trade_id=%s) ***',
