@@ -39,6 +39,7 @@ class Trade(models.Model):
     _order = "deribit_ts desc"
 
     name = fields.Char(required=True)
+    active = fields.Boolean(default=True)
     strike = fields.Integer(compute="_compute_strike", store=True)
     expiration = fields.Datetime()
     index_price = fields.Float(digits=(16, 4))
@@ -411,7 +412,7 @@ class Trade(models.Model):
     def _delete_expired_trades(self):
         self.env['dankbit.trade'].search(
             domain=[("expiration", "<", fields.Datetime.now())]
-        ).unlink()
+        ).write({"active": False})
 
     def get_btc_option_name_for_today(self):
         tomorrow = datetime.now() + timedelta(days=1)
