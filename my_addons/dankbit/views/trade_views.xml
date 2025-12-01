@@ -74,10 +74,14 @@
                 <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
                 <separator/>
                 <filter name="only_block_trades" string="Only Block Trades" domain="[('is_block_trade', '=', True)]"/>
+                <separator/>
+                <filter name="only_active_trades" string="Active" domain="[('active', '=', True)]"/>
+                <filter name="only_expired_trades" string="Expired" domain="[('active', '=', False)]"/>
                 
                 <group expand="0" string="Group By">
                     <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
                     <filter string="Option Type" name="option_type" context="{'group_by':'option_type'}"/>
+                    <separator/>
                     <filter string="Block Trade" name="is_block_trade" context="{'group_by':'block_trade_id'}"/>
                 </group>
             </search>
