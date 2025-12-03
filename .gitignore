@@ -52,3 +52,5 @@ package.json
 /src/
 enterprise/
 odoo_filestore/
+
+*.env
