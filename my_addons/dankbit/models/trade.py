@@ -44,15 +44,15 @@ class Trade(models.Model):
     expiration = fields.Datetime()
     index_price = fields.Float(digits=(16, 4))
     price = fields.Float(digits=(16, 4), required=True)
-    mark_price = fields.Float(digits=(16, 4), required=True)
+    mark_price = fields.Float(digits=(16, 4))
     option_type = fields.Text(compute="_compute_type", store=True)
     direction = fields.Selection([("buy", "Buy"), ("sell", "Sell")], required=True)
     iv = fields.Float(string="IV %", digits=(2, 2), required=True)
     amount = fields.Float(digits=(6, 2), required=True)
-    contracts = fields.Float(digits=(6, 2), required=True)
+    contracts = fields.Float(digits=(6, 2))
     deribit_ts = fields.Datetime()
     deribit_trade_identifier = fields.Float(digits=(15, 0), string="Deribit Trade ID", required=True)
-    trade_seq = fields.Float(digits=(15, 0), required=True)
+    trade_seq = fields.Float(digits=(15, 0))
     days_to_expiry = fields.Integer(
         string="Days to Expiry",
         compute="_compute_days_to_expiry"
