@@ -122,7 +122,7 @@ class Trade(models.Model):
             cache_ttl = 30.0
 
         # consult cache first
-        now_ts = time.time()
+        now_ts = time_module.time()
         cached = _DERIBIT_CACHE.get('index_price', {})
         if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
             return cached.get('value')
@@ -172,7 +172,7 @@ class Trade(models.Model):
             timeout = 5.0
 
         URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
-        now_ts = int(time.time() * 1000)
+        now_ts = int(time_module.time() * 1000)
 
         # critical: if DB already contains full history → always start from last trade timestamp
         # NEVER limit by "days ago" again
@@ -326,7 +326,7 @@ class Trade(models.Model):
         except Exception:
             cache_ttl = 300.0
 
-        now_ts = time.time()
+        now_ts = time_module.time()
         cached = _DERIBIT_CACHE.get('instruments', {})
         if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
             return cached.get('value')
