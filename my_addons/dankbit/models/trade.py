@@ -2,9 +2,9 @@
 
 import random
 import pytz
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 import logging
-import requests, time
+import requests, time as time_module
 
 from odoo import api, fields, models
 
@@ -414,14 +414,22 @@ class Trade(models.Model):
             domain=[("expiration", "<", fields.Datetime.now())]
         ).write({"active": False})
 
-    def get_btc_option_name_for_today(self):
-        tomorrow = datetime.now() + timedelta(days=1)
-        instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
+    def get_btc_option_name_for_yesterday(self):
+        yesterday = datetime.now() - timedelta(days=1)
+        instrument = f"BTC-{yesterday.day}{yesterday.strftime('%b').upper()}{yesterday.strftime('%y')}"
         return instrument
 
     # run by scheduled action
     def _take_screenshot(self):
-        btc_today = self.get_btc_option_name_for_today()
+        now = datetime.now().time()
+        start = time(5, 0)   # 05:00
+        end   = time(9, 0)   # 09:00
+
+        if not (start <= now <= end):
+            _logger.info("Skipping screenshot: outside time window.")
+            return  # skip outside window
+        
+        btc_today = self.get_btc_option_name_for_yesterday()
         # Use configured base URL so this works both on dankbit.com and locally.
         icp = self.env['ir.config_parameter'].sudo()
         try:
