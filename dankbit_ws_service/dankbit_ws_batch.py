@@ -236,13 +236,13 @@ async def run():
                 # -------------------------------
                 # BACKFILL ALL NON-EXPIRED INSTRUMENTS
                 # -------------------------------
-                log.info("Starting full backfill…")
-                instruments = [c.split(".")[1] for c in channels]  # extract instrument names
-                for inst in instruments:
-                    await backfill_instrument(ws, inst)
-                    await asyncio.sleep(1)  # pacing between instruments
+                # log.info("Starting full backfill…")
+                # instruments = [c.split(".")[1] for c in channels]  # extract instrument names
+                # for inst in instruments:
+                #     await backfill_instrument(ws, inst)
+                #     await asyncio.sleep(1)  # pacing between instruments
 
-                log.info("Backfill completed. Now subscribing for live trades…")
+                # log.info("Backfill completed. Now subscribing for live trades…")
 
                 # -------------------------------
                 # LIVE STREAM
