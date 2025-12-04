@@ -30,7 +30,7 @@ def _safe_deribit_request(url, params, timeout=5.0, retries=2, backoff=0.5):
             _logger.warning("Deribit request failed (attempt %d/%d) %s %s: %s",
                             attempt + 1, retries + 1, url, params, e)
             if attempt < retries:
-                time.sleep(backoff * (2 ** attempt))
+                time_module.sleep(backoff * (2 ** attempt))
             else:
                 return None
 
@@ -242,7 +242,7 @@ class Trade(models.Model):
                             "Deribit request failed (%s/%s) %s params=%s: %s",
                             attempt+1, 5, URL, params, e
                         )
-                        time.sleep(backoff)
+                        time_module.sleep(backoff)
                         backoff *= 2
                 else:
                     _logger.error("Giving up on %s after repeated errors.", inst_name)
@@ -269,7 +269,7 @@ class Trade(models.Model):
                         break
 
                     # chill and try next cycle
-                    time.sleep(0.05)
+                    time_module.sleep(0.05)
                     continue
 
                 #
@@ -292,7 +292,7 @@ class Trade(models.Model):
                     break
 
                 # polite pacing
-                time.sleep(0.05 + random.random() * 0.02)
+                time_module.sleep(0.05 + random.random() * 0.02)
 
             # per-instrument commit
             self.env.cr.commit()
@@ -414,9 +414,9 @@ class Trade(models.Model):
             domain=[("expiration", "<", fields.Datetime.now())]
         ).write({"active": False})
 
-    def get_btc_option_name_for_yesterday(self):
-        yesterday = datetime.now() - timedelta(days=1)
-        instrument = f"BTC-{yesterday.day}{yesterday.strftime('%b').upper()}{yesterday.strftime('%y')}"
+    def get_btc_option_name_for_today(self):
+        tomorrow = datetime.now() + timedelta(days=1)
+        instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
 
     # run by scheduled action
@@ -429,7 +429,7 @@ class Trade(models.Model):
             _logger.info("Skipping screenshot: outside time window.")
             return  # skip outside window
         
-        btc_today = self.get_btc_option_name_for_yesterday()
+        btc_today = self.get_btc_option_name_for_today()
         # Use configured base URL so this works both on dankbit.com and locally.
         icp = self.env['ir.config_parameter'].sudo()
         try:
@@ -439,7 +439,7 @@ class Trade(models.Model):
             base_url = icp.get_param('web.base.url', default='http://localhost:8069')
 
         # Build the URL robustly and allow local hosts.
-        full_url = f"{base_url.rstrip('/')}/{btc_today}/mm/y"
+        full_url = f"{base_url.rstrip('/')}/{btc_today}/mm/"
         _logger.info("Taking screenshot using URL: %s", full_url)
 
         # timeout configurable (seconds)

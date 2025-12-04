@@ -64,28 +64,6 @@ class ChartController(http.Controller):
         from_hour_ts = now.replace(hour=from_hour, minute=0, second=0, microsecond=0)
         return from_hour_ts
     
-    @staticmethod
-    def get_previous_4h_start():
-        """
-        Return the UTC datetime for the start of the *previous* 4h candle.
-
-        Examples:
-            15:22 → 08:00
-            10:05 → 04:00
-            04:00 → 00:00
-            01:10 → 20:00 (previous day)
-        """
-        now = datetime.now(timezone.utc)
-
-        # Current candle open for the bucket (0,4,8,12,16,20)
-        current_bucket = (now.hour // 4) * 4
-        current_open = now.replace(hour=current_bucket, minute=0, second=0, microsecond=0)
-
-        # Previous candle is always 4 hours earlier
-        prev_open = current_open - timedelta(hours=4)
-
-        return prev_open
-
     @http.route('/help', auth='public', type='http', website=True)
     def help_page(self):
         return request.render('dankbit.dankbit_help')
@@ -106,8 +84,7 @@ class ChartController(http.Controller):
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -152,6 +129,13 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - calls",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -177,8 +161,7 @@ class ChartController(http.Controller):
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -223,6 +206,13 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - puts",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -248,8 +238,7 @@ class ChartController(http.Controller):
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -295,7 +284,14 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - buys",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
+
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
@@ -320,8 +316,7 @@ class ChartController(http.Controller):
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -367,6 +362,13 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - sells",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -387,8 +389,7 @@ class ChartController(http.Controller):
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -448,9 +449,8 @@ class ChartController(http.Controller):
     @http.route([
         "/<string:instrument>/<string:view_type>", 
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
-        "/<string:instrument>/<string:view_type>/<string:take_screenshot>"
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, view_type, from_hour=0, take_screenshot=None):
+    def chart_png_day(self, instrument, view_type, from_hour=0):
         plot_title = view_type
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -462,8 +462,7 @@ class ChartController(http.Controller):
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -516,12 +515,11 @@ class ChartController(http.Controller):
         plt.close(fig)
         buf.seek(0) 
 
-        if take_screenshot and take_screenshot in ["y", "Y"]:
-            request.env["dankbit.screenshot"].sudo().create({
-                "name": instrument,
-                "timestamp": fields.Datetime.now(),
-                "image_png": base64.b64encode(buf.read()),
-            })
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - {plot_title}",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -586,6 +584,12 @@ class ChartController(http.Controller):
         plt.close(fig)
         buf.seek(0) 
 
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - all",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
+
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
@@ -604,8 +608,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -660,6 +663,13 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - zones",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -683,8 +693,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         if last_hedging_time:
             start_ts = last_hedging_time
@@ -715,6 +724,13 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+        buf.seek(0) 
+
+        request.env["dankbit.screenshot"].sudo().create({
+            "name": f"{instrument} - oi",
+            "timestamp": fields.Datetime.now(),
+            "image_png": base64.b64encode(buf.read()),
+        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -736,8 +752,7 @@ class ChartController(http.Controller):
         icp = env['ir.config_parameter'].sudo()
         Trade = env["dankbit.trade"].sudo()
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        # start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        start_ts = self.get_previous_4h_start()
+        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
 
         strikes = sorted(set(Trade.search([
             ("name", "ilike", instrument),
