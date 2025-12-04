@@ -448,9 +448,10 @@ class ChartController(http.Controller):
 
     @http.route([
         "/<string:instrument>/<string:view_type>", 
+        "/<string:instrument>/<string:view_type>/l/<int:hours_ago>", 
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, view_type, from_hour=0):
+    def chart_png_day(self, instrument, view_type, from_hour=0, hours_ago=0):
         plot_title = view_type
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -470,6 +471,10 @@ class ChartController(http.Controller):
         if from_hour:
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
+
+        if hours_ago:
+            start_ts = datetime.now() - timedelta(hours=hours_ago)
+            plot_title = f"{plot_title} last {str(hours_ago)} hours"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
@@ -528,6 +533,7 @@ class ChartController(http.Controller):
             ("Refresh", refresh_interval),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
+
 
     @http.route("/<string:instrument>/<string:view_type>/a", type="http", auth="public", website=True)
     def chart_png_all(self, instrument, view_type):
