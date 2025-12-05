@@ -452,6 +452,9 @@ class ChartController(http.Controller):
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
     ], type="http", auth="public", website=True)
     def chart_png_day(self, instrument, view_type, from_hour=0, hours_ago=0):
+        if view_type not in ["taker", "mm", "be_taker", "be_mm"]:
+            return f"<h3>Nothing here.</h3>"
+        
         plot_title = view_type
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -533,7 +536,6 @@ class ChartController(http.Controller):
             ("Refresh", refresh_interval),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
-
 
     @http.route("/<string:instrument>/<string:view_type>/a", type="http", auth="public", website=True)
     def chart_png_all(self, instrument, view_type):
