@@ -191,7 +191,7 @@ async def authenticate(ws):
 # -----------------------------------------------------
 async def fetch_instruments(ws):
     channels = []
-    for currency in ["BTC"]:
+    for currency in ["BTC", "ETH"]:
         resp = await ws_call(ws, "public/get_instruments", {
             "currency": currency,
             "kind": "option",

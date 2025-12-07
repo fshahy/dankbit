@@ -83,9 +83,13 @@ class OptionStrat:
 
     def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
-        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
         plt.xticks(rotation=90) 
-        plt.yticks(list(range(-10000, 10001, 20))) 
+        if self.name.startswith("BTC"):
+            ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+            plt.yticks(list(range(-10000, 10001, 20))) 
+        elif self.name.startswith("ETH"):
+            ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
+            plt.yticks(list(range(-2000, 2001, 100)))
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it

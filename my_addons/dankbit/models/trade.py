@@ -51,7 +51,7 @@ class Trade(models.Model):
     amount = fields.Float(digits=(6, 2), required=True)
     contracts = fields.Float(digits=(6, 2))
     deribit_ts = fields.Datetime()
-    deribit_trade_identifier = fields.Float(digits=(15, 0), string="Deribit Trade ID", required=True)
+    deribit_trade_identifier = fields.Char(string="Deribit Trade ID", required=True)
     trade_seq = fields.Float(digits=(15, 0))
     days_to_expiry = fields.Integer(
         string="Days to Expiry",
@@ -107,10 +107,16 @@ class Trade(models.Model):
             except Exception:
                 rec.strike = 0
 
-    def get_index_price(self):
+    def get_index_price(self, instrument):
         _logger.info("------------------- get_index_price -------------------")
+        params = {}
         URL = "https://www.deribit.com/api/v2/public/get_index_price"
-        params = {"index_name": "btc_usdt"}
+
+        if instrument.startswith("BTC"):
+            params = {"index_name": "btc_usdt"}
+        if instrument.startswith("ETH"):
+            params = {"index_name": "eth_usdt"}
+        
 
         # read timeout from config (seconds)
         timeout = 5.0

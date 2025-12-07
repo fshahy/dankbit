@@ -76,9 +76,18 @@ class ChartController(http.Controller):
         plot_title = "calls"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+        
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
@@ -102,7 +111,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -153,9 +162,18 @@ class ChartController(http.Controller):
         plot_title = "puts"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
@@ -179,7 +197,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -230,9 +248,18 @@ class ChartController(http.Controller):
         plot_title = "buys"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
@@ -256,7 +283,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -308,9 +335,18 @@ class ChartController(http.Controller):
         plot_title = "sells"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
@@ -334,7 +370,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -407,7 +443,7 @@ class ChartController(http.Controller):
         if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
             index_price = _INDEX_CACHE["price"]
         else:
-            index_price = request.env['dankbit.trade'].sudo().get_index_price()
+            index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
             _INDEX_CACHE["price"] = index_price
             _INDEX_CACHE["timestamp"] = now
 
@@ -458,9 +494,18 @@ class ChartController(http.Controller):
         plot_title = view_type
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
@@ -487,7 +532,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -542,9 +587,18 @@ class ChartController(http.Controller):
         plot_title = f"{view_type} all"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -556,7 +610,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -639,7 +693,7 @@ class ChartController(http.Controller):
             ]
         )
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, zone_from_price, zone_to_price, steps)
         is_call = []
 
@@ -724,7 +778,7 @@ class ChartController(http.Controller):
             oi_data.append([strike, oi_call, oi_put])
 
 
-        index_price = request.env['dankbit.trade'].sudo().get_index_price()
+        index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
 
         fig = obj.plot_oi(index_price, oi_data, plot_title)
@@ -775,7 +829,7 @@ class ChartController(http.Controller):
         if _INDEX_CACHE["price"] and (now - _INDEX_CACHE["timestamp"] < _CACHE_TTL):
             index_price = _INDEX_CACHE["price"]
         else:
-            index_price = Trade.get_index_price()
+            index_price = Trade.get_index_price(instrument)
             _INDEX_CACHE["price"] = index_price
             _INDEX_CACHE["timestamp"] = now
 

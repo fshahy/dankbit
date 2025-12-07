@@ -13,10 +13,26 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.to_price"
     )
 
+    eth_from_price = fields.Float(
+        string="ETH From price",
+        config_parameter="dankbit.eth_from_price"
+    )
+
+    eth_to_price = fields.Float(
+        string="ETH To price",
+        config_parameter="dankbit.eth_to_price"
+    )
+
     steps = fields.Integer(
         string="Steps",
         config_parameter="dankbit.steps"
     )
+
+    eth_steps = fields.Integer(
+        string="ETH Steps",
+        config_parameter="dankbit.eth_steps"
+    )
+
     refresh_interval = fields.Integer(
         string="Refresh interval",
         config_parameter="dankbit.refresh_interval"
