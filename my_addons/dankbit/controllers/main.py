@@ -448,10 +448,10 @@ class ChartController(http.Controller):
 
     @http.route([
         "/<string:instrument>/<string:view_type>", 
-        "/<string:instrument>/<string:view_type>/l/<int:hours_ago>", 
+        "/<string:instrument>/<string:view_type>/l/<int:minutes_ago>", 
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, view_type, from_hour=0, hours_ago=0):
+    def chart_png_day(self, instrument, view_type, from_hour=0, minutes_ago=0):
         if view_type not in ["taker", "mm", "be_taker", "be_mm"]:
             return f"<h3>Nothing here.</h3>"
         
@@ -475,9 +475,9 @@ class ChartController(http.Controller):
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
-        if hours_ago:
-            start_ts = datetime.now() - timedelta(hours=hours_ago)
-            plot_title = f"{plot_title} last {str(hours_ago)} hours"
+        if minutes_ago:
+            start_ts = datetime.now() - timedelta(minutes=minutes_ago)
+            plot_title = f"{plot_title} last {str(minutes_ago)} minutes"
 
         trades = request.env['dankbit.trade'].sudo().search(
             domain=[
