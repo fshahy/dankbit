@@ -7,7 +7,7 @@
         <field name="arch" type="xml">
             <xpath expr="//form" position="inside">
                  <app data-string="Dankbit" string="Dankbit" name="dankbit_settings">
-                    <block title="Genral Graph Settings" id="dankbit_graph_settings" groups="base.group_no_one">
+                    <block title="General Settings" id="dankbit_graph_settings" groups="base.group_no_one">
                         <setting>
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
@@ -34,7 +34,7 @@
                         </setting>
                     </block>
 
-                    <block title="BTC Graph Settings" id="dankbit_graph_settings" groups="base.group_no_one">
+                    <block title="BTC Settings" id="dankbit_graph_settings" groups="base.group_no_one">
                         <setting>
                             <field name="from_price" placeholder="From Price"/>
                         </setting>
@@ -52,7 +52,7 @@
                         </setting>
                     </block>
 
-                    <block title="ETH Graph Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">
+                    <block title="ETH Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">
                         <setting>
                             <field name="eth_from_price" placeholder="ETH From Price"/>
                         </setting>
