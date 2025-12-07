@@ -36,19 +36,19 @@ services:
     volumes:
       - odoo-db-data:/var/lib/postgresql/data/pgdata
 
-  # dankbit_ws:
-  #   build: ./dankbit_ws_service
-  #   container_name: dankbit_ws_service
-  #   restart: unless-stopped
-  #   environment:
-  #     - POSTGRES_HOST=db
-  #     - POSTGRES_DB=${DANKBIT_POSTGRES_DB:-db1}
-  #     - POSTGRES_USER=odoo
-  #     - POSTGRES_PASSWORD=odoo
-  #     - DERIBIT_KEY=${DERIBIT_KEY}
-  #     - DERIBIT_SECRET=${DERIBIT_SECRET}
-  #   depends_on:
-  #     - db
+  dankbit_ws:
+    build: ./dankbit_ws_service
+    container_name: dankbit_ws_service
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_DB=${DANKBIT_POSTGRES_DB:-db1}
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=odoo
+      - DERIBIT_KEY=${DERIBIT_KEY}
+      - DERIBIT_SECRET=${DERIBIT_SECRET}
+    depends_on:
+      - db
 
 volumes:
   odoo-db-data:

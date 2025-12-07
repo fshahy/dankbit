@@ -5,18 +5,20 @@ import websockets
 import logging
 import psycopg2
 from psycopg2.extras import execute_values
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import time
+
+# -----------------------------------------------------
+# Config
+# -----------------------------------------------------
+WS_URL = "wss://www.deribit.com/ws/api/v2/"
 
 last_request_ts = 0
 REQUEST_INTERVAL = 0.15  # ~7 requests / second
-
+SUB_CHUNK_SIZE = 400     # subscribe in chunks < 500 to respect Deribit limits
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 log = logging.getLogger("ws")
-
-WS_URL = "wss://www.deribit.com/ws/api/v2/"
-
 
 # -----------------------------------------------------
 # PostgreSQL connection (global)
@@ -32,6 +34,9 @@ PG_CONN.autocommit = True
 print("WS connecting to DB:", PG_CONN.dsn, flush=True)
 
 
+# -----------------------------------------------------
+# Helpers for instruments
+# -----------------------------------------------------
 def extract_option_type(instrument_name):
     if instrument_name.endswith("-C"):
         return "call"
@@ -39,28 +44,29 @@ def extract_option_type(instrument_name):
         return "put"
     return None  # should not happen for options
 
+
 def extract_expiration(instrument_name):
     """
     Convert Deribit expiry code (e.g. '27FEB26') into UTC datetime.
+    Deribit expiries are at 08:00 UTC on expiry day.
     """
     try:
         exp_str = instrument_name.split("-")[1]
         exp_date = datetime.strptime(exp_str, "%d%b%y")
-        # Deribit expiries are always 08:00 UTC on expiry day
         return exp_date.replace(hour=8, minute=0, second=0, tzinfo=timezone.utc)
     except Exception:
         return None
 
 
 # -----------------------------------------------------
-# DB Insert (single-row, no batching)
+# DB Insert (single-row, ON CONFLICT ignore)
 # -----------------------------------------------------
 def insert_trade(t):
     sql = """
         INSERT INTO dankbit_trade
         (
             name, strike, active, deribit_trade_identifier, amount, price, direction,
-            option_type, index_price, iv, block_trade_id, is_block_trade, 
+            option_type, index_price, iv, block_trade_id, is_block_trade,
             expiration, deribit_ts,
             create_uid, create_date, write_uid, write_date
         )
@@ -72,21 +78,22 @@ def insert_trade(t):
         ON CONFLICT (deribit_trade_identifier) DO NOTHING;
     """
 
+    instr_name = t.get("instrument_name")
+
     values = (
-        t.get("instrument_name"),
-        t.get("instrument_name").split("-")[2] if t.get("instrument_name") else 0,  # strike
+        instr_name,
+        instr_name.split("-")[2] if instr_name else 0,  # strike
         t.get("trade_id"),
         t.get("amount"),
         t.get("price"),
         t.get("direction"),
-        extract_option_type(t.get("instrument_name")),
+        extract_option_type(instr_name),
         t.get("index_price"),
         t.get("iv"),
-        #t.get("amount"),                  # contracts = amount
-        t.get("block_trade_id"),      # block_trade_id
+        t.get("block_trade_id"),        # block_trade_id
         bool(t.get("block_trade_id")),  # is_block_trade
-        extract_expiration(t.get("instrument_name")),   # <-- NEW FIELD
-        t.get("timestamp"),               # ms → converted in SQL
+        extract_expiration(instr_name),
+        t.get("timestamp"),             # ms → converted in SQL
     )
 
     try:
@@ -97,55 +104,14 @@ def insert_trade(t):
         PG_CONN.rollback()
 
 
-async def backfill_instrument(ws, instrument):
-    log.info(f"Backfilling: {instrument}")
-
-    end_id = None
-    page = 0
-
-    while True:
-        params = {
-            "instrument_name": instrument,
-            "count": 1000,
-            "include_old": True,
-            "sorting": "desc",
-        }
-
-        if end_id:
-            params["end_seq"] = end_id  # continue before last batch
-
-        resp = await ws_call(ws, "public/get_last_trades_by_instrument", params)
-
-        trades = resp["result"]["trades"]
-        if not trades:
-            break
-
-        # Insert trades
-        for t in trades:
-            insert_trade(t)
-
-        # Prepare next pagination step
-        end_id = trades[-1]["trade_id"]  # smallest ID from this batch
-        page += 1
-
-        log.info(f"{instrument}: page {page}, got {len(trades)} trades")
-
-        if len(trades) < 1000:
-            break  # finished
-
-        # gentle pacing
-        await asyncio.sleep(0.05)
-
-    log.info(f"Backfill finished for {instrument}")
-
-
-
 # -----------------------------------------------------
 # WebSocket helper
 # -----------------------------------------------------
 async def ws_call(ws, method, params=None):
+    """
+    Simple RPC helper with basic rate limiting and retry on 'over_limit'.
+    """
     global last_request_ts
-    # rate limit
     now = time.time()
     if now - last_request_ts < REQUEST_INTERVAL:
         await asyncio.sleep(REQUEST_INTERVAL - (now - last_request_ts))
@@ -160,14 +126,16 @@ async def ws_call(ws, method, params=None):
     await ws.send(json.dumps(req))
     resp = json.loads(await ws.recv())
 
-    # handle Deribit over_limit error gracefully
-    if "error" in resp and resp["error"]["message"] == "over_limit":
-        log.warning("Rate limit hit. Sleeping 0.5 seconds…")
-        await asyncio.sleep(0.5)
-        return await ws_call(ws, method, params)
+    if "error" in resp:
+        err = resp["error"]
+        if err.get("message") == "over_limit":
+            log.warning("Rate limit hit. Sleeping 0.5 seconds…")
+            await asyncio.sleep(0.5)
+            return await ws_call(ws, method, params)
+        else:
+            log.error(f"Error from Deribit for {method}: {err}")
 
     return resp
-
 
 
 # -----------------------------------------------------
@@ -197,26 +165,48 @@ async def fetch_instruments(ws):
             "kind": "option",
             "expired": False,
         })
-        for inst in resp["result"]:
+        result = resp.get("result", [])
+        if not isinstance(result, list):
+            log.error(f"Unexpected result for {currency} instruments: {resp}")
+            continue
+
+        count = 0
+        for inst in result:
             instrument = inst["instrument_name"]
             channels.append(f"trades.{instrument}.raw")
+            count += 1
+
+        log.info(f"{currency} instruments: {count}")
+
+    # Quick summary
+    btc_count = sum(1 for c in channels if c.startswith("trades.BTC"))
+    eth_count = sum(1 for c in channels if c.startswith("trades.ETH"))
+    log.info(f"Total channels: {len(channels)} (BTC: {btc_count}, ETH: {eth_count})")
+
     return channels
 
 
 # -----------------------------------------------------
-# Subscribe
+# Subscribe in chunks (important for ETH!)
 # -----------------------------------------------------
-async def subscribe(ws, channels):
-    msg = {
-        "jsonrpc": "2.0",
-        "id": 777,
-        "method": "public/subscribe",
-        "params": {"channels": channels[:500]},  # Deribit limit
-    }
-    await ws.send(json.dumps(msg))
-    resp = json.loads(await ws.recv())
-    log.info(f"Subscribed to {len(channels[:500])} raw channels.")
-    return resp
+async def subscribe_all(ws, channels, chunk_size=SUB_CHUNK_SIZE):
+    total = len(channels)
+    if total == 0:
+        log.warning("No channels to subscribe to.")
+        return
+
+    for i in range(0, total, chunk_size):
+        part = channels[i:i + chunk_size]
+        log.info(f"Subscribing to channels {i+1}–{i+len(part)} of {total}…")
+        resp = await ws_call(ws, "public/subscribe", {"channels": part})
+
+        if "error" in resp:
+            log.error(f"Subscribe error for chunk {i//chunk_size}: {resp['error']}")
+        else:
+            log.info(f"Subscribed to {len(part)} channels in this chunk.")
+
+        # tiny pause to be nice to Deribit
+        await asyncio.sleep(0.1)
 
 
 # -----------------------------------------------------
@@ -225,49 +215,55 @@ async def subscribe(ws, channels):
 async def run():
     while True:
         try:
-            async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
+            log.info("Connecting to Deribit WS…")
+            async with websockets.connect(
+                WS_URL,
+                ping_interval=20,
+                ping_timeout=20,
+            ) as ws:
 
+                # 1) Auth
                 await authenticate(ws)
 
+                # 2) Fetch instruments
                 log.info("Fetching instrument list…")
                 channels = await fetch_instruments(ws)
-                log.info(f"Found {len(channels)} option instruments.")
+                log.info(f"Found {len(channels)} option channels to subscribe.")
 
-                # -------------------------------
-                # BACKFILL ALL NON-EXPIRED INSTRUMENTS
-                # -------------------------------
-                # log.info("Starting full backfill…")
-                # instruments = [c.split(".")[1] for c in channels]  # extract instrument names
-                # for inst in instruments:
-                #     await backfill_instrument(ws, inst)
-                #     await asyncio.sleep(1)  # pacing between instruments
-
-                # log.info("Backfill completed. Now subscribing for live trades…")
-
-                # -------------------------------
-                # LIVE STREAM
-                # -------------------------------
-                await subscribe(ws, channels)
+                # 3) Subscribe (BTC + ETH, in chunks)
+                await subscribe_all(ws, channels)
 
                 log.info("Listening for raw option trades…")
 
+                # 4) Main receive loop
                 while True:
                     raw = await ws.recv()
                     msg = json.loads(raw)
 
-                    if "params" not in msg or "data" not in msg["params"]:
+                    params = msg.get("params")
+                    if not params:
                         continue
 
-                    trades = msg["params"]["data"]
-                    if isinstance(trades, dict):
-                        trades = [trades]
+                    data = params.get("data")
+                    if not data:
+                        continue
+
+                    # Deribit uses either dict (single trade) or list
+                    if isinstance(data, dict):
+                        trades = [data]
+                    else:
+                        trades = data
 
                     for t in trades:
-                        log.info(
-                            f"{t['instrument_name']} | {t['direction']} | "
-                            f"price {t['price']} | amount {t['amount']}"
-                        )
-                        insert_trade(t)
+                        instr = t.get("instrument_name", "???")
+                        try:
+                            log.info(
+                                f"{instr} | {t.get('direction')} | "
+                                f"price {t.get('price')} | amount {t.get('amount')}"
+                            )
+                            insert_trade(t)
+                        except Exception as e:
+                            log.error(f"Error processing trade {instr}: {e}")
 
         except Exception as e:
             log.error(f"WS error: {e}")
