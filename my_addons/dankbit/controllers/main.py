@@ -84,9 +84,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
         
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -170,9 +170,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -256,9 +256,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -343,9 +343,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -488,7 +488,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
     ], type="http", auth="public", website=True)
     def chart_png_day(self, instrument, view_type, from_hour=0, minutes_ago=0):
-        if view_type not in ["taker", "mm", "be_taker", "be_mm"]:
+        if view_type not in ["taker", "mm"]:
             return f"<h3>Nothing here.</h3>"
         
         plot_title = view_type
@@ -502,9 +502,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
@@ -595,9 +595,9 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=1500))
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         mock_0dte = icp.get_param('dankbit.mock_0dte')

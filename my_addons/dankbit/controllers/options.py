@@ -180,16 +180,6 @@ class OptionStrat:
                 alpha=0.3,
                 interpolate=True
             )
-        elif view_type == "be_taker":
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
-            ax.plot(self.STs, md_plot, color="green", label="Delta")
-            ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
-        elif view_type == "be_mm":
-            if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
-            ax.plot(self.STs, -md_plot, color="green", label="Delta")
-            ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
         if strike is not None and isinstance(strike, str):
             view_type = strike

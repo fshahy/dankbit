@@ -492,7 +492,7 @@ class Trade(models.Model):
             "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
             "target": "new",
             'context': {
-                "dankbit_view_type": "be_taker",
+                "dankbit_view_type": "taker",
             }
         }
 
@@ -504,7 +504,7 @@ class Trade(models.Model):
             "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
             "target": "new",
             'context': {
-                "dankbit_view_type": "be_mm",
+                "dankbit_view_type": "mm",
             }
         }
 
