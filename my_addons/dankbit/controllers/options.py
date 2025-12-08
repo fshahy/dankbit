@@ -151,11 +151,35 @@ class OptionStrat:
                 ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
+
+            # fill areas where mm gamma is positive
+            pos_mask = -mg_plot > 0
+            ax.fill_between(
+                self.STs,
+                -mg_plot,
+                0,
+                where=pos_mask,
+                color="violet",
+                alpha=0.3,
+                interpolate=True
+            )
         elif view_type == "taker":
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
+
+            # fill areas where mm gamma is positive
+            pos_mask = mg_plot < 0
+            ax.fill_between(
+                self.STs,
+                mg_plot,
+                0,
+                where=pos_mask,
+                color="violet",
+                alpha=0.3,
+                interpolate=True
+            )
         elif view_type == "be_taker":
             if show_red_line:
                 ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
