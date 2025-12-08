@@ -177,18 +177,6 @@ class OptionStrat:
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
-
-        # Zero-delta zone size
-        max_abs_delta = max(abs(x) for x in market_delta)
-        threshold = max_abs_delta * 0.05  # 5% of max delta
-        ax.axhspan(-threshold, threshold, color="yellow", alpha=0.20)
-
-        # Mark Gamma Peak
-        idx = max(range(len(market_gammas)), key=lambda i: abs(market_gammas[i]))
-        max_abs_gamma = market_gammas[idx]
-        gamma_peak = self.STs[idx]
-        if max_abs_gamma:
-            ax.axvline(x=gamma_peak, color="orange", label=str(f"Gamma Peak {gamma_peak:.0f}"))
             
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
