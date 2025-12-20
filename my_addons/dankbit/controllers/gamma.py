@@ -1,29 +1,58 @@
+import logging
+import math
+from datetime import datetime, timezone
 import numpy as np
 from scipy.stats import norm
-import logging
 from odoo.http import request as _odoo_request
 
 _logger = logging.getLogger(__name__)
 
 
 # --- Black-Scholes Gamma ---
-def bs_gamma(S, K, T, r, sigma):
+def bs_gamma(S, K, T, r, sigma, trade_ts):
     S = np.asarray(S, dtype=float)
-    # Small-time regularization: use a minimum time-to-expiry so gamma is
-    # represented as a finite, sharp peak instead of a non-representable Dirac.
+
     try:
         icp = _odoo_request.env['ir.config_parameter'].sudo()
         hours = float(icp.get_param('dankbit.greeks_min_time_hours', default=1.0))
+
+        # Gamma decays slower than delta
+        tau_seconds = float(
+            icp.get_param(
+                'dankbit.greeks_gamma_decay_tau_seconds',
+                default=21600  # 6h
+            )
+        )
     except Exception:
         hours = 1.0
+        tau_seconds = 21600
 
+    # --- Small-time regularization ---
     eps_years = hours / (24.0 * 365.0)
+
     sigma_eps = 1e-4
     T_eff = max(T, eps_years)
     sigma_eff = max(sigma, sigma_eps)
 
-    d1 = (np.log(S / K) + (r + 0.044 * sigma_eff**2) * T_eff) / (sigma_eff * np.sqrt(T_eff))
-    return norm.pdf(d1) / (S * sigma_eff * np.sqrt(T_eff))
+    # --- Correct Black–Scholes d1 ---
+    d1 = (
+        np.log(S / K)
+        + (r + 0.5 * sigma_eff**2) * T_eff
+    ) / (sigma_eff * np.sqrt(T_eff))
+
+    gamma = norm.pdf(d1) / (S * sigma_eff * np.sqrt(T_eff))
+
+    # --- Time-decay weighting (Postgres-safe) ---
+    if trade_ts is not None:
+        now = datetime.now()
+        dt = (now - trade_ts).total_seconds()
+
+        if dt > 0:
+            gamma *= math.exp(-dt / tau_seconds)
+        else:
+            gamma *= 0.0
+
+    return gamma
 
 def _infer_sign(trd):
     if hasattr(trd, "direction"):
@@ -45,6 +74,6 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False):
         sigma  = trd.iv/100
         sign   = _infer_sign(trd)
         qty    = trd.amount
-        gamma  = bs_gamma(S, trd.strike, T, r, sigma)
+        gamma  = bs_gamma(S, trd.strike, T, r, sigma, trd.deribit_ts)
         total += sign * qty * gamma
     return total
