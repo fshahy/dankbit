@@ -49,7 +49,6 @@ class Trade(models.Model):
     direction = fields.Selection([("buy", "Buy"), ("sell", "Sell")], required=True)
     iv = fields.Float(string="IV %", digits=(2, 2), required=True)
     amount = fields.Float(digits=(6, 2), required=True)
-    contracts = fields.Float(digits=(6, 2))
     deribit_ts = fields.Datetime()
     deribit_trade_identifier = fields.Char(string="Deribit Trade ID", required=True)
     trade_seq = fields.Float(digits=(15, 0))
@@ -392,7 +391,6 @@ class Trade(models.Model):
             "trade_seq": trade.get("trade_seq"),
             "deribit_trade_identifier": trade.get("trade_id"),
             "amount": trade.get("amount"),
-            "contracts": trade.get("contracts", trade.get("amount")),  # fallback to amount
             "deribit_ts": deribit_str,
             "expiration": exp_str,
             "is_block_trade": is_block_trade,

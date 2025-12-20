@@ -16,7 +16,6 @@
                         <field name="index_price" />
                         <field name="direction" />
                         <field name="amount" />
-                        <field name="contracts" />
                         <field name="iv" />
                         <field name="deribit_ts" />
                         <field name="price" />
@@ -40,7 +39,6 @@
                 <field name="deribit_ts" />
                 <field name="strike" />
                 <field name="amount" />
-                <field name="contracts" />
                 <field name="direction" />
                 <field name="option_type" />
                 <field name="days_to_expiry" />
