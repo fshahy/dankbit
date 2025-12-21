@@ -8,7 +8,7 @@ from odoo.http import request as _odoo_request
 _logger = logging.getLogger(__name__)
 
 
-def bs_delta(S, K, T, r, sigma, trade_ts, option_type="call"):
+def bs_delta(S, K, T, r, sigma, trade_ts, oi_impact, option_type="call"):
     S = np.asarray(S, dtype=float)
     tau_seconds=14400  # 4h default decay
 
@@ -44,7 +44,7 @@ def bs_delta(S, K, T, r, sigma, trade_ts, option_type="call"):
         else:
             delta *= 0.0
 
-    return delta
+    return delta * oi_impact
 
 def _infer_sign(trd):
     if hasattr(trd, "direction"):
@@ -66,7 +66,7 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False):
         sigma  = trd.iv/100
         sign   = _infer_sign(trd)
         qty    = trd.amount
-        delta  = bs_delta(S, trd.strike, T, r, sigma, trd.deribit_ts, trd.option_type)
+        delta  = bs_delta(S, trd.strike, T, r, sigma, trd.deribit_ts, trd.oi_impact, trd.option_type)
         total += sign * qty * delta
     return total
 

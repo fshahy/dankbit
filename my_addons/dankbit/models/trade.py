@@ -124,6 +124,7 @@ class Trade(models.Model):
         groups = self.read_group(
             domain=[
                 ("expiration", "=", self._get_tomorrows_ts()),   # ✅ only non-expired instruments
+                ("is_block_trade", "=", False),
                 ("active", "=", True),
             ],
             fields=["name"],
@@ -171,13 +172,12 @@ class Trade(models.Model):
 
         trades = Trade.search([
             ("name", "=", instrument_name),
+            ("is_block_trade", "=", False),
             ("deribit_ts", ">", older.timestamp),
             ("deribit_ts", "<=", newer.timestamp),
             ("oi_reconciled", "=", False),
         ])
-        # _logger.info("********************************************************")
-        _logger.info("Reconciling OI for %s: ΔOI=%.2f over %d trades",
-                     instrument_name, delta_oi, len(trades))
+
         if not trades:
             return
 
@@ -201,8 +201,6 @@ class Trade(models.Model):
 
 
     def _cron_reconcile_oi(self):
-        # now = fields.Datetime.now()
-
         groups = self.read_group(
             domain=[
                 ("expiration", "=", self._get_tomorrows_ts()),

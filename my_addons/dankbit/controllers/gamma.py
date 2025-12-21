@@ -9,7 +9,7 @@ _logger = logging.getLogger(__name__)
 
 
 # --- Black-Scholes Gamma ---
-def bs_gamma(S, K, T, r, sigma, trade_ts):
+def bs_gamma(S, K, T, r, sigma, trade_ts, oi_impact):
     S = np.asarray(S, dtype=float)
 
     try:
@@ -52,7 +52,7 @@ def bs_gamma(S, K, T, r, sigma, trade_ts):
         else:
             gamma *= 0.0
 
-    return gamma
+    return gamma * oi_impact
 
 def _infer_sign(trd):
     if hasattr(trd, "direction"):
@@ -74,6 +74,6 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False):
         sigma  = trd.iv/100
         sign   = _infer_sign(trd)
         qty    = trd.amount
-        gamma  = bs_gamma(S, trd.strike, T, r, sigma, trd.deribit_ts)
+        gamma  = bs_gamma(S, trd.strike, T, r, sigma, trd.deribit_ts, trd.oi_impact)
         total += sign * qty * gamma
     return total

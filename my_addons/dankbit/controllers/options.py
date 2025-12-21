@@ -28,10 +28,10 @@ class OptionStrat:
     def __init__(self, name, S0, from_price, to_price, step):
         self.name = name
         self.S0 = S0
-        self.STs = np.arange(from_price, to_price, step)
-        self.payoffs = np.zeros_like(self.STs)
-        self.longs = np.zeros_like(self.STs)
-        self.shorts = np.zeros_like(self.STs)
+        self.STs = np.arange(from_price, to_price, step, dtype=np.float64)
+        self.payoffs = np.zeros_like(self.STs, dtype=np.float64)
+        self.longs = np.zeros_like(self.STs, dtype=np.float64)
+        self.shorts = np.zeros_like(self.STs, dtype=np.float64)
         self.instruments = [] 
            
     def long_call(self, K, C, Q=1):
@@ -86,10 +86,10 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            plt.yticks(list(range(-10000, 10001, 20))) 
+            plt.yticks(list(range(-10000, 10001, 100))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
-            plt.yticks(list(range(-2000, 2001, 100)))
+            plt.yticks(list(range(-2000, 2001, 500)))
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it
