@@ -33,5 +33,25 @@
             <field name="code">model._delete_expired_trades()</field>
         </record>
 
+        <record id="cron_fetch_oi_snapshots" model="ir.cron">
+            <field name="name">Dankbit: Fetch Deribit OI</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_fetch_oi_snapshots()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">False</field>
+        </record>
+
+        <record id="cron_reconcile_oi_impact" model="ir.cron">
+            <field name="name">Dankbit: Reconcile OI Impact</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_reconcile_oi()</field>
+            <field name="interval_number">5</field>
+            <field name="interval_type">minutes</field>
+            <field name="active">False</field>
+        </record>
+
     </data>
 </odoo>

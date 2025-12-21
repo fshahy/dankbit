@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+
+<odoo>
+
+    <record id="view_dankbit_oi_snapshot_list" model="ir.ui.view">
+        <field name="name">dankbit.oi.snapshot.list</field>
+        <field name="model">dankbit.oi_snapshot</field>
+        <field name="arch" type="xml">
+            <list string="OI Snapshots" default_order="timestamp desc">
+                <field name="name"/>
+                <field name="open_interest"/>
+                <field name="timestamp"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_dankbit_oi_snapshot_form" model="ir.ui.view">
+        <field name="name">dankbit.oi.snapshot.form</field>
+        <field name="model">dankbit.oi_snapshot</field>
+        <field name="arch" type="xml">
+            <form string="OI Snapshot">
+                <sheet>
+                    <group>
+                        <field name="name" readonly="1"/>
+                        <field name="open_interest" readonly="1"/>
+                        <field name="timestamp" readonly="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_dankbit_oi_snapshot" model="ir.actions.act_window">
+        <field name="name">OI Snapshots</field>
+        <field name="res_model">dankbit.oi_snapshot</field>
+        <field name="view_mode">list,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                OI snapshots fetched periodically from Deribit.
+            </p>
+        </field>
+    </record>
+
+    <menuitem
+        id="menu_dankbit_oi_snapshot"
+        name="OI Snapshots"
+        parent="dankbit_root_menu"
+        action="action_dankbit_oi_snapshot"
+        sequence="30"/>
+
+</odoo>

@@ -17,6 +17,10 @@ _DERIBIT_CACHE = {
     'instruments': {'ts': 0, 'value': None},
 }
 
+# Simple in-memory cache for OI per instrument
+# { instrument_name: {'ts': epoch_seconds, 'value': float} }
+_DERIBIT_OI_CACHE = {}
+
 def _safe_deribit_request(url, params, timeout=5.0, retries=2, backoff=0.5):
     """Make a requests.get call with retries and exponential backoff.
     Returns parsed JSON on success, or None on persistent failure.
@@ -60,12 +64,158 @@ class Trade(models.Model):
         string="Block Trade ID",
         help="Deribit-assigned ID if this trade was executed as a block trade."
     )
-
     is_block_trade = fields.Boolean(
         string="Is Block Trade",
         default=False,
         help="True if this trade came from a Deribit block trade event."
     )
+    oi_impact = fields.Float(
+        string="OI Impact",
+        default=0.0,
+        help="Allocated OI change for this trade"
+    )
+
+    oi_reconciled = fields.Boolean(
+        default=False,
+        index=True,
+        help="Whether OI impact has been reconciled"
+    )
+
+    @staticmethod
+    def fetch_deribit_open_interest(instrument_name: str) -> float:
+        """
+        Fetch current open interest for a Deribit option instrument,
+        with a short in-memory cache to avoid hammering the API.
+        """
+
+        DERIBIT_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
+        CACHE_TTL = 15.0  # seconds
+
+        now_ts = time_module.time()
+        cached = _DERIBIT_OI_CACHE.get(instrument_name)
+
+        # return cached value if still fresh
+        if cached and (now_ts - cached.get("ts", 0) < CACHE_TTL):
+            return float(cached.get("value", 0.0))
+
+        data = _safe_deribit_request(
+            DERIBIT_URL,
+            params={"instrument_name": instrument_name},
+            timeout=10.0,
+        )
+
+        if not data or "result" not in data or not data["result"]:
+            # fallback to last cached value if available
+            return float(cached.get("value", 0.0)) if cached else 0.0
+
+        oi = float(data["result"][0].get("open_interest", 0.0))
+
+        _DERIBIT_OI_CACHE[instrument_name] = {
+            "ts": now_ts,
+            "value": oi,
+        }
+
+        return oi
+        
+    def _cron_fetch_oi_snapshots(self):
+        Snapshot = self.env["dankbit.oi_snapshot"]
+        now = fields.Datetime.now()
+
+        groups = self.read_group(
+            domain=[
+                ("expiration", "=", self._get_tomorrows_ts()),   # ✅ only non-expired instruments
+                ("active", "=", True),
+            ],
+            fields=["name"],
+            groupby=["name"],
+        )
+
+        for g in groups:
+            instrument = g.get("name")
+            if not instrument:
+                continue
+
+            try:
+                time_module.sleep(0.03 + random.random() * 0.02)  # polite pacing
+                oi = self.fetch_deribit_open_interest(instrument)
+            except Exception as e:
+                _logger.warning("OI fetch failed for %s: %s", instrument, e)
+                continue
+
+            Snapshot.create({
+                "name": instrument,
+                "open_interest": oi,
+                "timestamp": now,
+            })
+
+    # @staticmethod
+    def reconcile_oi_impact(self, instrument_name):
+        Trade = self.env["dankbit.trade"]
+        Snapshot = self.env["dankbit.oi_snapshot"]
+
+        snaps = Snapshot.search(
+            [("name", "=", instrument_name)],
+            order="timestamp desc",
+            limit=2,
+        )
+        if len(snaps) < 2:
+            return
+
+        newer, older = snaps[0], snaps[1]
+
+        # Guard against identical or inverted timestamps
+        if not newer.timestamp or not older.timestamp or newer.timestamp <= older.timestamp:
+            return
+
+        delta_oi = float(newer.open_interest) - float(older.open_interest)
+
+        trades = Trade.search([
+            ("name", "=", instrument_name),
+            ("deribit_ts", ">", older.timestamp),
+            ("deribit_ts", "<=", newer.timestamp),
+            ("oi_reconciled", "=", False),
+        ])
+        # _logger.info("********************************************************")
+        _logger.info("Reconciling OI for %s: ΔOI=%.2f over %d trades",
+                     instrument_name, delta_oi, len(trades))
+        if not trades:
+            return
+
+        # No OI change → zero impacts, mark reconciled
+        if delta_oi == 0.0:
+            trades.write({"oi_impact": 0.0, "oi_reconciled": True})
+            return
+
+        total_volume = sum(abs(t.amount or 0.0) for t in trades)
+
+        # Important: don't leave trades unreconciled forever
+        if total_volume <= 0.0:
+            trades.write({"oi_impact": 0.0, "oi_reconciled": True})
+            return
+
+        # Allocate ΔOI proportionally
+        for t in trades:
+            weight = abs(t.amount or 0.0) / total_volume
+            t.oi_impact = delta_oi * weight
+            t.oi_reconciled = True
+
+
+    def _cron_reconcile_oi(self):
+        # now = fields.Datetime.now()
+
+        groups = self.read_group(
+            domain=[
+                ("expiration", "=", self._get_tomorrows_ts()),
+                ("active", "=", True),
+            ],
+            fields=["name"],
+            groupby=["name"],
+        )
+
+        for g in groups:
+            instrument = g.get("name")
+            if instrument:
+                self.reconcile_oi_impact(instrument)
 
     @api.depends('expiration')
     def _compute_days_to_expiry(self):
@@ -305,15 +455,37 @@ class Trade(models.Model):
             _logger.info("Finished fetching trades for %s", inst_name)
 
 
-    def _get_tomorrows_ts(self):
-        # Current UTC time
-        now = datetime.now(pytz.utc)
-        # Tomorrow's date
+    # def _get_tomorrows_ts(self):
+    #     # Current UTC time
+    #     now = datetime.now(pytz.utc)
+    #     # Tomorrow's date
+    #     tomorrow = now.date() + timedelta(days=1)
+    #     # Tomorrow at 08:00 GMT
+    #     target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=timezone.utc)
+    #     # Milliseconds since epoch
+    #     return int(target.timestamp() * 1000)
+
+    @staticmethod
+    def _get_tomorrows_ts():
+        """
+        Return tomorrow's option expiry timestamp at 08:00 UTC
+        as a timezone-aware datetime.
+        """
+
+        now = datetime.now(timezone.utc)
         tomorrow = now.date() + timedelta(days=1)
-        # Tomorrow at 08:00 GMT
-        target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=timezone.utc)
-        # Milliseconds since epoch
-        return int(target.timestamp() * 1000)
+
+        expiry_dt = datetime(
+            year=tomorrow.year,
+            month=tomorrow.month,
+            day=tomorrow.day,
+            hour=8,
+            minute=0,
+            second=0,
+            tzinfo=timezone.utc,
+        )
+
+        return expiry_dt
 
     def _get_instruments(self):
         URL = "https://www.deribit.com/api/v2/public/get_instruments"
@@ -514,3 +686,13 @@ class DankbitScreenshot(models.Model):
     name = fields.Char(required=True)
     timestamp = fields.Datetime(string="Timestamp", default=lambda self: fields.Datetime.now())
     image_png = fields.Binary(string="Chart Image", attachment=True)
+
+
+class DankbitOISnapshot(models.Model):
+    _name = "dankbit.oi_snapshot"
+    _description = "Option Open Interest Snapshot"
+    _order = "timestamp desc"
+
+    name = fields.Char(required=True, index=True)
+    open_interest = fields.Float(required=True)
+    timestamp = fields.Datetime(required=True, index=True)

@@ -108,6 +108,8 @@ class ChartController(http.Controller):
                 ("option_type", "=", "call"),
                 ("deribit_ts", ">=", start_ts),
                 ("is_block_trade", "=", False),
+                ("oi_reconciled", "!=", False),
+                ("oi_impact", ">", 0),
             ]
         )
 
@@ -194,6 +196,8 @@ class ChartController(http.Controller):
                 ("option_type", "=", "put"),
                 ("deribit_ts", ">=", start_ts),
                 ("is_block_trade", "=", False),
+                ("oi_reconciled", "!=", False),
+                ("oi_impact", ">", 0),
             ]
         )
 
@@ -280,6 +284,8 @@ class ChartController(http.Controller):
                 ("direction", "=", "buy"),
                 ("deribit_ts", ">=", start_ts),
                 ("is_block_trade", "=", False),
+                ("oi_reconciled", "!=", False),
+                ("oi_impact", ">", 0),
             ]
         )
 
@@ -367,6 +373,8 @@ class ChartController(http.Controller):
                 ("direction", "=", "sell"),
                 ("deribit_ts", ">=", start_ts),
                 ("is_block_trade", "=", False),
+                ("oi_reconciled", "!=", False),
+                ("oi_impact", ">", 0),
             ]
         )
 
@@ -529,6 +537,8 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("deribit_ts", ">=", start_ts),
                 ("is_block_trade", "=", False),
+                ("oi_reconciled", "!=", False),
+                ("oi_impact", ">", 0),
             ]
         )
 

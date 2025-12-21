@@ -24,6 +24,8 @@
                         <field name="deribit_trade_identifier" />
                         <field name="is_block_trade" />
                         <field name="block_trade_id" />
+                        <field name="oi_impact" />
+                        <field name="oi_reconciled" />
                     </group>
                 </sheet>
             </form>
@@ -46,6 +48,8 @@
                 <field name="index_price" />
                 <field name="is_block_trade" />
                 <field name="block_trade_id" />
+                <field name="oi_impact" />
+                <field name="oi_reconciled" />
             </list>
         </field>
     </record>
