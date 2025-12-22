@@ -288,7 +288,6 @@ class Trade(models.Model):
         # get instruments that actually have snapshots
         groups = Snapshot.read_group(
             domain=[
-                ("oi_reconciled", "=", False),
                 ("timestamp", ">=", fields.Datetime.now() - timedelta(hours=2)),
             ],
             fields=["name"],
