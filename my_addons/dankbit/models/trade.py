@@ -21,21 +21,35 @@ _DERIBIT_CACHE = {
 # { instrument_name: {'ts': epoch_seconds, 'value': float} }
 _DERIBIT_OI_CACHE = {}
 
-def _safe_deribit_request(url, params, timeout=5.0, retries=2, backoff=0.5):
-    """Make a requests.get call with retries and exponential backoff.
-    Returns parsed JSON on success, or None on persistent failure.
+def _safe_deribit_request(
+    url,
+    params,
+    timeout=5.0,
+    retries=3,
+    backoff=0.4,
+    raise_on_fail=False,
+):
     """
-    for attempt in range(retries + 1):
+    Robust GET with retries and exponential backoff.
+    Returns parsed JSON dict on success.
+    Returns None on failure unless raise_on_fail=True.
+    """
+
+    for attempt in range(1, retries + 1):
         try:
             resp = requests.get(url, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            _logger.warning("Deribit request failed (attempt %d/%d) %s %s: %s",
-                            attempt + 1, retries + 1, url, params, e)
+            _logger.warning(
+                "Deribit request failed (%d/%d) %s params=%s error=%s",
+                attempt, retries, url, params, e
+            )
             if attempt < retries:
-                time_module.sleep(backoff * (2 ** attempt))
+                time_module.sleep(backoff * (2 ** (attempt - 1)))
             else:
+                if raise_on_fail:
+                    raise
                 return None
 
 class Trade(models.Model):
@@ -51,7 +65,7 @@ class Trade(models.Model):
     mark_price = fields.Float(digits=(16, 4))
     option_type = fields.Text(compute="_compute_type", store=True)
     direction = fields.Selection([("buy", "Buy"), ("sell", "Sell")], required=True)
-    iv = fields.Float(string="IV %", digits=(2, 2), required=True)
+    iv = fields.Float(string="IV %", digits=(8, 4), required=True)
     amount = fields.Float(digits=(6, 2), required=True)
     deribit_ts = fields.Datetime()
     deribit_trade_identifier = fields.Char(string="Deribit Trade ID", required=True)
@@ -60,6 +74,7 @@ class Trade(models.Model):
         string="Days to Expiry",
         compute="_compute_days_to_expiry"
     )
+    # hours_to_expiry = (expiration - now).total_seconds() / 3600
     block_trade_id = fields.Char(
         string="Block Trade ID",
         help="Deribit-assigned ID if this trade was executed as a block trade."
@@ -76,27 +91,47 @@ class Trade(models.Model):
     )
 
     oi_reconciled = fields.Boolean(
+        string="OI Reconciled",
         default=False,
         index=True,
         help="Whether OI impact has been reconciled"
     )
 
-    @staticmethod
-    def fetch_deribit_open_interest(instrument_name: str) -> float:
+    def get_hours_to_expiry(self):
         """
-        Fetch current open interest for a Deribit option instrument,
-        with a short in-memory cache to avoid hammering the API.
+        Continuous time to expiry in hours (UTC-safe).
+        Used ONLY for greeks, not UI logic.
         """
+        if not self.expiration:
+            return 0.0
 
+        now = datetime.now(timezone.utc)
+
+        exp = self.expiration
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+
+        seconds = (exp - now).total_seconds()
+        return max(seconds / 3600.0, 0.0)
+
+
+    @staticmethod
+    def fetch_deribit_open_interest(instrument_name: str):
         DERIBIT_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
-        CACHE_TTL = 15.0  # seconds
+        CACHE_TTL = 15.0
 
         now_ts = time_module.time()
         cached = _DERIBIT_OI_CACHE.get(instrument_name)
 
-        # return cached value if still fresh
-        if cached and (now_ts - cached.get("ts", 0) < CACHE_TTL):
-            return float(cached.get("value", 0.0))
+        # prune old cache entries occasionally
+        if len(_DERIBIT_OI_CACHE) > 5000:
+            cutoff = now_ts - 300
+            for k in list(_DERIBIT_OI_CACHE.keys()):
+                if _DERIBIT_OI_CACHE[k]["ts"] < cutoff:
+                    _DERIBIT_OI_CACHE.pop(k, None)
+
+        if cached and (now_ts - cached["ts"] < CACHE_TTL):
+            return cached["value"]
 
         data = _safe_deribit_request(
             DERIBIT_URL,
@@ -105,8 +140,14 @@ class Trade(models.Model):
         )
 
         if not data or "result" not in data or not data["result"]:
-            # fallback to last cached value if available
-            return float(cached.get("value", 0.0)) if cached else 0.0
+            # network / API failure → use cache if possible
+            if cached:
+                _logger.warning("OI fetch failed for %s, using cached value", instrument_name)
+                return cached["value"]
+
+            # no cache → signal failure
+            _logger.warning("OI fetch failed for %s, no cache available", instrument_name)
+            return None
 
         oi = float(data["result"][0].get("open_interest", 0.0))
 
@@ -114,42 +155,77 @@ class Trade(models.Model):
             "ts": now_ts,
             "value": oi,
         }
-
         return oi
-        
+            
     def _cron_fetch_oi_snapshots(self):
         Snapshot = self.env["dankbit.oi_snapshot"]
         now = fields.Datetime.now()
 
-        groups = self.read_group(
-            domain=[
-                ("expiration", "=", self._get_tomorrows_ts()),   # ✅ only non-expired instruments
-                ("is_block_trade", "=", False),
-                ("active", "=", True),
-            ],
-            fields=["name"],
-            groupby=["name"],
-        )
+        # 1) Get authoritative instrument list from Deribit
+        instruments = self._get_instruments()
 
-        for g in groups:
-            instrument = g.get("name")
-            if not instrument:
-                continue
+        if not instruments:
+            _logger.warning("No instruments returned from Deribit for OI snapshot.")
+            return
 
+        # 2) Snapshot OI for every eligible option instrument
+        for inst in instruments:
             try:
-                time_module.sleep(0.03 + random.random() * 0.02)  # polite pacing
-                oi = self.fetch_deribit_open_interest(instrument)
+                if inst.get("kind") != "option":
+                    continue
+
+                instrument_name = inst.get("instrument_name")
+                expiration_ts = inst.get("expiration_timestamp")
+
+                if not instrument_name or not expiration_ts:
+                    continue
+
+                # convert expiration timestamp
+                exp_dt = datetime.fromtimestamp(
+                    expiration_ts / 1000,
+                    tz=timezone.utc
+                )
+
+                # apply your expiry cutoff logic
+                if exp_dt < self._get_tomorrows_ts():
+                    continue
+
+                # polite pacing (Deribit friendly)
+                time_module.sleep(0.03 + random.random() * 0.02)
+
+                oi = self.fetch_deribit_open_interest(instrument_name)
+                if oi is None:
+                    continue
+
+                last = Snapshot.search(
+                    [("name", "=", instrument_name)],
+                    order="timestamp desc",
+                    limit=1
+                )
+                if last and (now - last.timestamp).total_seconds() < 60:
+                    continue
+
+                Snapshot.create({
+                    "name": instrument_name,
+                    "open_interest": oi,
+                    "timestamp": now,
+                })
+                _logger.info(
+                    "OI snapshot taken for %s: %.2f",
+                    instrument_name,
+                    oi,
+                )
+
             except Exception as e:
-                _logger.warning("OI fetch failed for %s: %s", instrument, e)
+                _logger.warning(
+                    "OI snapshot failed for %s: %s",
+                    inst.get("instrument_name"),
+                    e,
+                )
+                # IMPORTANT: rollback to keep cron alive
+                self.env.cr.rollback()
                 continue
 
-            Snapshot.create({
-                "name": instrument,
-                "open_interest": oi,
-                "timestamp": now,
-            })
-
-    # @staticmethod
     def reconcile_oi_impact(self, instrument_name):
         Trade = self.env["dankbit.trade"]
         Snapshot = self.env["dankbit.oi_snapshot"]
@@ -164,8 +240,13 @@ class Trade(models.Model):
 
         newer, older = snaps[0], snaps[1]
 
-        # Guard against identical or inverted timestamps
-        if not newer.timestamp or not older.timestamp or newer.timestamp <= older.timestamp:
+        # grace delay: wait until snapshots are old enough
+        GRACE_SECONDS = 90
+        now = fields.Datetime.now()
+        if (now - newer.timestamp).total_seconds() < GRACE_SECONDS:
+            return
+
+        if newer.timestamp <= older.timestamp:
             return
 
         delta_oi = float(newer.open_interest) - float(older.open_interest)
@@ -181,39 +262,47 @@ class Trade(models.Model):
         if not trades:
             return
 
-        # No OI change → zero impacts, mark reconciled
         if delta_oi == 0.0:
             trades.write({"oi_impact": 0.0, "oi_reconciled": True})
             return
 
         total_volume = sum(abs(t.amount or 0.0) for t in trades)
-
-        # Important: don't leave trades unreconciled forever
         if total_volume <= 0.0:
             trades.write({"oi_impact": 0.0, "oi_reconciled": True})
             return
 
-        # Allocate ΔOI proportionally
         for t in trades:
             weight = abs(t.amount or 0.0) / total_volume
             t.oi_impact = delta_oi * weight
             t.oi_reconciled = True
-
+            _logger.info(
+                "Reconciled OI impact for trade %s: %.2f (weight %.4f)",
+                t.deribit_trade_identifier,
+                t.oi_impact,
+                weight,
+            )
 
     def _cron_reconcile_oi(self):
-        groups = self.read_group(
-            domain=[
-                ("expiration", "=", self._get_tomorrows_ts()),
-                ("active", "=", True),
-            ],
+        Snapshot = self.env["dankbit.oi_snapshot"]
+
+        # get instruments that actually have snapshots
+        groups = Snapshot.read_group(
+            domain=[("timestamp", ">=", fields.Datetime.now() - timedelta(hours=2))],
             fields=["name"],
             groupby=["name"],
         )
 
         for g in groups:
             instrument = g.get("name")
-            if instrument:
+            if not instrument:
+                continue
+
+            try:
                 self.reconcile_oi_impact(instrument)
+            except Exception:
+                self.env.cr.rollback()
+                _logger.exception("OI reconciliation failed for %s", instrument)
+                continue
 
     @api.depends('expiration')
     def _compute_days_to_expiry(self):
@@ -385,20 +474,9 @@ class Trade(models.Model):
                 #
                 # Robust request with backoff
                 #
-                backoff = 0.2
-                for attempt in range(5):
-                    try:
-                        data = _safe_deribit_request(URL, params=params, timeout=timeout)
-                        break
-                    except Exception as e:
-                        _logger.warning(
-                            "Deribit request failed (%s/%s) %s params=%s: %s",
-                            attempt+1, 5, URL, params, e
-                        )
-                        time_module.sleep(backoff)
-                        backoff *= 2
-                else:
-                    _logger.error("Giving up on %s after repeated errors.", inst_name)
+                data = _safe_deribit_request(URL, params=params, timeout=timeout)
+                if not data:
+                    _logger.warning("Deribit request failed for %s, stopping pagination.", inst_name)
                     break
 
                 if not data or "result" not in data:
@@ -452,17 +530,6 @@ class Trade(models.Model):
 
             _logger.info("Finished fetching trades for %s", inst_name)
 
-
-    # def _get_tomorrows_ts(self):
-    #     # Current UTC time
-    #     now = datetime.now(pytz.utc)
-    #     # Tomorrow's date
-    #     tomorrow = now.date() + timedelta(days=1)
-    #     # Tomorrow at 08:00 GMT
-    #     target = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 8, 0, 0, tzinfo=timezone.utc)
-    #     # Milliseconds since epoch
-    #     return int(target.timestamp() * 1000)
-
     @staticmethod
     def _get_tomorrows_ts():
         """
@@ -487,11 +554,6 @@ class Trade(models.Model):
 
     def _get_instruments(self):
         URL = "https://www.deribit.com/api/v2/public/get_instruments"
-        params = {
-            "currency": "BTC",
-            "kind": "option",
-            "expired": "false"
-        }
 
         timeout = 5.0
         try:
@@ -502,73 +564,84 @@ class Trade(models.Model):
             cache_ttl = 300.0
 
         now_ts = time_module.time()
-        cached = _DERIBIT_CACHE.get('instruments', {})
-        if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
-            return cached.get('value')
+        all_instruments = []
 
-        data = _safe_deribit_request(URL, params=params, timeout=timeout)
-        if data and isinstance(data, dict):
-            instruments = data.get("result", [])
-            _DERIBIT_CACHE['instruments'] = {'ts': now_ts, 'value': instruments}
-            return instruments
-        else:
-            _logger.exception("_get_instruments failed and no cache available")
-            return cached.get('value', [])
+        for currency in ("BTC", "ETH"):
+            cache_key = f"instruments_{currency}"
+            cached = _DERIBIT_CACHE.get(cache_key, {})
+
+            if (
+                cached
+                and cached.get("value") is not None
+                and (now_ts - cached.get("ts", 0) < cache_ttl)
+            ):
+                all_instruments.extend(cached["value"])
+                continue
+
+            params = {
+                "currency": currency,
+                "kind": "option",
+                "expired": "false",
+            }
+
+            data = _safe_deribit_request(URL, params=params, timeout=timeout)
+
+            if data and isinstance(data, dict):
+                instruments = data.get("result", [])
+                _DERIBIT_CACHE[cache_key] = {
+                    "ts": now_ts,
+                    "value": instruments,
+                }
+                all_instruments.extend(instruments)
+            else:
+                _logger.warning(
+                    "Failed to fetch %s instruments from Deribit, using cache if available",
+                    currency,
+                )
+                if cached and cached.get("value"):
+                    all_instruments.extend(cached["value"])
+
+        return all_instruments
 
     def _create_new_trade(self, trade, expiration_ts):
-        exists = self.env["dankbit.trade"].search(
-            domain=[("deribit_trade_identifier", "=", trade.get("trade_id"))],
-            limit=1
-        )
-
-        icp = self.env['ir.config_parameter'].sudo()
         try:
-            start_from_ts = int(icp.get_param("dankbit.from_days_ago", default=2))
-        except Exception:
-            start_from_ts = 2
+            deribit_dt = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc)
+            exp_dt = datetime.fromtimestamp(expiration_ts / 1000, tz=timezone.utc) if expiration_ts else None
 
-        start_ts = self._get_midnight_dt(start_from_ts)
+            vals = {
+                "name": trade.get("instrument_name"),
+                "iv": trade.get("iv"),
+                "index_price": trade.get("index_price"),
+                "price": trade.get("price"),
+                "mark_price": trade.get("mark_price"),
+                "direction": trade.get("direction"),
+                "trade_seq": trade.get("trade_seq"),
+                "deribit_trade_identifier": trade.get("trade_id"),
+                "amount": trade.get("amount"),
+                "deribit_ts": fields.Datetime.to_string(deribit_dt),
+                "expiration": fields.Datetime.to_string(exp_dt) if exp_dt else False,
+                "is_block_trade": bool(
+                    trade.get("is_block_trade")
+                    or trade.get("block_trade")
+                    or trade.get("block_trade_id")
+                ),
+                "block_trade_id": trade.get("block_trade_id"),
+            }
 
-        # skip anything older than our configured window
-        if exists or trade.get("timestamp", 0) <= start_ts:
-            return
+            self.env["dankbit.trade"].create(vals)
 
-        # convert timestamps to timezone-aware UTC datetimes and store
-        try:
-            deribit_dt = datetime.fromtimestamp(trade["timestamp"]/1000, tz=timezone.utc)
-            exp_dt = datetime.fromtimestamp(expiration_ts/1000, tz=timezone.utc) if expiration_ts else None
-            deribit_str = fields.Datetime.to_string(deribit_dt)
-            exp_str = fields.Datetime.to_string(exp_dt) if exp_dt else False
-        except Exception:
-            # fallback to raw string format if conversion fails
-            deribit_str = datetime.fromtimestamp(trade["timestamp"]/1000).strftime('%Y-%m-%d %H:%M:%S')
-            exp_str = datetime.fromtimestamp(expiration_ts/1000).strftime('%Y-%m-%d %H:%M:%S') if expiration_ts else False
+        except Exception as e:
+            # VERY IMPORTANT: rollback poisoned transaction
+            self.env.cr.rollback()
 
-        block_trade_id = trade.get("block_trade_id")
-        is_block_trade = (
-            trade.get("is_block_trade")
-            or trade.get("block_trade")
-            or bool(block_trade_id)
-        )
+            # duplicate trade → safe to ignore
+            if "deribit_trade_identifier" in str(e):
+                return
 
-        vals = {
-            "name": trade.get("instrument_name"),
-            "iv": trade.get("iv"),
-            "index_price": trade.get("index_price"),
-            "price": trade.get("price"),
-            "mark_price": trade.get("mark_price"),
-            "direction": trade.get("direction"),
-            "trade_seq": trade.get("trade_seq"),
-            "deribit_trade_identifier": trade.get("trade_id"),
-            "amount": trade.get("amount"),
-            "deribit_ts": deribit_str,
-            "expiration": exp_str,
-            "is_block_trade": is_block_trade,
-            "block_trade_id": block_trade_id if block_trade_id else None,
-        }
-        self.env["dankbit.trade"].create(vals)
-        _logger.info('*** Trade Created: %s (trade_id=%s) ***',
-                    trade.get("instrument_name"), trade.get("trade_id"))
+            _logger.exception("Failed to create trade %s", trade.get("trade_id"))
+            raise
+
+
 
     @staticmethod
     def _get_midnight_dt(days_offset=0):
@@ -585,11 +658,14 @@ class Trade(models.Model):
     # run by scheduled action
     def _delete_expired_trades(self):
         self.env['dankbit.trade'].search(
-            domain=[("expiration", "<", fields.Datetime.now())]
+            domain=[
+                ("expiration", "<", fields.Datetime.now()), 
+                ("active", "=", True)
+            ]
         ).write({"active": False})
 
-    def get_btc_option_name_for_today(self):
-        tomorrow = datetime.now() + timedelta(days=1)
+    def get_btc_option_name_for_tomorrow_expiry(self):
+        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
         instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
         return instrument
 
@@ -603,7 +679,7 @@ class Trade(models.Model):
             _logger.info("Skipping screenshot: outside time window.")
             return  # skip outside window
         
-        btc_today = self.get_btc_option_name_for_today()
+        btc_today = self.get_btc_option_name_for_tomorrow_expiry()
         # Use configured base URL so this works both on dankbit.com and locally.
         icp = self.env['ir.config_parameter'].sudo()
         try:

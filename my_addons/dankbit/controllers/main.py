@@ -740,7 +740,6 @@ class ChartController(http.Controller):
             oi_call, oi_put = oi.calculate_oi(strike, trades)
             oi_data.append([strike, oi_call, oi_put])
 
-
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
 

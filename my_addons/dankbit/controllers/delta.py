@@ -8,9 +8,10 @@ from odoo.http import request as _odoo_request
 _logger = logging.getLogger(__name__)
 
 
-def bs_delta(S, K, T, r, sigma, trade_ts, oi_impact, option_type="call"):
+# --- Black-Scholes Delta ---
+def bs_delta(S, K, T, r, sigma, trade_ts, option_type="call"):
     S = np.asarray(S, dtype=float)
-    tau_seconds=14400  # 4h default decay
+    tau_seconds = 14400  # 4h decay
 
     try:
         icp = _odoo_request.env['ir.config_parameter'].sudo()
@@ -19,8 +20,8 @@ def bs_delta(S, K, T, r, sigma, trade_ts, oi_impact, option_type="call"):
         hours = 1.0
 
     eps_years = hours / (24.0 * 365.0)
-
     sigma_eps = 1e-4
+
     T_eff = max(T, eps_years)
     sigma_eff = max(sigma, sigma_eps)
 
@@ -32,19 +33,21 @@ def bs_delta(S, K, T, r, sigma, trade_ts, oi_impact, option_type="call"):
     delta = norm.cdf(d1) if option_type == "call" else norm.cdf(d1) - 1
 
     # -------------------------------
-    # Time-decay weighting
+    # Time-decay weighting (SAFE)
     # -------------------------------
     if trade_ts is not None:
-        now = datetime.now()
-        dt = (now - trade_ts).total_seconds()
+        now = datetime.now(timezone.utc)
 
+        if trade_ts.tzinfo is None:
+            trade_ts = trade_ts.replace(tzinfo=timezone.utc)
+
+        dt = (now - trade_ts).total_seconds()
         if dt > 0:
-            weight = math.exp(-dt / float(tau_seconds))
-            delta *= weight
+            delta *= math.exp(-dt / tau_seconds)
         else:
             delta *= 0.0
 
-    return delta * oi_impact
+    return delta
 
 def _infer_sign(trd):
     if hasattr(trd, "direction"):
@@ -59,15 +62,40 @@ def _infer_sign(trd):
 
 def portfolio_delta(S, trades, r=0.0, mock_0dte=False):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
+
     for trd in trades:
-        T = trd.days_to_expiry/365
-        if mock_0dte == "True":
-            T = 0
-        sigma  = trd.iv/100
-        sign   = _infer_sign(trd)
-        qty    = trd.amount
-        delta  = bs_delta(S, trd.strike, T, r, sigma, trd.deribit_ts, trd.oi_impact, trd.option_type)
-        total += sign * qty * delta
+        hours_to_expiry = trd.get_hours_to_expiry()
+        T = hours_to_expiry / (24.0 * 365.0)
+        if str(mock_0dte).lower() == "true":
+            T = 0.0
+
+        sigma = trd.iv / 100.0
+        sign  = _infer_sign(trd)
+        qty   = trd.amount
+
+        delta_flow = bs_delta(
+            S,
+            trd.strike,
+            T,
+            r,
+            sigma,
+            trd.deribit_ts,
+            trd.option_type,
+        )
+
+        # -------------------------------
+        # OI persistence weighting
+        # -------------------------------
+        if trd.oi_impact is None:
+            persistence = 1.0
+        elif trd.amount:
+            persistence = min(
+                1.0,
+                abs(trd.oi_impact) / max(abs(trd.amount), 1e-6)
+            )
+        else:
+            persistence = 0.0
+
+        total += sign * qty * delta_flow * persistence
+
     return total
-
-
