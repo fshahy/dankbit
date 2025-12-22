@@ -177,7 +177,7 @@ class Trade(models.Model):
                 instrument_name = inst.get("instrument_name")
                 expiration_ts = inst.get("expiration_timestamp")
 
-                if not instrument_name or not expiration_ts:
+                if not instrument_name or not expiration_ts or expiration_ts > self._get_tomorrows_ts():
                     continue
 
                 # convert expiration timestamp
