@@ -139,13 +139,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - calls",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -226,13 +219,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - puts",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -314,13 +300,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - buys",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -402,13 +381,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - sells",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -474,6 +446,13 @@ class ChartController(http.Controller):
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, strike=int(strike))
         
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -571,13 +550,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - {plot_title}",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -649,13 +621,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - all",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -730,13 +695,6 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - zones",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -750,24 +708,14 @@ class ChartController(http.Controller):
         "/<string:instrument>/oi",
         "/<string:instrument>/oi/<int:from_hour>",
         ], type="http", auth="public", website=True)
-    def chart_png_oi(self, instrument, from_hour=0):
-        plot_title = "OI"
+    def chart_png_full_oi(self, instrument):
+        plot_title = "Full OI"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) + 10000.0 # +1000 to have more space in oi view
         day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
         steps = int(icp.get_param("dankbit.steps", default=100))
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        last_hedging_time = icp.get_param("dankbit.last_hedging_time")
-        start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
-        start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-
-        if last_hedging_time:
-            start_ts = last_hedging_time
-
-        if from_hour:
-            start_ts = self.get_ts_from_hour(from_hour)
-            plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), 1000):
@@ -775,7 +723,6 @@ class ChartController(http.Controller):
                 domain=[
                     ("name", "ilike", f"{instrument}"),
                     ("strike", "=", strike),
-                    ("deribit_ts", ">=", start_ts),
                     ("is_block_trade", "=", False),
                 ]
             )
@@ -791,18 +738,11 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
-        buf.seek(0) 
-
-        request.env["dankbit.screenshot"].sudo().create({
-            "name": f"{instrument} - oi",
-            "timestamp": fields.Datetime.now(),
-            "image_png": base64.b64encode(buf.read()),
-        })
 
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="{instrument}_oi.png"'),
+            ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
             ("Refresh", refresh_interval),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
