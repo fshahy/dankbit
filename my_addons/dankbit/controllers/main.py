@@ -712,13 +712,24 @@ class ChartController(http.Controller):
         plot_title = "Full OI"
         icp = request.env['ir.config_parameter'].sudo()
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) + 10000.0 # +1000 to have more space in oi view
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000)) - 10000.0 # -1000 to have more space in oi view
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        strike_step = 1000
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) 
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            strike_step = 25
+
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
         oi_data = []
-        for strike in range(int(day_from_price), int(day_to_price), 1000):
+        for strike in range(int(day_from_price), int(day_to_price), strike_step):
             trades = request.env['dankbit.trade'].sudo().search(
                 domain=[
                     ("name", "ilike", f"{instrument}"),

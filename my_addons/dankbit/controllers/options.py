@@ -228,7 +228,15 @@ class OptionStrat:
     
     def plot_oi(self, index_price, oi_data, plot_title):
         fig, ax = plt.subplots(figsize=(18, 8))
-        ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+        # ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+
+        if self.name.startswith("BTC"):
+            ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+            plt.yticks(list(range(-1000000, 1000001, 2000))) 
+        elif self.name.startswith("ETH"):
+            ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
+            plt.yticks(list(range(-1000000, 1000001, 10000)))
+
         plt.xticks(rotation=90) 
         ax.grid(True)
 
@@ -237,9 +245,14 @@ class OptionStrat:
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
-        for oi in oi_data:
-            plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
-            plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
+        if self.name.startswith("BTC"):
+            for oi in oi_data:
+                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
+                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
+        elif self.name.startswith("ETH"):
+            for oi in oi_data:
+                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
+                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
 
         ax.set_title(f"{self.name} | {now} | {plot_title}")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
