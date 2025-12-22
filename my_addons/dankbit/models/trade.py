@@ -177,7 +177,7 @@ class Trade(models.Model):
                 instrument_name = inst.get("instrument_name")
                 expiration_ts = inst.get("expiration_timestamp")
 
-                if not instrument_name or not expiration_ts or expiration_ts > self._get_tomorrows_ts():
+                if not instrument_name or not expiration_ts or expiration_ts > (self._get_tomorrows_ts().timestamp() * 1000):
                     continue
 
                 # convert expiration timestamp
@@ -240,12 +240,6 @@ class Trade(models.Model):
 
         newer, older = snaps[0], snaps[1]
 
-        # grace delay: wait until snapshots are old enough
-        GRACE_SECONDS = 90
-        now = fields.Datetime.now()
-        if (now - newer.timestamp).total_seconds() < GRACE_SECONDS:
-            return
-
         if newer.timestamp <= older.timestamp:
             return
 
@@ -288,7 +282,7 @@ class Trade(models.Model):
         # get instruments that actually have snapshots
         groups = Snapshot.read_group(
             domain=[
-                ("timestamp", ">=", fields.Datetime.now() - timedelta(hours=2)),
+                ("timestamp", ">=", fields.Datetime.now() - timedelta(hours=1)),
             ],
             fields=["name"],
             groupby=["name"],
