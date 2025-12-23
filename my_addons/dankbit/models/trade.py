@@ -156,6 +156,11 @@ class Trade(models.Model):
             "value": oi,
         }
         return oi
+    
+    @staticmethod
+    def expiry_window():
+        now = datetime.now(timezone.utc)
+        return (now + timedelta(hours=32)).timestamp() * 1000
             
     def _cron_fetch_oi_snapshots(self):
         Snapshot = self.env["dankbit.oi_snapshot"]
@@ -169,6 +174,8 @@ class Trade(models.Model):
             return
 
         # 2) Snapshot OI for every eligible option instrument
+        window = self.expiry_window()
+
         for inst in instruments:
             try:
                 if inst.get("kind") != "option":
@@ -177,7 +184,7 @@ class Trade(models.Model):
                 instrument_name = inst.get("instrument_name")
                 expiration_ts = inst.get("expiration_timestamp")
 
-                if not instrument_name or not expiration_ts or expiration_ts > (self._get_tomorrows_ts().timestamp() * 1000):
+                if not instrument_name or not expiration_ts or expiration_ts > window:
                     continue
 
                 # convert expiration timestamp
