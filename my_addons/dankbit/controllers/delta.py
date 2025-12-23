@@ -60,7 +60,7 @@ def _infer_sign(trd):
     amt = getattr(trd, "amount", getattr(trd, "qty", 0.0))
     return 1.0 if amt >= 0 else -1.0
 
-def portfolio_delta(S, trades, r=0.0, mock_0dte=False):
+def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="raw"):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
 
     for trd in trades:
@@ -71,7 +71,18 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False):
 
         sigma = trd.iv / 100.0
         sign  = _infer_sign(trd)
-        qty   = trd.amount
+
+        # -------------------------------
+        # Trade weight by mode
+        # -------------------------------
+        if mode == "raw":
+            weight = trd.amount
+
+        elif mode == "oi":
+            weight = trd.oi_impact or 0.0
+
+        if weight == 0:
+            continue
 
         delta_flow = bs_delta(
             S,
@@ -84,18 +95,21 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False):
         )
 
         # -------------------------------
-        # OI persistence weighting
+        # OI persistence ONLY in oi/hybrid
         # -------------------------------
-        if trd.oi_impact is None:
+        if mode == "raw":
             persistence = 1.0
-        elif trd.amount:
-            persistence = min(
-                1.0,
-                abs(trd.oi_impact) / max(abs(trd.amount), 1e-6)
-            )
         else:
-            persistence = 0.0
+            if trd.oi_impact is None:
+                persistence = 1.0
+            elif trd.amount:
+                persistence = min(
+                    1.0,
+                    abs(trd.oi_impact) / max(abs(trd.amount), 1e-6)
+                )
+            else:
+                persistence = 0.0
 
-        total += sign * qty * delta_flow * persistence
+        total += sign * weight * delta_flow * persistence
 
     return total

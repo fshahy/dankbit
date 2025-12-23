@@ -108,7 +108,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -126,8 +126,8 @@ class ChartController(http.Controller):
                 obj.short_call(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
@@ -190,7 +190,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -208,8 +208,8 @@ class ChartController(http.Controller):
                 obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
@@ -272,7 +272,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -291,8 +291,8 @@ class ChartController(http.Controller):
                 obj.long_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
@@ -355,7 +355,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -374,8 +374,8 @@ class ChartController(http.Controller):
                 obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
@@ -449,8 +449,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte=False, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte=False, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, strike=int(strike))
         
@@ -521,7 +521,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -546,8 +546,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
@@ -596,7 +596,7 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode")
+        mode = params.get("mode", "raw")
         if mode and mode == "oi":
             domain.append(("oi_reconciled", "=", True))
 
@@ -621,8 +621,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
         
