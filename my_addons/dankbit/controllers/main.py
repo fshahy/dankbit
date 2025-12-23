@@ -72,7 +72,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/c",
         "/<string:instrument>/c/<int:from_hour>",
         ], type="http", auth="public", website=True)
-    def chart_png_calls(self, instrument, from_hour=0):
+    def chart_png_calls(self, instrument, from_hour=0, **params):
         plot_title = "calls"
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -89,7 +89,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
         
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -102,15 +101,20 @@ class ChartController(http.Controller):
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("option_type", "=", "call"),
-                ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
-                ("oi_reconciled", "=", True),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("option_type", "=", "call"),
+            ("deribit_ts", ">=", start_ts),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -127,7 +131,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
         ax.text(
             0.01, 0.02,
@@ -152,7 +156,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/p",
         "/<string:instrument>/p/<int:from_hour>",
         ], type="http", auth="public", website=True)
-    def chart_png_puts(self, instrument, from_hour=0):
+    def chart_png_puts(self, instrument, from_hour=0, **params):
         plot_title = "puts"
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -169,7 +173,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -182,15 +185,20 @@ class ChartController(http.Controller):
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("option_type", "=", "put"),
-                ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
-                ("oi_reconciled", "=", True),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("option_type", "=", "put"),
+            ("deribit_ts", ">=", start_ts),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -207,7 +215,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
         ax.text(
             0.01, 0.02,
@@ -232,7 +240,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/b",
         "/<string:instrument>/b/<int:from_hour>",
         ], type="http", auth="public", website=True)
-    def chart_png_buys(self, instrument, from_hour=0):
+    def chart_png_buys(self, instrument, from_hour=0, **params):
         plot_title = "buys"
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -249,7 +257,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -262,15 +269,20 @@ class ChartController(http.Controller):
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("direction", "=", "buy"),
-                ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
-                ("oi_reconciled", "=", True),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("direction", "=", "buy"),
+            ("deribit_ts", ">=", start_ts),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -288,7 +300,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
         ax.text(
             0.01, 0.02,
@@ -313,7 +325,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/s",
         "/<string:instrument>/s/<int:from_hour>",
         ], type="http", auth="public", website=True)
-    def chart_png_sells(self, instrument, from_hour=0):
+    def chart_png_sells(self, instrument, from_hour=0, **params):
         plot_title = "sells"
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -330,7 +342,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         last_hedging_time = icp.get_param("dankbit.last_hedging_time")
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
@@ -343,15 +354,20 @@ class ChartController(http.Controller):
             start_ts = self.get_ts_from_hour(from_hour)
             plot_title = f"{plot_title} from {str(from_hour)}:00 UTC"
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("direction", "=", "sell"),
-                ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
-                ("oi_reconciled", "=", True),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("direction", "=", "sell"),
+            ("deribit_ts", ">=", start_ts),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -369,7 +385,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", True, strike=plot_title)
         
         ax.text(
             0.01, 0.02,
@@ -470,7 +486,7 @@ class ChartController(http.Controller):
         "/<string:instrument>/<string:view_type>/l/<int:minutes_ago>", 
         "/<string:instrument>/<string:view_type>/<int:from_hour>", 
     ], type="http", auth="public", website=True)
-    def chart_png_day(self, instrument, view_type, from_hour=0, minutes_ago=0):
+    def chart_png_day(self, instrument, view_type, from_hour=0, minutes_ago=0, **params):
         if view_type not in ["taker", "mm"]:
             return f"<h3>Nothing here.</h3>"
         
@@ -507,14 +523,19 @@ class ChartController(http.Controller):
             start_ts = datetime.now() - timedelta(minutes=minutes_ago)
             plot_title = f"{plot_title} last {str(minutes_ago)} minutes"
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
-                ("oi_reconciled", "=", True),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("deribit_ts", ">=", start_ts),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -560,7 +581,7 @@ class ChartController(http.Controller):
         return request.make_response(buf.getvalue(), headers=headers)
 
     @http.route("/<string:instrument>/<string:view_type>/a", type="http", auth="public", website=True)
-    def chart_png_all(self, instrument, view_type):
+    def chart_png_all(self, instrument, view_type, **params):
         plot_title = f"{view_type} all"
         icp = request.env['ir.config_parameter'].sudo()
 
@@ -580,12 +601,18 @@ class ChartController(http.Controller):
         mock_0dte = icp.get_param('dankbit.mock_0dte')
         show_red_line = icp.get_param("dankbit.show_red_line")
 
-        trades = request.env['dankbit.trade'].sudo().search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("is_block_trade", "=", False),
-            ]
-        )
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("is_block_trade", "=", False),
+        ]
+
+        mode = params.get("mode", "oi")
+        if mode not in ("raw", "oi"):
+            mode = "oi"
+        if mode == "oi":
+            domain += [("oi_reconciled", "=", True)]
+
+        trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
