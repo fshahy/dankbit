@@ -232,10 +232,10 @@ class OptionStrat:
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            plt.yticks(list(range(-1000000, 1000001, 2000))) 
+            plt.yticks(list(range(-1000000, 1000001, 100))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-            plt.yticks(list(range(-1000000, 1000001, 10000)))
+            plt.yticks(list(range(-1000000, 1000001, 500)))
 
         plt.xticks(rotation=90) 
         ax.grid(True)
