@@ -133,7 +133,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -215,7 +215,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -298,7 +298,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -381,7 +381,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -456,7 +456,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: raw",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -553,7 +553,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -628,7 +628,7 @@ class ChartController(http.Controller):
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades",
+            f"{len(trades)} trades | Mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
