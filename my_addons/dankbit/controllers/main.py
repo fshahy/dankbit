@@ -108,11 +108,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
@@ -192,11 +190,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
@@ -276,11 +272,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
@@ -361,11 +355,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
@@ -529,11 +521,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
@@ -606,11 +596,9 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "oi")
-        if mode not in ("raw", "oi"):
-            mode = "oi"
-        if mode == "oi":
-            domain += [("oi_reconciled", "=", True)]
+        mode = params.get("mode")
+        if mode and mode == "oi":
+            domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
 
