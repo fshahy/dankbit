@@ -187,16 +187,6 @@ class Trade(models.Model):
                 if not instrument_name or not expiration_ts or expiration_ts > window:
                     continue
 
-                # convert expiration timestamp
-                exp_dt = datetime.fromtimestamp(
-                    expiration_ts / 1000,
-                    tz=timezone.utc
-                )
-
-                # apply your expiry cutoff logic
-                if exp_dt < self._get_tomorrows_ts():
-                    continue
-
                 # polite pacing (Deribit friendly)
                 time_module.sleep(0.03 + random.random() * 0.02)
 
