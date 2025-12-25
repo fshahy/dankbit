@@ -55,7 +55,7 @@ def _infer_sign(trd):
         return 0.0
 
 # --- Portfolio Delta ---
-def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="raw"):
+def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="flow"):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
 
     for trd in trades:
@@ -67,9 +67,9 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="raw"):
         sigma = trd.iv / 100.0
         sign  = _infer_sign(trd)
 
-        if mode == "raw":
+        if mode == "flow":
             weight = trd.amount
-        elif mode == "oi":
+        elif mode == "structure":
             weight = trd.oi_impact
         else:
             raise ValueError(f"Unknown mode: {mode}")
@@ -87,9 +87,9 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="raw"):
             trd.option_type,
         )
 
-        if mode == "raw":
+        if mode == "flow":
             persistence = 1.0
-        elif mode == "oi":
+        elif mode == "structure":
             if trd.oi_impact is None:
                 persistence = 1.0
             elif trd.amount:

@@ -67,7 +67,7 @@ class OptionStrat:
             plt.yticks(list(range(-1000, 1001, 10))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
-            plt.yticks(list(range(-1000, 1001, 50)))
+            plt.yticks(list(range(-10000, 10001, 100)))
         ax.grid(True)
 
         # NOTE: signature is added after legend creation to allow placing it

@@ -82,8 +82,8 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "raw")
-        if mode and mode == "oi":
+        mode = params.get("mode", "flow")
+        if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
@@ -107,14 +107,14 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades | Mode: {mode}",
+            f"{len(trades)} trades | mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -157,8 +157,8 @@ class ChartController(http.Controller):
             ("is_block_trade", "=", False),
         ]
 
-        mode = params.get("mode", "raw")
-        if mode and mode == "oi":
+        mode = params.get("mode", "flow")
+        if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
         trades = request.env['dankbit.trade'].sudo().search(domain=domain)
@@ -182,14 +182,14 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow")
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow")
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
         
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades | Mode: {mode}",
+            f"{len(trades)} trades | mode: {mode}",
             transform=ax.transAxes,
             fontsize=14,
         )
