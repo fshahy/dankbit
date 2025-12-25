@@ -126,7 +126,7 @@ class OptionStrat:
 
         if view_type == "mm": # for market maker
             if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
+                ax.plot(self.STs, -payoff_scaled, color="red", label="MM P&L")
             ax.plot(self.STs, -md_plot, color="green", label="Delta")
             ax.plot(self.STs, -mg_plot, color="violet", label="Gamma")
 
@@ -143,7 +143,7 @@ class OptionStrat:
             )
         elif view_type == "taker":
             if show_red_line:
-                ax.plot(self.STs, payoff_scaled, color="red", label="P&L")
+                ax.plot(self.STs, payoff_scaled, color="red", label="Taker P&L")
             ax.plot(self.STs, md_plot, color="green", label="Delta")
             ax.plot(self.STs, mg_plot, color="violet", label="Gamma")
 
