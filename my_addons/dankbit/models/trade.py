@@ -12,8 +12,8 @@ _logger = logging.getLogger(__name__)
 # Simple in-memory cache to avoid hitting Deribit too often.
 # Keys: 'index_price', 'instruments', optionally others.
 _DERIBIT_CACHE = {
-    'index_price': {'ts': 0, 'value': None},
-    'instruments': {'ts': 0, 'value': None},
+    "index_price": {"ts": 0, "value": None},
+    "instruments": {"ts": 0, "value": None},
 }
 
 # Simple in-memory cache for OI per instrument
@@ -293,7 +293,7 @@ class Trade(models.Model):
                 _logger.exception("OI reconciliation failed for %s", instrument)
                 continue
 
-    @api.depends('expiration')
+    @api.depends("expiration")
     def _compute_days_to_expiry(self):
         """Compute remaining days until expiration from current UTC date."""
         now = datetime.now(timezone.utc)
@@ -346,28 +346,28 @@ class Trade(models.Model):
         # read timeout from config (seconds)
         timeout = 5.0
         try:
-            icp = self.env['ir.config_parameter'].sudo()
-            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
-            cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=30.0))
+            icp = self.env["ir.config_parameter"].sudo()
+            timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
+            cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=30.0))
         except Exception:
             cache_ttl = 30.0
 
         # consult cache first
         now_ts = time_module.time()
-        cached = _DERIBIT_CACHE.get('index_price', {})
-        if cached and cached.get('value') is not None and (now_ts - cached.get('ts', 0) < cache_ttl):
-            return cached.get('value')
+        cached = _DERIBIT_CACHE.get("index_price", {})
+        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < cache_ttl):
+            return cached.get("value")
 
         data = _safe_deribit_request(URL, params=params, timeout=timeout)
         if data and isinstance(data, dict):
             val = data.get("result", {}).get("index_price", 0.0)
-            _DERIBIT_CACHE['index_price'] = {'ts': now_ts, 'value': val}
+            _DERIBIT_CACHE["index_price"] = {"ts": now_ts, "value": val}
             return val
         else:
             # on failure, fall back to last cached value if available
-            if cached and cached.get('value') is not None:
+            if cached and cached.get("value") is not None:
                 _logger.warning("get_index_price: using stale cached value")
-                return cached.get('value')
+                return cached.get("value")
             _logger.exception("get_index_price failed and no cache available")
             return 0.0
 
@@ -396,7 +396,7 @@ class Trade(models.Model):
             if inst.get("kind") == "option"
         ]
 
-        icp = self.env['ir.config_parameter'].sudo()
+        icp = self.env["ir.config_parameter"].sudo()
         try:
             timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
         except Exception:
@@ -524,9 +524,9 @@ class Trade(models.Model):
 
         timeout = 5.0
         try:
-            icp = self.env['ir.config_parameter'].sudo()
-            timeout = float(icp.get_param('dankbit.deribit_timeout', default=5.0))
-            cache_ttl = float(icp.get_param('dankbit.deribit_cache_ttl', default=300.0))
+            icp = self.env["ir.config_parameter"].sudo()
+            timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
+            cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=300.0))
         except Exception:
             cache_ttl = 300.0
 
@@ -610,7 +610,7 @@ class Trade(models.Model):
 
     # run by scheduled action
     def _delete_expired_trades(self):
-        self.env['dankbit.trade'].search(
+        self.env["dankbit.trade"].search(
             domain=[
                 ("expiration", "<", fields.Datetime.now()), 
                 ("active", "=", True)
@@ -624,7 +624,7 @@ class Trade(models.Model):
             "view_mode": "form",
             "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
             "target": "new",
-            'context': {
+            "context": {
                 "dankbit_view_type": "taker",
             }
         }
@@ -636,7 +636,7 @@ class Trade(models.Model):
             "view_mode": "form",
             "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
             "target": "new",
-            'context': {
+            "context": {
                 "dankbit_view_type": "mm",
             }
         }

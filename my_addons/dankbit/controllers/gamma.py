@@ -10,11 +10,11 @@ def bs_gamma(S, K, T, r, sigma, trade_ts):
     S = np.asarray(S, dtype=float)
 
     try:
-        icp = _odoo_request.env['ir.config_parameter'].sudo()
-        hours = float(icp.get_param('dankbit.greeks_min_time_hours', default=1.0))
+        icp = _odoo_request.env["ir.config_parameter"].sudo()
+        hours = float(icp.get_param("dankbit.greeks_min_time_hours", default=1.0))
         tau_seconds = float(
             icp.get_param(
-                'dankbit.greeks_gamma_decay_tau_seconds',
+                "dankbit.greeks_gamma_decay_tau_seconds",
                 default=21600  # 6h
             )
         )

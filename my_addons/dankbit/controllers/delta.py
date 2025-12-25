@@ -11,8 +11,8 @@ def bs_delta(S, K, T, r, sigma, trade_ts, option_type="call"):
     tau_seconds = 14400  # 4h decay
 
     try:
-        icp = _odoo_request.env['ir.config_parameter'].sudo()
-        hours = float(icp.get_param('dankbit.greeks_min_time_hours', default=1.0))
+        icp = _odoo_request.env["ir.config_parameter"].sudo()
+        hours = float(icp.get_param("dankbit.greeks_min_time_hours", default=1.0))
     except Exception:
         hours = 1.0
 

@@ -1,34 +1,82 @@
 <odoo>
-<template id="dankbit_help" name="Dankbit 2x2 Image Grid">
-  <t t-call="website.layout">
-    <div class="container my-5">
-      <div class="row text-center">
-        <!-- Row 1 -->
-        <div class="col-md-6 mb-4">
-          <img src="/dankbit/static/src/img/LC.png"
-               class="img-fluid rounded shadow-sm"
-               alt="Image 1"/>
-        </div>
-        <div class="col-md-6 mb-4">
-          <img src="/dankbit/static/src/img/LP.png"
-               class="img-fluid rounded shadow-sm"
-               alt="Image 2"/>
-        </div>
+	<template id="dankbit_help" name="Dankbit 2x2 Image Grid">
+		<t t-call="website.layout">
+			<div class="container my-5">
+				<div class="row text-center">
+					<!-- Row 1 -->
+					<div class="col-md-6 mb-4">
+						<img src="/dankbit/static/src/img/LC.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Image 1" />
+					</div>
+					<div class="col-md-6 mb-4">
+						<img src="/dankbit/static/src/img/LP.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Image 2" />
+					</div>
 
-        <!-- Row 2 -->
-        <div class="col-md-6 mb-4">
-          <img src="/dankbit/static/src/img/SC.png"
-               class="img-fluid rounded shadow-sm"
-               alt="Image 3"/>
-        </div>
-        <div class="col-md-6 mb-4">
-          <img src="/dankbit/static/src/img/SP.png"
-               class="img-fluid rounded shadow-sm"
-               alt="Image 4"/>
-        </div>
-      </div>
-    </div>
-  </t>
-</template>
+					<!-- Row 2 -->
+					<div class="col-md-6 mb-4">
+						<img src="/dankbit/static/src/img/SC.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Image 3" />
+					</div>
+					<div class="col-md-6 mb-4">
+						<img src="/dankbit/static/src/img/SP.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Image 4" />
+					</div>
+				</div>
+			</div>
+		</t>
+	</template>
+
+	<template id="dankbit_instrument_home_page" name="Instrument Homepage">
+		<t t-call="website.layout">
+			<div class="container my-5">
+				<div class="row justify-content-center">
+					<div class="col-lg-6 col-md-8">
+						<h2>
+							<t t-esc="instrument"/>
+						</h2>
+
+						<h4>
+							Market Maker Views:
+						</h4>
+						<p>
+							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
+								Today's Flow: /mm?mode=flow
+							</a>
+						</p>
+						<p>
+							<a t-attf-href="{{instrument}}/mm?mode=structure" target="_blank">
+								Today's Structure: /mm?mode=structure
+							</a>
+						</p>
+						<p>
+							<a t-attf-href="{{instrument}}/mm/a?mode=flow" target="_blank">
+								Full Flow: /mm/a?mode=flow
+							</a>
+						</p>
+						<p>
+							<a t-attf-href="{{instrument}}/mm/a?mode=structure" target="_blank">
+								Full Structure: /mm/a?mode=structure
+							</a>
+						</p>
+
+						<br/>
+						<h4>
+							OI Views:
+						</h4>
+						<p>
+							<a t-attf-href="{{instrument}}/oi" target="_blank">
+								Full OI (/oi)
+							</a>
+						</p>
+					</div>
+				</div>
+			</div>
+		</t>
+	</template>
 
 </odoo>

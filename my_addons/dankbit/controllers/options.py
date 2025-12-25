@@ -21,8 +21,8 @@ class Option:
         self.direction = direction
     
     def __repr__(self):
-        direction = 'long' if self.direction == 1 else 'short'
-        return f'Option(type={self.type},K={self.K}, price={self.price},direction={direction})'
+        direction = "long" if self.direction == 1 else "short"
+        return f"Option(type={self.type},K={self.K}, price={self.price},direction={direction})"
 
 class OptionStrat:
     def __init__(self, name, S0, from_price, to_price, step):
@@ -37,22 +37,22 @@ class OptionStrat:
     def long_call(self, K, C, Q=1):
         payoffs = (np.maximum(self.STs-K, 0) - C) * Q
         self.payoffs += payoffs
-        self._add_to_self('call', K, C, 1, Q)
+        self._add_to_self("call", K, C, 1, Q)
     
     def short_call(self, K, C, Q=1):
         payoffs = ((-1)*np.maximum(self.STs-K, 0) + C) * Q
         self.payoffs += payoffs
-        self._add_to_self('call', K, C, -1, Q)
+        self._add_to_self("call", K, C, -1, Q)
     
     def long_put(self, K, P, Q=1):
         payoffs = (np.maximum(K-self.STs, 0) - P) * Q
         self.payoffs += payoffs
-        self._add_to_self('put', K, P, 1, Q)
+        self._add_to_self("put", K, P, 1, Q)
       
     def short_put(self, K, P, Q=1):
         payoffs = ((-1)*np.maximum(K-self.STs, 0) + P) * Q
         self.payoffs += payoffs
-        self._add_to_self('put', K, P, -1, Q)
+        self._add_to_self("put", K, P, -1, Q)
 
     def _add_to_self(self, type_, K, price, direction, Q):
         o = Option(type_, K, price, direction)
@@ -88,8 +88,8 @@ class OptionStrat:
         gamma_scale = 1.0
         cfg_val = None
         try:
-            icp = _odoo_request.env['ir.config_parameter'].sudo()
-            cfg = icp.get_param('dankbit.gamma_plot_scale', default=None)
+            icp = _odoo_request.env["ir.config_parameter"].sudo()
+            cfg = icp.get_param("dankbit.gamma_plot_scale", default=None)
             if cfg is not None:
                 try:
                     cfg_val = float(cfg)
@@ -160,8 +160,8 @@ class OptionStrat:
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
-            
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
+
+        ax.axhline(0, color="black", linewidth=1, linestyle="-")
         ax.axvline(x=index_price, color="blue")
 
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
@@ -189,18 +189,18 @@ class OptionStrat:
 
         if self.name.startswith("BTC"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
-                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
+                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color="green")
+                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color="red")
         elif self.name.startswith("ETH"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
-                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
+                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color="green")
+                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color="red")
 
         utc_now = datetime.now(ZoneInfo("UTC"))
         now = utc_now.strftime("%Y-%m-%d %H:%M")
 
         ax.set_title(f"{self.name} | {now} UTC | Full OI")
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
+        ax.axhline(0, color="black", linewidth=1, linestyle="-")
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # no legend here by default, but keep signature placement logic

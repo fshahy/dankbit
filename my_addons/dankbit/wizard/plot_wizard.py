@@ -34,9 +34,9 @@ class PlotWizard(models.TransientModel):
         return res
     
     def _plot(self, trades, dankbit_view_type):
-        icp = self.env['ir.config_parameter'].sudo()
+        icp = self.env["ir.config_parameter"].sudo()
 
-        mock_0dte = icp.get_param('dankbit.mock_0dte')
+        mock_0dte = icp.get_param("dankbit.mock_0dte")
 
         day_from_price = 0
         day_to_price = 1000
@@ -50,8 +50,8 @@ class PlotWizard(models.TransientModel):
             day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
-        
-        index_price = self.env['dankbit.trade'].sudo().get_index_price(instrument)
+
+        index_price = self.env["dankbit.trade"].sudo().get_index_price(instrument)
         # Note: here it is possible that users selects multiple instruments.
         obj = options.OptionStrat(f"{instrument} | Plotting {len(trades)} trades", index_price, day_from_price, day_to_price, steps)
         is_call = []
