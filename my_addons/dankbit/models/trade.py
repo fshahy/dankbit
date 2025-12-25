@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import random
-import pytz
-from datetime import datetime, timezone, timedelta, time
+from datetime import datetime, timezone, timedelta
 import logging
 import requests, time as time_module
 
@@ -74,7 +73,6 @@ class Trade(models.Model):
         string="Days to Expiry",
         compute="_compute_days_to_expiry"
     )
-    # hours_to_expiry = (expiration - now).total_seconds() / 3600
     block_trade_id = fields.Char(
         string="Block Trade ID",
         help="Deribit-assigned ID if this trade was executed as a block trade."
@@ -89,7 +87,6 @@ class Trade(models.Model):
         default=0.0,
         help="Allocated OI change for this trade"
     )
-
     oi_reconciled = fields.Boolean(
         string="OI Reconciled",
         default=False,
@@ -113,7 +110,6 @@ class Trade(models.Model):
 
         seconds = (exp - now).total_seconds()
         return max(seconds / 3600.0, 0.0)
-
 
     @staticmethod
     def fetch_deribit_open_interest(instrument_name: str):
@@ -523,28 +519,6 @@ class Trade(models.Model):
 
             _logger.info("Finished fetching trades for %s", inst_name)
 
-    @staticmethod
-    def _get_tomorrows_ts():
-        """
-        Return tomorrow's option expiry timestamp at 08:00 UTC
-        as a timezone-aware datetime.
-        """
-
-        now = datetime.now(timezone.utc)
-        tomorrow = now.date() + timedelta(days=1)
-
-        expiry_dt = datetime(
-            year=tomorrow.year,
-            month=tomorrow.month,
-            day=tomorrow.day,
-            hour=8,
-            minute=0,
-            second=0,
-            tzinfo=timezone.utc,
-        )
-
-        return expiry_dt
-
     def _get_instruments(self):
         URL = "https://www.deribit.com/api/v2/public/get_instruments"
 
@@ -634,20 +608,6 @@ class Trade(models.Model):
             _logger.exception("Failed to create trade %s", trade.get("trade_id"))
             raise
 
-
-
-    @staticmethod
-    def _get_midnight_dt(days_offset=0):
-        """
-        Return midnight UTC minus 'days_offset' days, in milliseconds since epoch.
-        Example:
-            _get_midnight_dt(0)  → today's midnight UTC (ms)
-            _get_midnight_dt(1)  → yesterday's midnight UTC (ms)
-        """
-        now = datetime.now(timezone.utc)
-        midnight = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
-        return int((midnight - timedelta(days=days_offset)).timestamp() * 1000)
-
     # run by scheduled action
     def _delete_expired_trades(self):
         self.env['dankbit.trade'].search(
@@ -656,70 +616,6 @@ class Trade(models.Model):
                 ("active", "=", True)
             ]
         ).write({"active": False})
-
-    def get_btc_option_name_for_tomorrow_expiry(self):
-        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-        instrument = f"BTC-{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
-        return instrument
-
-    # run by scheduled action
-    def _take_screenshot(self):
-        now = datetime.now().time()
-        start = time(5, 0)   # 05:00
-        end   = time(9, 0)   # 09:00
-
-        if not (start <= now <= end):
-            _logger.info("Skipping screenshot: outside time window.")
-            return  # skip outside window
-        
-        btc_today = self.get_btc_option_name_for_tomorrow_expiry()
-        # Use configured base URL so this works both on dankbit.com and locally.
-        icp = self.env['ir.config_parameter'].sudo()
-        try:
-            base_url = icp.get_base_url()
-        except Exception:
-            # fallback to param (older Odoo versions)
-            base_url = icp.get_param('web.base.url', default='http://localhost:8069')
-
-        # Build the URL robustly and allow local hosts.
-        full_url = f"{base_url.rstrip('/')}/{btc_today}/mm/4"
-        _logger.info("Taking screenshot using URL: %s", full_url)
-
-        # timeout configurable (seconds)
-        try:
-            timeout = float(icp.get_param('dankbit.screenshot_timeout', default=3.0))
-        except Exception:
-            timeout = 3.0
-
-        try:
-            response = requests.get(full_url, timeout=timeout)
-            response.raise_for_status()
-            self.env.cr.commit()
-            _msg = f"✅ Called {full_url} — {response.status_code}"
-        except requests.exceptions.SSLError as e:
-            # Retry without SSL verification for local dev servers with self-signed certs
-            _logger.warning("SSL error when calling %s: %s — retrying with verify=False", full_url, e)
-            try:
-                response = requests.get(full_url, timeout=timeout, verify=False)
-                response.raise_for_status()
-                self.env.cr.commit()
-                _msg = f"✅ Called {full_url} (insecure) — {response.status_code}"
-            except Exception as e2:
-                _msg = f"❌ Error calling {full_url} (insecure retry): {e2}"
-        except Exception as e:
-            _msg = f"❌ Error calling {full_url}: {e}"
-
-        self.env['ir.logging'].sudo().create({
-            'name': 'Dankbit Screenshot Taker',
-            'type': 'server',
-            'dbname': self._cr.dbname,
-            'level': 'info',
-            'message': _msg,
-            'path': __name__,
-            'func': '_take_screenshot',
-            'line': '0',
-        })
-        return True
 
     def open_plot_wizard_taker(self):
         return {
@@ -744,15 +640,6 @@ class Trade(models.Model):
                 "dankbit_view_type": "mm",
             }
         }
-
-class DankbitScreenshot(models.Model):
-    _name = "dankbit.screenshot"
-    _description = "Dankbit Screenshot"
-    _order = "timestamp asc"
-
-    name = fields.Char(required=True)
-    timestamp = fields.Datetime(string="Timestamp", default=lambda self: fields.Datetime.now())
-    image_png = fields.Binary(string="Chart Image", attachment=True)
 
 
 class DankbitOISnapshot(models.Model):

@@ -1,11 +1,8 @@
-import logging
 import math
 from datetime import datetime, timezone
 import numpy as np
 from scipy.stats import norm
 from odoo.http import request as _odoo_request
-
-_logger = logging.getLogger(__name__)
 
 
 # --- Black-Scholes Gamma ---
@@ -56,14 +53,12 @@ def bs_gamma(S, K, T, r, sigma, trade_ts):
     return gamma
 
 def _infer_sign(trd):
-    if hasattr(trd, "direction"):
-        s = str(trd.direction).lower()
-        if s in ("buy", "long", "+", "1"):
-            return 1.0
-        if s in ("sell", "short", "-", "-1"):
-            return -1.0
-    amt = getattr(trd, "amount", getattr(trd, "qty", 0.0))
-    return 1.0 if amt >= 0 else -1.0
+    if trd.direction == "buy":
+        return 1.0
+    elif trd.direction == "sell":
+        return -1.0
+    else:
+        return 0.0
 
 # --- Portfolio Gamma ---
 def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="raw"):
@@ -72,20 +67,18 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="raw"):
     for trd in trades:
         hours_to_expiry = trd.get_hours_to_expiry()
         T = hours_to_expiry / (24.0 * 365.0)
-        if str(mock_0dte).lower() == "true":
+        if mock_0dte:
             T = 0.0
 
         sigma = trd.iv / 100.0
         sign  = _infer_sign(trd)
 
-        # -------------------------------
-        # Trade weight by mode
-        # -------------------------------
         if mode == "raw":
             weight = trd.amount
-
         elif mode == "oi":
-            weight = trd.oi_impact or 0.0
+            weight = trd.oi_impact
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
 
         if weight == 0:
             continue
@@ -99,12 +92,9 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="raw"):
             trd.deribit_ts,
         )
 
-        # -------------------------------
-        # OI persistence ONLY in oi/hybrid
-        # -------------------------------
         if mode == "raw":
             persistence = 1.0
-        else:
+        elif mode == "oi":
             if trd.oi_impact is None:
                 persistence = 1.0
             elif trd.amount:
@@ -114,6 +104,8 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="raw"):
                 )
             else:
                 persistence = 0.0
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
 
         total += sign * weight * gamma_flow * persistence
 

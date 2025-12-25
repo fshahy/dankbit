@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "Dankbit",
-    "version": "0.1",
+    "version": "18.0.0.0.2",
     "category": "Options Greeks",
     "author": "Farid Shahy <fshahy@gmail.com>",
     "summary": "",
@@ -14,7 +14,6 @@
         "security/ir.model.access.csv",
         "views/res_config_settings_views.xml",
         "views/trade_views.xml",
-        "views/screenshot_views.xml",
         "views/help_templates.xml",
         "wizard/plot_wizard_view.xml",
         "views/oi_snapshot_views.xml",

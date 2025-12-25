@@ -1,3 +1,0 @@
-numpy
-plotly==5.13.1
-matplotlib

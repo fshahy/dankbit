@@ -54,28 +54,6 @@ class OptionStrat:
         self.payoffs += payoffs
         self._add_to_self('put', K, P, -1, Q)
 
-    # --------------------------------------------------------------
-    # longs
-    def add_call_to_longs(self, K, C, Q=1):
-        longs = (np.maximum(self.STs-K, 0) - C) * Q
-        self.longs += longs
-        self._add_to_self('call', K, C, 1, Q)
-
-    def add_put_to_longs(self, K, P, Q=1):
-        longs = (np.maximum(K-self.STs, 0) - P) * Q
-        self.longs += longs
-        self._add_to_self('put', K, P, 1, Q)
-    # shorts
-    def add_call_to_shorts(self, K, C, Q=1):
-        shorts = ((-1)*np.maximum(self.STs-K, 0) + C) * Q
-        self.shorts += shorts
-        self._add_to_self('call', K, C, -1, Q)
-
-    def add_put_to_shorts(self, K, P, Q=1):
-        shorts = ((-1)*np.maximum(K-self.STs, 0) + P) * Q
-        self.shorts += shorts
-        self._add_to_self('put', K, P, -1, Q)
-    # --------------------------------------------------------------
     def _add_to_self(self, type_, K, price, direction, Q):
         o = Option(type_, K, price, direction)
         for _ in range(Q):
@@ -204,28 +182,6 @@ class OptionStrat:
 
         return fig,ax
 
-    def plot_zones(self, index_price):
-        fig, ax = plt.subplots(figsize=(18, 8))
-        ax.xaxis.set_major_locator(MultipleLocator(500))  # Tick every 500
-        plt.xticks(rotation=90) 
-        ax.grid(True)
-
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
-
-        ax.plot(self.STs, self.longs, color="green", label="Longs")
-        ax.plot(self.STs, self.shorts, color="red", label="Shorts")
-
-        ax.set_title(f"{self.name} | {now} | Zones")
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
-        ax.axvline(x=index_price, color="blue")
-        ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        legend = plt.legend()
-        self.add_dankbit_signature(ax)
-        plt.show()
-
-        return fig, ax
-    
     def plot_oi(self, index_price, oi_data, plot_title):
         fig, ax = plt.subplots(figsize=(18, 8))
         # ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
@@ -270,9 +226,6 @@ class OptionStrat:
         Dankbit™ signature sits immediately to the LEFT of the legend, with minimal spacing.
         Zero overlap, minimal distance.
         """
-        import matplotlib.image as mpimg
-        from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-
         fig = ax.figure
 
         # --- Force legend into top-right ---
