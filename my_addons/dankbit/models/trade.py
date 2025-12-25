@@ -617,6 +617,13 @@ class Trade(models.Model):
             ]
         ).write({"active": False})
 
+    def _delete_old_oi_snapshots(self):
+        self.env["dankbit.oi_snapshot"].search(
+            domain=[
+                ("create_date", "<", datetime.now() - timedelta(hours=1)), 
+            ]
+        ).unlink()
+
     def open_plot_wizard_taker(self):
         return {
             "type": "ir.actions.act_window",

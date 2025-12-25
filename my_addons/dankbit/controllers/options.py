@@ -199,7 +199,7 @@ class OptionStrat:
         utc_now = datetime.now(ZoneInfo("UTC"))
         now = utc_now.strftime("%Y-%m-%d %H:%M")
 
-        ax.set_title(f"{self.name} | {now} UTC | Full OI")
+        ax.set_title(f"{self.name} | {now} UTC | Taker Full OI")
         ax.axhline(0, color="black", linewidth=1, linestyle="-")
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")

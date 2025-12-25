@@ -11,6 +11,7 @@
             <field name="interval_type">minutes</field>
             <field name="state">code</field>
             <field name="code">model.get_last_trades()</field>
+            <field name="priority">5</field>
         </record>
 
         <record id="dankbit_deleted_expired_trades_cron" model="ir.cron">
@@ -21,6 +22,7 @@
             <field name="interval_type">days</field>
             <field name="state">code</field>
             <field name="code">model._delete_expired_trades()</field>
+            <field name="priority">10</field>
         </record>
 
         <record id="cron_fetch_oi_snapshots" model="ir.cron">
@@ -31,6 +33,7 @@
             <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
             <field name="active">False</field>
+            <field name="priority">5</field>
         </record>
 
         <record id="cron_reconcile_oi_impact" model="ir.cron">
@@ -41,6 +44,18 @@
             <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
             <field name="active">False</field>
+            <field name="priority">4</field>
+        </record>
+
+        <record id="dankbit_deleted_old_oi_snapshots_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Delete Old OI Snapshots</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model._delete_old_oi_snapshots()</field>
+            <field name="priority">10</field>
         </record>
 
     </data>

@@ -70,7 +70,7 @@
 						</h4>
 						<p>
 							<a t-attf-href="{{instrument}}/oi" target="_blank">
-								Full OI (/oi)
+								Taker Full OI (/oi)
 							</a>
 						</p>
 					</div>
