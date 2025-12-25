@@ -69,12 +69,7 @@ class OptionStrat:
             ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
             plt.yticks(list(range(-10000, 10001, 100)))
         ax.grid(True)
-
-        # NOTE: signature is added after legend creation to allow placing it
-        # next to the legend (see add_dankbit_signature implementation).
         
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
         # compute plotting arrays for delta/gamma and scaled payoff
         try:
             md_arr = np.array(market_delta, dtype=float)
@@ -159,7 +154,9 @@ class OptionStrat:
                 interpolate=True
             )
 
-        ax.set_title(f"{self.name} | {now} | {view_type}")
+        utc_now = datetime.now(ZoneInfo("UTC"))
+        now = utc_now.strftime("%Y-%m-%d %H:%M")
+        ax.set_title(f"{self.name} | {now} UTC | {view_type}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)
@@ -190,9 +187,6 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
-
         if self.name.startswith("BTC"):
             for oi in oi_data:
                 plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
@@ -202,7 +196,10 @@ class OptionStrat:
                 plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
                 plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
 
-        ax.set_title(f"{self.name} | {now} | Full OI")
+        utc_now = datetime.now(ZoneInfo("UTC"))
+        now = utc_now.strftime("%Y-%m-%d %H:%M")
+
+        ax.set_title(f"{self.name} | {now} UTC | Full OI")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
