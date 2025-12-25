@@ -32,6 +32,12 @@
                         <setting>
                             <field name="mock_0dte" placeholder="Mock 0DTE"/>
                         </setting>
+                        <setting>
+                            <field name="greeks_min_time_hours" placeholder="Greeks min time (hours)"/>
+                        </setting>
+                        <setting>
+                            <field name="greeks_gamma_decay_tau_seconds" placeholder="Gamma decay tau (hours)"/>
+                        </setting>
                     </block>
 
                     <block title="BTC Settings" id="dankbit_graph_settings" groups="base.group_no_one">

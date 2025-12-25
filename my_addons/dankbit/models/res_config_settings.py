@@ -75,4 +75,16 @@ class ResConfigSettings(models.TransientModel):
         string="Mock 0DTE",
         config_parameter="dankbit.mock_0dte"
     )
+
+    greeks_min_time_hours = fields.Float(
+        string="Greeks min time (hours)",
+        config_parameter="dankbit.greeks_min_time_hours",
+        help="Minimum time to expiry (in hours) used in Greeks calculations to avoid singularities."
+    )
+
+    greeks_gamma_decay_tau_seconds = fields.Float(
+        string="Gamma decay tau (hours)",
+        config_parameter="dankbit.greeks_gamma_decay_tau_seconds",
+        help="Time-decay constant (in seconds) used in Gamma calculations to weight recent trades more."
+    )
     
