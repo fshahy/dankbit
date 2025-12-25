@@ -74,7 +74,7 @@ class PlotWizard(models.TransientModel):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
 
-        fig, _ = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, "")
+        fig, _ = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")

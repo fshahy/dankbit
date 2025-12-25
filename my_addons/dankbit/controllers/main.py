@@ -110,7 +110,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
         
         ax.text(
             0.01, 0.02,
@@ -185,7 +185,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="raw")
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="raw")
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, strike=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
         
         ax.text(
             0.01, 0.02,
@@ -211,7 +211,6 @@ class ChartController(http.Controller):
         "/<string:instrument>/oi/<int:from_hour>",
         ], type="http", auth="public", website=True)
     def chart_png_full_oi(self, instrument):
-        plot_title = "Full OI"
         icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = 0
@@ -243,7 +242,7 @@ class ChartController(http.Controller):
         index_price = request.env['dankbit.trade'].sudo().get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
 
-        fig = obj.plot_oi(index_price, oi_data, plot_title)
+        fig = obj.plot_oi(index_price, oi_data)
 
         buf = BytesIO()
         fig.savefig(buf, format="png")

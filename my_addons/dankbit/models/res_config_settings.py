@@ -37,17 +37,6 @@ class ResConfigSettings(models.TransientModel):
         string="Refresh interval",
         config_parameter="dankbit.refresh_interval"
     )
-
-    zone_from_price = fields.Float(
-        string="Zone from price",
-        config_parameter="dankbit.zone_from_price"
-    )
-
-    zone_to_price = fields.Float(
-        string="Zone to price",
-        config_parameter="dankbit.zone_to_price"
-    )
-
     show_red_line = fields.Boolean(
         string="Show red line",
         config_parameter="dankbit.show_red_line"

@@ -59,7 +59,7 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, strike=None, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
         plt.xticks(rotation=90) 
         if self.name.startswith("BTC"):
@@ -159,12 +159,6 @@ class OptionStrat:
                 interpolate=True
             )
 
-        if strike is not None and isinstance(strike, str):
-            view_type = strike
-        if strike is not None and isinstance(strike, (int, float)):
-            ax.axvline(x=strike, color="orange")
-            view_type = f"MM Strike {strike}"
-
         ax.set_title(f"{self.name} | {now} | {view_type}")
 
         ymax = np.max(np.abs(plt.ylim()))
@@ -182,7 +176,7 @@ class OptionStrat:
 
         return fig,ax
 
-    def plot_oi(self, index_price, oi_data, plot_title):
+    def plot_oi(self, index_price, oi_data):
         fig, ax = plt.subplots(figsize=(18, 8))
         # ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
 
@@ -196,8 +190,6 @@ class OptionStrat:
         plt.xticks(rotation=90) 
         ax.grid(True)
 
-        # place signature after plotting bars so it can choose a clean area
-        
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
@@ -210,7 +202,7 @@ class OptionStrat:
                 plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
                 plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
 
-        ax.set_title(f"{self.name} | {now} | {plot_title}")
+        ax.set_title(f"{self.name} | {now} | Full OI")
         ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
