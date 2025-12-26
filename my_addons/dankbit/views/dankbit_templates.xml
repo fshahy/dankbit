@@ -46,6 +46,11 @@
 						</h4>
 						<p>
 							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
+								Best for Scalping: /mm/l/60?mode=flow&amp;tau=1
+							</a>
+						</p>
+						<p>
+							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
 								Today's Flow: /mm?mode=flow
 							</a>
 						</p>
