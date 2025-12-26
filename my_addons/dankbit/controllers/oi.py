@@ -8,4 +8,3 @@ def calculate_oi(trades):
         elif t.option_type == "put":
             oi_put += qty if t.direction == "buy" else -qty
     return oi_call, oi_put
-
