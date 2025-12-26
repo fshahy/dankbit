@@ -133,6 +133,26 @@ class ChartController(http.Controller):
             fontsize=14,
         )
 
+        # Get Gamma Peak Value
+        gamma_peak_value = self._magnified_gamma_peak(
+            market_gammas,
+            market_deltas,
+            0.0
+        )
+        
+        color = "red"  # Weak Market
+        if abs(gamma_peak_value) > 70 and volume > 100 and len(trades) > 100:
+            color = "green"  # Strong Market
+
+        ax.scatter(
+            [0.95], [0.05],
+            transform=ax.transAxes,
+            s=500,
+            c=f"{color}",
+            edgecolors=f"{color}",
+            zorder=100
+        )
+
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
@@ -272,3 +292,59 @@ class ChartController(http.Controller):
             ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
+
+    def _magnified_gamma_peak(
+        self,
+        raw_market_gammas,
+        raw_market_delta,
+        gamma_plot_scale=None
+    ):
+        """
+        Returns the magnified gamma peak value (signed),
+        using the exact same logic as Dankbit plotting.
+
+        Parameters
+        ----------
+        raw_market_gammas : array-like
+            Raw (unscaled) market gamma values
+        raw_market_delta : array-like
+            Raw market delta values
+        gamma_plot_scale : float or None
+            Optional config override (dankbit.gamma_plot_scale).
+            If None, auto-scaling is used.
+
+        Returns
+        -------
+        float
+            Magnified gamma peak (signed)
+        """
+
+        mg_arr = np.asarray(raw_market_gammas, dtype=float)
+        md_arr = np.asarray(raw_market_delta, dtype=float)
+
+        if mg_arr.size == 0:
+            return 0.0
+
+        mg_max = np.max(np.abs(mg_arr))
+        md_max = np.max(np.abs(md_arr)) if md_arr.size else 0.0
+
+        # --- compute gamma scale ---
+        if gamma_plot_scale and gamma_plot_scale > 0:
+            gamma_scale = float(gamma_plot_scale)
+        else:
+            if mg_max > 0:
+                gamma_scale = max(md_max, 1.0) / mg_max
+            else:
+                gamma_scale = 1.0
+
+        # --- magnify gamma ---
+        mg_plot = mg_arr * gamma_scale
+
+        # --- return signed peak ---
+        gamma_peak_magnified = max(
+            mg_plot,
+            key=lambda g: abs(g),
+            default=0.0
+        )
+
+        return gamma_peak_magnified
