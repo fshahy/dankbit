@@ -59,7 +59,7 @@ class OptionStrat:
         for _ in range(Q):
             self.instruments.append(o)
 
-    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, width=18, height=8):
+    def plot(self, index_price, market_delta, market_gammas, view_type, show_red_line, plot_title, width=18, height=8):
         fig, ax = plt.subplots(figsize=(width, height))
         plt.xticks(rotation=90) 
         if self.name.startswith("BTC"):
@@ -156,7 +156,7 @@ class OptionStrat:
 
         utc_now = datetime.now(ZoneInfo("UTC"))
         now = utc_now.strftime("%Y-%m-%d %H:%M")
-        ax.set_title(f"{self.name} | {now} UTC | {view_type}")
+        ax.set_title(f"{self.name} | {now} UTC | {plot_title}")
 
         ymax = np.max(np.abs(plt.ylim()))
         plt.ylim(-ymax, ymax)

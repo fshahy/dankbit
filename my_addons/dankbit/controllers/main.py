@@ -117,7 +117,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow")
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow")
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
         
         ax.text(
             0.01, 0.02,
@@ -192,7 +192,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow")
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow")
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
         
         ax.text(
             0.01, 0.02,
