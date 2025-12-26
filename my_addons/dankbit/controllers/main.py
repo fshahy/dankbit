@@ -125,7 +125,7 @@ class ChartController(http.Controller):
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
 
-        volume = sum(trade.amount for trade in trades)
+        volume = round(sum(trade.amount for trade in trades))
         ax.text(
             0.01, 0.02,
             f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
@@ -141,7 +141,7 @@ class ChartController(http.Controller):
         )
         
         color = "red"  # Weak Market
-        if abs(gamma_peak_value) > 70 and volume > 100 and len(trades) > 100:
+        if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
             color = "green"  # Strong Market
 
         ax.scatter(
@@ -226,8 +226,8 @@ class ChartController(http.Controller):
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
-        
-        volume = sum(trade.amount for trade in trades)
+
+        volume = round(sum(trade.amount for trade in trades))
         ax.text(
             0.01, 0.02,
             f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
