@@ -45,7 +45,7 @@
 							Flow Views:
 						</h4>
 						<p>
-							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
+							<a t-attf-href="{{instrument}}/mm/l/60?mode=flow&amp;tau=1" target="_blank">
 								Best for Scalping: /mm/l/60?mode=flow&amp;tau=1
 							</a>
 						</p>
