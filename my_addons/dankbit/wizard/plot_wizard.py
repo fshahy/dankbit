@@ -53,7 +53,7 @@ class PlotWizard(models.TransientModel):
 
         index_price = self.env["dankbit.trade"].sudo().get_index_price(instrument)
         # Note: here it is possible that users selects multiple instruments.
-        obj = options.OptionStrat(f"{instrument} | Plotting {len(trades)} trades", index_price, day_from_price, day_to_price, steps)
+        obj = options.OptionStrat(f"{instrument} | Plotting {len(trades)} trade(s)", index_price, day_from_price, day_to_price, steps)
         is_call = []
 
         for trade in trades:
@@ -71,10 +71,10 @@ class PlotWizard(models.TransientModel):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
 
-        fig, _ = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True)
+        fig, _ = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, dankbit_view_type)
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
