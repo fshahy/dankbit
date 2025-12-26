@@ -82,9 +82,9 @@ class ResConfigSettings(models.TransientModel):
         help="Minimum time to expiry (in hours) used in Greeks calculations to avoid singularities."
     )
 
-    greeks_gamma_decay_tau_seconds = fields.Float(
+    greeks_gamma_decay_tau_hours = fields.Float(
         string="Gamma decay tau (hours)",
-        config_parameter="dankbit.greeks_gamma_decay_tau_seconds",
-        help="Time-decay constant (in seconds) used in Gamma calculations to weight recent trades more."
+        config_parameter="dankbit.greeks_gamma_decay_tau_hours",
+        help="Time-decay constant (in hours) used in Gamma calculations to weight recent trades more."
     )
     

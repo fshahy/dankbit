@@ -2,7 +2,6 @@ import math
 from datetime import datetime, timezone
 import numpy as np
 from scipy.stats import norm
-from odoo.http import request as _odoo_request
 
 
 # ============================================================
@@ -39,19 +38,9 @@ def _infer_sign(trd):
 # ============================================================
 # Portfolio Gamma
 # ============================================================
-def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow"):
+def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.0, tau=None):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
-
-    try:
-        icp = _odoo_request.env["ir.config_parameter"].sudo()
-        min_hours = float(icp.get_param("dankbit.greeks_min_time_hours", default=1.0))
-        tau_seconds = float(
-            icp.get_param("dankbit.greeks_gamma_decay_tau_seconds", default=6.0)
-        ) * 3600.0
-    except Exception:
-        min_hours = 1.0
-        tau_seconds = 21600.0
-
+    tau_seconds = float(tau) * 3600.0
     now = datetime.now(timezone.utc)
 
     for trd in trades:
