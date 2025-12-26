@@ -39,9 +39,10 @@
 						<h2>
 							<t t-esc="instrument"/>
 						</h2>
+						<br/>
 
 						<h4>
-							Market Maker Views:
+							Flow Views:
 						</h4>
 						<p>
 							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
@@ -49,13 +50,19 @@
 							</a>
 						</p>
 						<p>
-							<a t-attf-href="{{instrument}}/mm?mode=structure" target="_blank">
-								Today's Structure: /mm?mode=structure
-							</a>
-						</p>
-						<p>
 							<a t-attf-href="{{instrument}}/mm/a?mode=flow" target="_blank">
 								Full Flow: /mm/a?mode=flow
+							</a>
+						</p>
+
+						<br/>
+
+						<h4>
+							Structure Views:
+						</h4>
+						<p>
+							<a t-attf-href="{{instrument}}/mm?mode=structure" target="_blank">
+								Today's Structure: /mm?mode=structure
 							</a>
 						</p>
 						<p>
