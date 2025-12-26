@@ -38,7 +38,7 @@ def _infer_sign(trd):
 # ============================================================
 # Portfolio Gamma
 # ============================================================
-def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.0, tau=None):
+def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.0, tau=6.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
     tau_seconds = float(tau) * 3600.0
     now = datetime.now(timezone.utc)

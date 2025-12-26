@@ -2,7 +2,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from io import BytesIO
 import logging
-from odoo import http
+from odoo import fields, http
 from odoo.http import request
 from . import options
 from . import delta
@@ -74,7 +74,7 @@ class ChartController(http.Controller):
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=4.0))
 
         if last_hedging_time:
-            start_ts = last_hedging_time
+            start_ts = fields.Datetime.from_string(last_hedging_time)
 
         if from_hour:
             start_ts = self.get_ts_from_hour(from_hour)
@@ -94,6 +94,8 @@ class ChartController(http.Controller):
         if tau_param is not None:
             tau = float(tau_param)
         mode = params.get("mode", "flow")
+        if mode not in ["flow", "structure"]:
+            raise ValueError(f"Unknown mode: {mode}")
         if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
@@ -118,8 +120,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow", tau=tau)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow", tau=tau)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
         
@@ -173,6 +175,8 @@ class ChartController(http.Controller):
         if tau_param is not None:
             tau = float(tau_param)
         mode = params.get("mode", "flow")
+        if mode not in ["flow", "structure"]:
+            raise ValueError(f"Unknown mode: {mode}")
         if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
@@ -197,8 +201,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow", tau=tau)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow", tau=tau)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
         
@@ -221,10 +225,7 @@ class ChartController(http.Controller):
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
-    @http.route([
-        "/<string:instrument>/oi",
-        "/<string:instrument>/oi/<int:from_hour>",
-        ], type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
     def chart_png_full_oi(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -251,7 +252,7 @@ class ChartController(http.Controller):
                     ("is_block_trade", "=", False),
                 ]
             )
-            oi_call, oi_put = oi.calculate_oi(strike, trades)
+            oi_call, oi_put = oi.calculate_oi(trades)
             oi_data.append([strike, oi_call, oi_put])
 
         index_price = request.env["dankbit.trade"].sudo().get_index_price(instrument)

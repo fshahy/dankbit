@@ -15,14 +15,12 @@
         </field>
     </record>
 
-    <odoo>
-        <record id="action_open_plot_wizard" model="ir.actions.act_window">
-            <field name="name">Open Plot Wizard</field>
-            <field name="res_model">dankbit.plot_wizard</field>
-            <field name="view_mode">form</field>
-            <field name="view_id" ref="view_plot_wizard_form"/>
-            <field name="target">new</field>
-        </record>
-    </odoo>
+    <record id="action_open_plot_wizard" model="ir.actions.act_window">
+        <field name="name">Open Plot Wizard</field>
+        <field name="res_model">dankbit.plot_wizard</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_plot_wizard_form"/>
+        <field name="target">new</field>
+    </record>
 
 </odoo>

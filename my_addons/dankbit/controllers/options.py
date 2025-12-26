@@ -166,10 +166,9 @@ class OptionStrat:
 
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # Draw legend first so we can place the Dankbit signature beside it
-        legend = ax.legend()
+        ax.legend()
         # add signature beside legend (or fallback to quiet corner)
         self.add_dankbit_signature(ax)
-        plt.show()
 
         return fig,ax
 
@@ -205,7 +204,6 @@ class OptionStrat:
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # no legend here by default, but keep signature placement logic
         self.add_dankbit_signature(ax)
-        plt.show()
 
         return fig
             
