@@ -245,8 +245,12 @@ class ChartController(http.Controller):
             )
             
             color = "red"  # Weak Market
-            if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
-                color = "green"  # Strong Market
+            if instrument.startswith("ETH"):
+                if abs(gamma_peak_value) > 1000 and volume > 500 and len(trades) > 500:
+                    color = "green"  # Strong Market
+            elif instrument.startswith("BTC"):
+                if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
+                    color = "green"  # Strong Market
 
             ax.scatter(
                 [0.95], [0.05],
