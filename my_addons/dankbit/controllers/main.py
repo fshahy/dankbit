@@ -133,25 +133,26 @@ class ChartController(http.Controller):
             fontsize=14,
         )
 
-        # Get Gamma Peak Value
-        gamma_peak_value = self._magnified_gamma_peak(
-            market_gammas,
-            market_deltas,
-            0.0
-        )
-        
-        color = "red"  # Weak Market
-        if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
-            color = "green"  # Strong Market
+        if mode == "flow":
+            # Get Gamma Peak Value
+            gamma_peak_value = self._magnified_gamma_peak(
+                market_gammas,
+                market_deltas,
+                0.0
+            )
+            
+            color = "red"  # Weak Market
+            if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
+                color = "green"  # Strong Market
 
-        ax.scatter(
-            [0.95], [0.05],
-            transform=ax.transAxes,
-            s=500,
-            c=f"{color}",
-            edgecolors=f"{color}",
-            zorder=100
-        )
+            ax.scatter(
+                [0.95], [0.05],
+                transform=ax.transAxes,
+                s=500,
+                c=f"{color}",
+                edgecolors=f"{color}",
+                zorder=100
+            )
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -234,6 +235,27 @@ class ChartController(http.Controller):
             transform=ax.transAxes,
             fontsize=14,
         )
+
+        if mode == "flow":
+            # Get Gamma Peak Value
+            gamma_peak_value = self._magnified_gamma_peak(
+                market_gammas,
+                market_deltas,
+                0.0
+            )
+            
+            color = "red"  # Weak Market
+            if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
+                color = "green"  # Strong Market
+
+            ax.scatter(
+                [0.95], [0.05],
+                transform=ax.transAxes,
+                s=500,
+                c=f"{color}",
+                edgecolors=f"{color}",
+                zorder=100
+            )
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
