@@ -273,34 +273,62 @@ class ChartController(http.Controller):
     def chart_png_full_oi(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
-        day_from_price = 0
-        day_to_price = 1000
-        steps = 1
-        strike_step = 1000
+        # --- price range ---
         if instrument.startswith("BTC"):
-            day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) 
-            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-            steps = int(icp.get_param("dankbit.steps", default=100))
-        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price   = float(icp.get_param("dankbit.to_price", default=150000))
+            steps          = int(icp.get_param("dankbit.steps", default=100))
+            strike_step    = 1000
+        elif instrument.startswith("ETH"):
             day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
-            strike_step = 25
+            day_to_price   = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps          = int(icp.get_param("dankbit.eth_steps", default=10))
+            strike_step    = 25
+        else:
+            return "<h3>Unsupported instrument</h3>"
 
+        # ------------------------------------------------------------------
+        # REAL OI SOURCE (Deribit snapshot, NOT trades)
+        # ------------------------------------------------------------------
+        try:
+            # Expected to return list of dicts:
+            # { strike, option_type, open_interest }
+            oi_snapshot = oi.get_oi_snapshot(instrument)
+        except Exception as e:
+            _logger.exception("Failed to fetch Deribit OI snapshot")
+            return f"<h3>OI fetch failed: {e}</h3>"
+
+        # --- aggregate per strike ---
+        oi_map = {}
+        for row in oi_snapshot:
+            strike = int(row["strike"])
+            if strike < day_from_price or strike > day_to_price:
+                continue
+
+            if strike not in oi_map:
+                oi_map[strike] = {"call": 0.0, "put": 0.0}
+
+            oi_map[strike][row["option_type"]] += float(row["open_interest"])
+
+        # --- build sorted plot data ---
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), strike_step):
-            trades = request.env["dankbit.trade"].sudo().search(
-                domain=[
-                    ("name", "ilike", f"{instrument}"),
-                    ("strike", "=", strike),
-                    ("is_block_trade", "=", False),
-                ]
-            )
-            oi_call, oi_put = oi.calculate_oi(trades)
-            oi_data.append([strike, oi_call, oi_put])
+            call_oi = oi_map.get(strike, {}).get("call", 0.0)
+            put_oi  = oi_map.get(strike, {}).get("put", 0.0)
+            oi_data.append([strike, call_oi, put_oi])
+            _logger.info([strike, call_oi, put_oi])
 
+        # ------------------------------------------------------------------
+        # plotting (unchanged)
+        # ------------------------------------------------------------------
         index_price = request.env["dankbit.trade"].sudo().get_index_price(instrument)
-        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        obj = options.OptionStrat(
+            instrument,
+            index_price,
+            day_from_price,
+            day_to_price,
+            steps
+        )
 
         fig = obj.plot_oi(index_price, oi_data)
 
@@ -309,11 +337,12 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         headers = [
-            ("Content-Type", "image/png"), 
+            ("Content-Type", "image/png"),
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
+
 
     def _magnified_gamma_peak(
         self,

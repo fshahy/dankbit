@@ -174,14 +174,13 @@ class OptionStrat:
 
     def plot_oi(self, index_price, oi_data):
         fig, ax = plt.subplots(figsize=(18, 8))
-        # ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            plt.yticks(list(range(-3000, 3001, 10))) 
+            plt.yticks(list(range(0, 30001, 500))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-            plt.yticks(list(range(-5000, 5001, 100)))
+            plt.yticks(list(range(0, 100001, 1000)))
 
         plt.xticks(rotation=90) 
         ax.grid(True)
