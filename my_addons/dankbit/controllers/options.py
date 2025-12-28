@@ -88,7 +88,7 @@ class OptionStrat:
         gamma_scale = 1.0
         cfg_val = None
         try:
-            icp = _odoo_request.env["ir.config_parameter"].sudo()
+            icp = _odoo_request.env["ir.config_parameter"]
             cfg = icp.get_param("dankbit.gamma_plot_scale", default=None)
             if cfg is not None:
                 try:

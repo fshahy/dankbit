@@ -41,6 +41,84 @@ class ChartController(http.Controller):
         }
         return request.render("dankbit.dankbit_instrument_home_page", values)
 
+    @http.route("/BTC", type="http", auth="public", website=True)
+    def chart_png_global(self, **params):
+        plot_title = f"mm global"
+        icp = request.env["ir.config_parameter"]
+
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        mock_0dte = icp.get_param("dankbit.mock_0dte")
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=4.0))
+
+        start_ts = datetime.now() - timedelta(hours=8)
+        plot_title = f"{plot_title}"
+
+        domain=[
+            ("name", "ilike", "BTC"),
+            ("is_block_trade", "=", False),
+            ("deribit_ts", ">=", start_ts),
+        ]
+
+        tau_param = params.get("tau", None)
+        if tau_param is not None:
+            tau = float(tau_param)
+        mode = "flow"
+
+        trades = request.env["dankbit.trade"].search(domain=domain)
+
+        index_price = request.env["dankbit.trade"].get_index_price("BTC")
+        obj = options.OptionStrat("BTC", index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            if trade.option_type == "call":
+                is_call.append(True)
+                if trade.direction == "buy":
+                    obj.long_call(trade.strike, trade.price * trade.index_price)
+                elif trade.direction == "sell":
+                    obj.short_call(trade.strike, trade.price * trade.index_price)
+            elif trade.option_type == "put":
+                is_call.append(False)
+                if trade.direction == "buy":
+                    obj.long_put(trade.strike, trade.price * trade.index_price)
+                elif trade.direction == "sell":
+                    obj.short_put(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
+
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, plot_title)
+
+        volume = round(sum(trade.amount for trade in trades))
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Disposition", f'inline; filename="btc_g_global.png"'),
+            ("Refresh", refresh_interval*10),
+        ]
+        return request.make_response(buf.getvalue(), headers=headers)
+
     @http.route([
         "/<string:instrument>/<string:view_type>", 
         "/<string:instrument>/<string:view_type>/l/<int:minutes_ago>", 
@@ -51,7 +129,7 @@ class ChartController(http.Controller):
             return f"<h3>Nothing here.</h3>"
         
         plot_title = view_type
-        icp = request.env["ir.config_parameter"].sudo()
+        icp = request.env["ir.config_parameter"]
 
         day_from_price = 0
         day_to_price = 1000
@@ -99,9 +177,9 @@ class ChartController(http.Controller):
         if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
-        trades = request.env["dankbit.trade"].sudo().search(domain=domain)
+        trades = request.env["dankbit.trade"].search(domain=domain)
 
-        index_price = request.env["dankbit.trade"].sudo().get_index_price(instrument)
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -173,7 +251,7 @@ class ChartController(http.Controller):
     @http.route("/<string:instrument>/<string:view_type>/a", type="http", auth="public", website=True)
     def chart_png_all(self, instrument, view_type, **params):
         plot_title = f"{view_type} all"
-        icp = request.env["ir.config_parameter"].sudo()
+        icp = request.env["ir.config_parameter"]
 
         day_from_price = 0
         day_to_price = 1000
@@ -206,9 +284,9 @@ class ChartController(http.Controller):
         if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
-        trades = request.env["dankbit.trade"].sudo().search(domain=domain)
+        trades = request.env["dankbit.trade"].search(domain=domain)
 
-        index_price = request.env["dankbit.trade"].sudo().get_index_price(instrument)
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
@@ -279,7 +357,7 @@ class ChartController(http.Controller):
 
     @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
     def chart_png_full_oi(self, instrument):
-        icp = request.env["ir.config_parameter"].sudo()
+        icp = request.env["ir.config_parameter"]
 
         # --- price range ---
         if instrument.startswith("BTC"):
@@ -329,7 +407,7 @@ class ChartController(http.Controller):
         # ------------------------------------------------------------------
         # plotting (unchanged)
         # ------------------------------------------------------------------
-        index_price = request.env["dankbit.trade"].sudo().get_index_price(instrument)
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(
             instrument,
             index_price,
@@ -350,7 +428,6 @@ class ChartController(http.Controller):
             ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
-
 
     def _magnified_gamma_peak(
         self,

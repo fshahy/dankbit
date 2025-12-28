@@ -346,7 +346,7 @@ class Trade(models.Model):
         # read timeout from config (seconds)
         timeout = 5.0
         try:
-            icp = self.env["ir.config_parameter"].sudo()
+            icp = self.env["ir.config_parameter"]
             timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
             cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=30.0))
         except Exception:
@@ -396,7 +396,7 @@ class Trade(models.Model):
             if inst.get("kind") == "option"
         ]
 
-        icp = self.env["ir.config_parameter"].sudo()
+        icp = self.env["ir.config_parameter"]
         try:
             timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
         except Exception:
@@ -524,7 +524,7 @@ class Trade(models.Model):
 
         timeout = 5.0
         try:
-            icp = self.env["ir.config_parameter"].sudo()
+            icp = self.env["ir.config_parameter"]
             timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
             cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=300.0))
         except Exception:
