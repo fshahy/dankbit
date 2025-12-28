@@ -67,7 +67,7 @@ class OptionStrat:
             plt.yticks(list(range(-1000, 1001, 10))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
-            plt.yticks(list(range(-10000, 10001, 100)))
+            plt.yticks(list(range(-10000, 10001, 200)))
         ax.grid(True)
         
         # compute plotting arrays for delta/gamma and scaled payoff
