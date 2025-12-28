@@ -409,9 +409,18 @@ class ChartController(http.Controller):
         plot_title = f"Dealer State at Strike {strike} (No Refresh)"
         icp = request.env['ir.config_parameter']
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+
         show_red_line = icp.get_param("dankbit.show_red_line")
         start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
