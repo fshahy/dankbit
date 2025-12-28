@@ -158,7 +158,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        # plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -287,7 +287,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        # plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -394,13 +394,78 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        # plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_all.png"'),
             ("Refresh", refresh_interval*5),
+        ]
+        return request.make_response(buf.getvalue(), headers=headers)
+
+    @http.route("/<string:instrument>/<int:strike>", type="http", auth="public", website=True)
+    def chart_png_strike(self, instrument, strike):
+        plot_title = f"Dealer State at Strike {strike} (No Refresh)"
+        icp = request.env['ir.config_parameter']
+
+        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+        steps = int(icp.get_param("dankbit.steps", default=100))
+        show_red_line = icp.get_param("dankbit.show_red_line")
+        start_ts = datetime.now() - timedelta(days=1)
+        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
+
+        trades = request.env['dankbit.trade'].search(
+            domain=[
+                ("name", "ilike", f"{instrument}"),
+                ("strike", "=", int(strike)),
+                ("deribit_ts", ">=", start_ts),
+                ("is_block_trade", "=", False),
+            ]
+        )
+
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
+
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+        is_call = []
+
+        for trade in trades:
+            if trade.option_type == "call":
+                is_call.append(True)
+                if trade.direction == "buy":
+                    obj.long_call(trade.strike, trade.price * trade.index_price)
+                elif trade.direction == "sell":
+                    obj.short_call(trade.strike, trade.price * trade.index_price)
+            elif trade.option_type == "put":
+                is_call.append(False)
+                if trade.direction == "buy":
+                    obj.long_put(trade.strike, trade.price * trade.index_price)
+                elif trade.direction == "sell":
+                    obj.short_put(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(day_from_price, day_to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte=False, mode="flow", tau=tau)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte=False, mode="flow", tau=tau)
+
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, plot_title=plot_title)
+        
+        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: flow | Tau: {tau}",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        # plt.close(fig)
+
+        headers = [
+            ("Content-Type", "image/png"), 
+            ("Cache-Control", "no-cache"),
+            ("Content-Disposition", f'inline; filename="{instrument}_strike_{strike}.png"'),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
@@ -469,7 +534,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        # plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"),
