@@ -74,9 +74,37 @@ class PlotWizard(models.TransientModel):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
 
-        fig, _ = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, dankbit_view_type)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, dankbit_view_type)
+
+        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
+        ax.text(
+            0.01, 0.02,
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: 6.0H",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
         return buf.getvalue()
+
+    def _atm_volume(self, trades, index_price, atm_pct=0.01):
+        """
+        Calculate ATM volume.
+        
+        trades: iterable of trade records (must have .strike and .amount)
+        index_price: current underlying price
+        atm_pct: ATM band as percentage (default ±1%)
+        
+        Returns: float
+        """
+        lower = index_price * (1.0 - atm_pct)
+        upper = index_price * (1.0 + atm_pct)
+
+        vol = 0.0
+        for trade in trades:
+            if lower <= trade.strike <= upper:
+                vol += abs(trade.amount)
+
+        return round(vol)
