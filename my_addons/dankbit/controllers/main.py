@@ -35,48 +35,97 @@ class ChartController(http.Controller):
         return request.render("dankbit.dankbit_help")
 
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
-    def instrument_home_page(self, instrument):
-        values = {
-            "instrument": instrument,
-        }
-        return request.render("dankbit.dankbit_instrument_home_page", values)
-
-    @http.route("/BTC", type="http", auth="public", website=True)
-    def chart_png_global(self, **params):
-        plot_title = f"mm global"
+    def dispatcher(self, instrument, **params):
         icp = request.env["ir.config_parameter"]
 
         day_from_price = 0
         day_to_price = 1000
         steps = 1
 
-        day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-        day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-        steps = int(icp.get_param("dankbit.steps", default=100))
-
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         mock_0dte = icp.get_param("dankbit.mock_0dte")
         show_red_line = icp.get_param("dankbit.show_red_line")
-        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=4.0))
+        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
-        start_ts = datetime.now() - timedelta(hours=8)
-        plot_title = f"{plot_title}"
-
-        domain=[
-            ("name", "ilike", "BTC"),
-            ("is_block_trade", "=", False),
-            ("deribit_ts", ">=", start_ts),
-        ]
+        start_ts = datetime.now() - timedelta(days=1)
 
         tau_param = params.get("tau", None)
         if tau_param is not None:
             tau = float(tau_param)
         mode = "flow"
 
+        if instrument == "BTC":
+            plot_title = f"Dealer State"
+
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+
+            domain=[
+                ("name", "ilike", "BTC"),
+                ("is_block_trade", "=", False),
+                ("deribit_ts", ">=", start_ts),
+            ]
+            return self.chart_png_dealer_state(
+                                    instrument,
+                                    domain,
+                                    day_from_price=day_from_price, 
+                                    day_to_price=day_to_price, 
+                                    steps=steps, 
+                                    refresh_interval=refresh_interval, 
+                                    mock_0dte=mock_0dte, 
+                                    show_red_line=show_red_line, 
+                                    plot_title=plot_title, 
+                                    mode=mode, 
+                                    tau=tau)
+        elif instrument == "ETH":
+            plot_title = f"Dealer State"
+
+            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=100000))
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=150000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=100))
+
+            domain=[
+                ("name", "ilike", "ETH"),
+                ("is_block_trade", "=", False),
+                ("deribit_ts", ">=", start_ts),
+            ]
+            return self.chart_png_dealer_state(instrument, 
+                                    domain, 
+                                    day_from_price=day_from_price, 
+                                    day_to_price=day_to_price, 
+                                    steps=steps, 
+                                    refresh_interval=refresh_interval, 
+                                    mock_0dte=mock_0dte, 
+                                    show_red_line=show_red_line, 
+                                    plot_title=plot_title, 
+                                    mode=mode, 
+                                    tau=tau)
+        elif instrument.startswith("BTC-") or instrument.startswith("ETH-"):
+            return self.instrument_home_page(instrument)
+
+    def instrument_home_page(self, instrument):
+        values = {
+            "instrument": instrument,
+        }
+        return request.render("dankbit.dankbit_instrument_home_page", values)
+
+    def chart_png_dealer_state(self, 
+                         instrument,
+                         domain, 
+                         day_from_price, 
+                         day_to_price, 
+                         steps, 
+                         refresh_interval, 
+                         mock_0dte, 
+                         show_red_line, 
+                         plot_title, 
+                         mode, 
+                         tau):
         trades = request.env["dankbit.trade"].search(domain=domain)
 
-        index_price = request.env["dankbit.trade"].get_index_price("BTC")
-        obj = options.OptionStrat("BTC", index_price, day_from_price, day_to_price, steps)
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
         is_call = []
 
         for trade in trades:
@@ -99,10 +148,10 @@ class ChartController(http.Controller):
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, plot_title)
 
-        volume = round(sum(trade.amount for trade in trades))
+        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -115,7 +164,7 @@ class ChartController(http.Controller):
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="btc_g_global.png"'),
-            ("Refresh", refresh_interval*10),
+            ("Refresh", refresh_interval),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
@@ -149,7 +198,7 @@ class ChartController(http.Controller):
         mock_0dte = icp.get_param("dankbit.mock_0dte")
         start_from_ts = int(icp.get_param("dankbit.from_days_ago"))
         start_ts = self.get_midnight_ts(days_offset=start_from_ts)
-        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=4.0))
+        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
         if last_hedging_time:
             start_ts = fields.Datetime.from_string(last_hedging_time)
@@ -203,10 +252,10 @@ class ChartController(http.Controller):
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
 
-        volume = round(sum(trade.amount for trade in trades))
+        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -268,7 +317,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         mock_0dte = icp.get_param("dankbit.mock_0dte")
         show_red_line = icp.get_param("dankbit.show_red_line")
-        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=4.0))
+        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
         domain=[
             ("name", "ilike", f"{instrument}"),
@@ -310,10 +359,10 @@ class ChartController(http.Controller):
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
 
-        volume = round(sum(trade.amount for trade in trades))
+        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} trades | volume: {volume} | mode: {mode} | tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -484,3 +533,23 @@ class ChartController(http.Controller):
         )
 
         return gamma_peak_magnified
+
+    def _atm_volume(self, trades, index_price, atm_pct=0.01):
+        """
+        Calculate ATM volume.
+        
+        trades: iterable of trade records (must have .strike and .amount)
+        index_price: current underlying price
+        atm_pct: ATM band as percentage (default ±1%)
+        
+        Returns: float
+        """
+        lower = index_price * (1.0 - atm_pct)
+        upper = index_price * (1.0 + atm_pct)
+
+        vol = 0.0
+        for trade in trades:
+            if lower <= trade.strike <= upper:
+                vol += abs(trade.amount)
+
+        return round(vol)

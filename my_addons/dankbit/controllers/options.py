@@ -63,10 +63,10 @@ class OptionStrat:
         fig, ax = plt.subplots(figsize=(width, height))
         plt.xticks(rotation=90) 
         if self.name.startswith("BTC"):
-            ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
+            ax.xaxis.set_major_locator(MultipleLocator(100))  # Tick every 100
             plt.yticks(list(range(-1000, 1001, 10))) 
         elif self.name.startswith("ETH"):
-            ax.xaxis.set_major_locator(MultipleLocator(50))  # Tick every 50
+            ax.xaxis.set_major_locator(MultipleLocator(10))  # Tick every 10
             plt.yticks(list(range(-10000, 10001, 100)))
         ax.grid(True)
         
