@@ -158,13 +158,13 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        # plt.close(fig)
+        plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="btc_g_global.png"'),
-            ("Refresh", refresh_interval),
+            ("Refresh", refresh_interval*10),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
@@ -260,34 +260,9 @@ class ChartController(http.Controller):
             fontsize=14,
         )
 
-        if mode == "flow":
-            # Get Gamma Peak Value
-            gamma_peak_value = self._magnified_gamma_peak(
-                market_gammas,
-                market_deltas,
-                0.0
-            )
-            
-            color = "red"  # Weak Market
-            if instrument.startswith("ETH"):
-                if abs(gamma_peak_value) > 1000 and volume > 500 and len(trades) > 500:
-                    color = "green"  # Strong Market
-            elif instrument.startswith("BTC"):
-                if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
-                    color = "green"  # Strong Market
-
-            ax.scatter(
-                [0.95], [0.05],
-                transform=ax.transAxes,
-                s=500,
-                c=f"{color}",
-                edgecolors=f"{color}",
-                zorder=100
-            )
-
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        # plt.close(fig)
+        plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
@@ -367,46 +342,21 @@ class ChartController(http.Controller):
             fontsize=14,
         )
 
-        if mode == "flow":
-            # Get Gamma Peak Value
-            gamma_peak_value = self._magnified_gamma_peak(
-                market_gammas,
-                market_deltas,
-                0.0
-            )
-            
-            color = "red"  # Weak Market
-            if instrument.startswith("ETH"):
-                if abs(gamma_peak_value) > 1000 and volume > 500 and len(trades) > 500:
-                    color = "green"  # Strong Market
-            elif instrument.startswith("BTC"):
-                if abs(gamma_peak_value) > 50 and volume > 100 and len(trades) > 100:
-                    color = "green"  # Strong Market
-
-            ax.scatter(
-                [0.95], [0.05],
-                transform=ax.transAxes,
-                s=500,
-                c=f"{color}",
-                edgecolors=f"{color}",
-                zorder=100
-            )
-
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        # plt.close(fig)
+        plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_all.png"'),
-            ("Refresh", refresh_interval*5),
+            ("Refresh", refresh_interval*10),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
     @http.route("/<string:instrument>/<int:strike>", type="http", auth="public", website=True)
     def chart_png_strike(self, instrument, strike):
-        plot_title = f"Dealer State at Strike {strike} (No Refresh)"
+        plot_title = f"Dealer State at Strike {strike}"
         icp = request.env['ir.config_parameter']
 
         day_from_price = 0
@@ -421,6 +371,7 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         show_red_line = icp.get_param("dankbit.show_red_line")
         start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
@@ -469,12 +420,13 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        # plt.close(fig)
+        plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"), 
             ("Cache-Control", "no-cache"),
             ("Content-Disposition", f'inline; filename="{instrument}_strike_{strike}.png"'),
+            ("Refresh", refresh_interval),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
 
@@ -543,7 +495,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        # plt.close(fig)
+        plt.close(fig)
 
         headers = [
             ("Content-Type", "image/png"),
@@ -551,62 +503,6 @@ class ChartController(http.Controller):
             ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
         ]
         return request.make_response(buf.getvalue(), headers=headers)
-
-    def _magnified_gamma_peak(
-        self,
-        raw_market_gammas,
-        raw_market_delta,
-        gamma_plot_scale=None
-    ):
-        """
-        Returns the magnified gamma peak value (signed),
-        using the exact same logic as Dankbit plotting.
-
-        Parameters
-        ----------
-        raw_market_gammas : array-like
-            Raw (unscaled) market gamma values
-        raw_market_delta : array-like
-            Raw market delta values
-        gamma_plot_scale : float or None
-            Optional config override (dankbit.gamma_plot_scale).
-            If None, auto-scaling is used.
-
-        Returns
-        -------
-        float
-            Magnified gamma peak (signed)
-        """
-
-        mg_arr = np.asarray(raw_market_gammas, dtype=float)
-        md_arr = np.asarray(raw_market_delta, dtype=float)
-
-        if mg_arr.size == 0:
-            return 0.0
-
-        mg_max = np.max(np.abs(mg_arr))
-        md_max = np.max(np.abs(md_arr)) if md_arr.size else 0.0
-
-        # --- compute gamma scale ---
-        if gamma_plot_scale and gamma_plot_scale > 0:
-            gamma_scale = float(gamma_plot_scale)
-        else:
-            if mg_max > 0:
-                gamma_scale = max(md_max, 1.0) / mg_max
-            else:
-                gamma_scale = 1.0
-
-        # --- magnify gamma ---
-        mg_plot = mg_arr * gamma_scale
-
-        # --- return signed peak ---
-        gamma_peak_magnified = max(
-            mg_plot,
-            key=lambda g: abs(g),
-            default=0.0
-        )
-
-        return gamma_peak_magnified
 
     def _atm_volume(self, trades, index_price, atm_pct=0.01):
         """

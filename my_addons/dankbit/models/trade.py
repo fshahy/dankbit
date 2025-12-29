@@ -333,7 +333,6 @@ class Trade(models.Model):
                 rec.strike = 0
 
     def get_index_price(self, instrument):
-        _logger.info("------------------- get_index_price -------------------")
         params = {}
         URL = "https://www.deribit.com/api/v2/public/get_index_price"
 
@@ -341,7 +340,6 @@ class Trade(models.Model):
             params = {"index_name": "btc_usdt"}
         if instrument.startswith("ETH"):
             params = {"index_name": "eth_usdt"}
-        
 
         # read timeout from config (seconds)
         timeout = 5.0
@@ -358,6 +356,7 @@ class Trade(models.Model):
         if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < cache_ttl):
             return cached.get("value")
 
+        _logger.info("------------------- get_index_price -------------------")
         data = _safe_deribit_request(URL, params=params, timeout=timeout)
         if data and isinstance(data, dict):
             val = data.get("result", {}).get("index_price", 0.0)
