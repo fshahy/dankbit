@@ -1,3 +1,4 @@
+import base64
 import numpy as np
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -104,12 +105,6 @@ class ChartController(http.Controller):
         elif instrument.startswith("BTC-") or instrument.startswith("ETH-"):
             return self.instrument_home_page(instrument)
 
-    def instrument_home_page(self, instrument):
-        values = {
-            "instrument": instrument,
-        }
-        return request.render("dankbit.dankbit_instrument_home_page", values)
-
     def chart_png_dealer_state(self, 
                          instrument,
                          domain, 
@@ -160,13 +155,16 @@ class ChartController(http.Controller):
         fig.savefig(buf, format="png")
         plt.close(fig)
 
-        headers = [
-            ("Content-Type", "image/png"), 
-            ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="btc_g_global.png"'),
-            ("Refresh", refresh_interval*10),
-        ]
-        return request.make_response(buf.getvalue(), headers=headers)
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_title": f"{instrument} - {plot_title}",
+                "refresh_interval": refresh_interval*5,
+                "image_b64": image_b64,
+            }
+        )
 
     @http.route([
         "/<string:instrument>/<string:view_type>", 
@@ -255,7 +253,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -264,99 +262,20 @@ class ChartController(http.Controller):
         fig.savefig(buf, format="png")
         plt.close(fig)
 
-        headers = [
-            ("Content-Type", "image/png"), 
-            ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_{from_hour}H_day.png"'),
-            ("Refresh", refresh_interval),
-        ]
-        return request.make_response(buf.getvalue(), headers=headers)
-
-    @http.route("/<string:instrument>/<string:view_type>/a", type="http", auth="public", website=True)
-    def chart_png_all(self, instrument, view_type, **params):
-        plot_title = f"{view_type} all"
-        icp = request.env["ir.config_parameter"]
-
-        day_from_price = 0
-        day_to_price = 1000
-        steps = 1
-        if instrument.startswith("BTC"):
-            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
-            steps = int(icp.get_param("dankbit.steps", default=100))
-        if instrument.startswith("ETH"):
-            day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=50))
-
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        mock_0dte = icp.get_param("dankbit.mock_0dte")
-        show_red_line = icp.get_param("dankbit.show_red_line")
-        tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
-
-        domain=[
-            ("name", "ilike", f"{instrument}"),
-            ("is_block_trade", "=", False),
-        ]
-
-        tau_param = params.get("tau", None)
-        if tau_param is not None:
-            tau = float(tau_param)
-        mode = params.get("mode", "flow")
-        if mode not in ["flow", "structure"]:
-            raise ValueError(f"Unknown mode: {mode}")
-        if mode and mode == "structure":
-            domain.append(("oi_reconciled", "=", True))
-
-        trades = request.env["dankbit.trade"].search(domain=domain)
-
-        index_price = request.env["dankbit.trade"].get_index_price(instrument)
-        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
-        is_call = []
-
-        for trade in trades:
-            if trade.option_type == "call":
-                is_call.append(True)
-                if trade.direction == "buy":
-                    obj.long_call(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_call(trade.strike, trade.price * trade.index_price)
-            elif trade.option_type == "put":
-                is_call.append(False)
-                if trade.direction == "buy":
-                    obj.long_put(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_put(trade.strike, trade.price * trade.index_price)
-
-        STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode=mode, tau=tau)
-
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
-
-        volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
-        ax.text(
-            0.01, 0.02,
-            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
-            transform=ax.transAxes,
-            fontsize=14,
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_title": f"{instrument} - Today",
+                "refresh_interval": refresh_interval,
+                "image_b64": image_b64,
+            }
         )
-
-        buf = BytesIO()
-        fig.savefig(buf, format="png")
-        plt.close(fig)
-
-        headers = [
-            ("Content-Type", "image/png"), 
-            ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="{instrument}_{view_type}_all.png"'),
-            ("Refresh", refresh_interval*10),
-        ]
-        return request.make_response(buf.getvalue(), headers=headers)
 
     @http.route("/<string:instrument>/<int:strike>", type="http", auth="public", website=True)
     def chart_png_strike(self, instrument, strike):
-        plot_title = f"Dealer State at Strike {strike}"
+        plot_title = f"Strike {strike}"
         icp = request.env['ir.config_parameter']
 
         day_from_price = 0
@@ -413,7 +332,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: flow | Tau: {tau}",
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: {tau}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -422,13 +341,16 @@ class ChartController(http.Controller):
         fig.savefig(buf, format="png")
         plt.close(fig)
 
-        headers = [
-            ("Content-Type", "image/png"), 
-            ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="{instrument}_strike_{strike}.png"'),
-            ("Refresh", refresh_interval),
-        ]
-        return request.make_response(buf.getvalue(), headers=headers)
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_title": f"{instrument} - {plot_title}",
+                "refresh_interval": refresh_interval,
+                "image_b64": image_b64,
+            }
+        )
 
     @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
     def chart_png_full_oi(self, instrument):
@@ -497,12 +419,16 @@ class ChartController(http.Controller):
         fig.savefig(buf, format="png")
         plt.close(fig)
 
-        headers = [
-            ("Content-Type", "image/png"),
-            ("Cache-Control", "no-cache"),
-            ("Content-Disposition", f'inline; filename="{instrument}_full_oi.png"'),
-        ]
-        return request.make_response(buf.getvalue(), headers=headers)
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_title": f"{instrument} - Taker Full OI",
+                "refresh_interval": 3600,
+                "image_b64": image_b64,
+            }
+        )
 
     def _atm_volume(self, trades, index_price, atm_pct=0.01):
         """

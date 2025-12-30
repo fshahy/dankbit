@@ -1,5 +1,5 @@
 <odoo>
-	<template id="dankbit_help" name="Dankbit 2x2 Image Grid">
+	<template id="dankbit_help" name="Dankbit Help">
 		<t t-call="website.layout">
 			<div class="container my-5">
 				<div class="row text-center">
@@ -31,64 +31,32 @@
 		</t>
 	</template>
 
-	<template id="dankbit_instrument_home_page" name="Instrument Homepage">
-		<t t-call="website.layout">
-			<div class="container my-5">
-				<div class="row justify-content-center">
-					<div class="col-lg-6 col-md-8">
-						<h2>
-							<t t-esc="instrument"/>
-						</h2>
-						<br/>
+	<template id="dankbit_page" name="Dankbit Plot Minimal">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta http-equiv="refresh" t-att-content="refresh_interval"/>
+				<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+				<meta http-equiv="Pragma" content="no-cache"/>
+				<meta http-equiv="Expires" content="0"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="plot_title"/></title>
 
-						<h4>
-							Flow Views:
-						</h4>
-						<p>
-							<a t-attf-href="{{instrument}}/mm/l/60?mode=flow&amp;tau=1" target="_blank">
-								Best for Scalping: /mm/l/60?mode=flow&amp;tau=1
-							</a>
-						</p>
-						<p>
-							<a t-attf-href="{{instrument}}/mm?mode=flow" target="_blank">
-								Today's Flow: /mm?mode=flow
-							</a>
-						</p>
-						<p>
-							<a t-attf-href="{{instrument}}/mm/a?mode=flow" target="_blank">
-								Full Flow: /mm/a?mode=flow
-							</a>
-						</p>
+				<style>
+					html, body { margin:0; padding:0; background:#0b0f14; }
+					.wrap { display:flex; justify-content:center; align-items:center; min-height:100vh; }
+					img { max-width:100vw; max-height:100vh; height:auto; width:auto; display:block; }
+				</style>
+			</head>
 
-						<br/>
-
-						<h4>
-							Structure Views:
-						</h4>
-						<p>
-							<a t-attf-href="{{instrument}}/mm?mode=structure" target="_blank">
-								Today's Structure: /mm?mode=structure
-							</a>
-						</p>
-						<p>
-							<a t-attf-href="{{instrument}}/mm/a?mode=structure" target="_blank">
-								Full Structure: /mm/a?mode=structure
-							</a>
-						</p>
-
-						<br/>
-						<h4>
-							OI Views:
-						</h4>
-						<p>
-							<a t-attf-href="{{instrument}}/oi" target="_blank">
-								Taker Full OI (/oi)
-							</a>
-						</p>
-					</div>
+			<body>
+				<div class="wrap">
+				<img
+					t-att-src="'data:image/png;base64,%s' % image_b64"
+					alt="Dankbit plot"
+				/>
 				</div>
-			</div>
-		</t>
+			</body>
+		</html>
 	</template>
-
 </odoo>
