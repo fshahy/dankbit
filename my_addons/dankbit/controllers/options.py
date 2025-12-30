@@ -58,7 +58,7 @@ class OptionStrat:
             self.instruments.append(o)
 
     # =========================================================
-    # BASELINE PLOT — SINGLE ZERO AXIS (CORRECT)
+    # BASELINE PLOT — THREE SEPARATE AXES, ZERO CENTERED
     # =========================================================
     def plot(
         self,
@@ -90,30 +90,31 @@ class OptionStrat:
             mg = np.interp(self.STs, np.linspace(self.STs.min(), self.STs.max(), mg.size), mg)
 
         if view_type == "mm":
-            if show_red_line:
-                ax.plot(self.STs, -self.payoffs, color="red", label="MM P&L")
+            pnl_curve = -self.payoffs
             delta_curve = -md
             gamma_curve = -mg
+            pnl_label = "MM P&L"
         else:
-            if show_red_line:
-                ax.plot(self.STs, self.payoffs, color="red", label="Taker P&L")
+            pnl_curve = self.payoffs
             delta_curve = md
             gamma_curve = mg
+            pnl_label = "Taker P&L"
 
+        # =====================================================
+        # DELTA AXIS (PRIMARY) — ZERO CENTERED
+        # =====================================================
         ax.plot(self.STs, delta_curve, color="green", label="Delta")
 
-        # ---- FORCE DELTA AXIS TO BE SYMMETRIC (KEY FIX) ----
         if np.any(np.isfinite(delta_curve)):
             dmax = float(np.max(np.abs(delta_curve)))
             if dmax > 0:
                 ax.set_ylim(-dmax, dmax)
 
-        # ---- SINGLE, TRUE ZERO LINE ----
         ax.axhline(0, color="black", linewidth=1)
         ax.axvline(x=index_price, color="blue")
 
         # =====================================================
-        # SECONDARY AXIS — Gamma (NO ZERO LINE HERE)
+        # GAMMA AXIS (SECONDARY) — ZERO CENTERED
         # =====================================================
         axg = ax.twinx()
         axg.plot(
@@ -142,13 +143,35 @@ class OptionStrat:
             interpolate=True,
         )
 
+        # =====================================================
+        # P&L AXIS (THIRD) — ZERO CENTERED
+        # =====================================================
+        if show_red_line:
+            axp = ax.twinx()
+            axp.spines["right"].set_position(("outward", 60))
+            axp.plot(self.STs, pnl_curve, color="red", label=pnl_label)
+            axp.tick_params(axis="y", labelcolor="red")
+
+            if np.any(np.isfinite(pnl_curve)):
+                pmax = float(np.max(np.abs(pnl_curve)))
+                if pmax > 0:
+                    axp.set_ylim(-pmax, pmax)
+
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
         ax.set_title(f"{self.name} | {now} UTC | {plot_title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
         h1, l1 = ax.get_legend_handles_labels()
         h2, l2 = axg.get_legend_handles_labels()
-        ax.legend(h1 + h2, l1 + l2, loc="upper right", framealpha=0.85)
+        h = h1 + h2
+        l = l1 + l2
+
+        if show_red_line:
+            h3, l3 = axp.get_legend_handles_labels()
+            h += h3
+            l += l3
+
+        ax.legend(h, l, loc="upper right", framealpha=0.85)
 
         self.add_dankbit_signature(ax)
         return fig, ax
