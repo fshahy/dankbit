@@ -25,6 +25,30 @@ def bs_gamma(S, K, T, r, sigma, min_time_hours=1.0):
 
 
 # ============================================================
+# Gamma impact zone (radius)
+# ΔS ≈ S * σ * √T
+# ============================================================
+def gamma_impact_radius(S, sigma, T, min_time_hours=1.0):
+    eps_years = min_time_hours / (24.0 * 365.0)
+    T_eff = max(T, eps_years)
+    return S * sigma * np.sqrt(T_eff)
+
+
+# ============================================================
+# Impact weighting (smooth decay outside zone)
+# ============================================================
+def gamma_impact_weight(S, K, radius):
+    S = np.asarray(S, dtype=float)
+    radius = np.asarray(radius, dtype=float)
+
+    # Avoid divide-by-zero safely
+    safe_radius = np.maximum(radius, 1e-12)
+
+    dist = np.abs(S - K)
+    return np.exp(- (dist / safe_radius) ** 2)
+
+
+# ============================================================
 # Trade sign
 # ============================================================
 def _infer_sign(trd):
@@ -36,9 +60,18 @@ def _infer_sign(trd):
 
 
 # ============================================================
-# Portfolio Gamma
+# Portfolio Gamma (with impact zone)
 # ============================================================
-def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.0, tau=6.0):
+def portfolio_gamma(
+    S,
+    trades,
+    r=0.0,
+    mock_0dte=False,
+    mode="flow",
+    min_hours=1.0,
+    tau=6.0,
+    use_impact_zone=True,
+):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
     tau_seconds = float(tau) * 3600.0
     now = datetime.now(timezone.utc)
@@ -71,6 +104,22 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.
             min_time_hours=min_hours,
         )
 
+        # ----------------------------------------------------
+        # Gamma impact zone weighting
+        # ----------------------------------------------------
+        if use_impact_zone:
+            radius = gamma_impact_radius(
+                S=S,
+                sigma=sigma,
+                T=T,
+                min_time_hours=min_hours,
+            )
+            impact = gamma_impact_weight(S, trd.strike, radius)
+            gamma *= impact
+
+        # ----------------------------------------------------
+        # Time decay (FLOW mode only)
+        # ----------------------------------------------------
         if mode == "flow" and trd.deribit_ts:
             ts = trd.deribit_ts
             if ts.tzinfo is None:
@@ -82,6 +131,9 @@ def portfolio_gamma(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.
             else:
                 gamma *= 0.0
 
+        # ----------------------------------------------------
+        # Persistence (STRUCTURE mode)
+        # ----------------------------------------------------
         if mode == "structure":
             if trd.oi_impact is None:
                 persistence = 1.0
