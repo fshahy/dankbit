@@ -41,7 +41,7 @@ def _infer_sign(trd):
 # ============================================================
 # Portfolio Delta (FLOW decays, STRUCTURE does not)
 # ============================================================
-def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.0, tau=6.0):
+def portfolio_delta(S, trades, r=0.0, mode="flow", min_hours=1.0, tau=6.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
     tau_seconds = float(tau) * 3600.0
     now = datetime.now(timezone.utc)
@@ -49,8 +49,6 @@ def portfolio_delta(S, trades, r=0.0, mock_0dte=False, mode="flow", min_hours=1.
     for trd in trades:
         hours_to_expiry = trd.get_hours_to_expiry()
         T = hours_to_expiry / (24.0 * 365.0)
-        if mock_0dte:
-            T = 0.0
 
         sigma = trd.iv / 100.0
         sign = _infer_sign(trd)

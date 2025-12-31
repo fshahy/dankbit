@@ -12,25 +12,13 @@
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
-                            <field name="from_days_ago"/>
-                        </setting>
-                        <setting>
                             <field name="show_red_line" placeholder="Show Red Line"/>
-                        </setting>
-                        <setting>
-                            <field name="last_hedging_time" placeholder="Last Hedging Time"/>
-                        </setting>
-                        <setting>
-                            <field name="gamma_plot_scale" placeholder="Gamma plot scale (0=auto)"/>
                         </setting>
                         <setting>
                             <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
                         </setting>
                         <setting>
                             <field name="deribit_cache_ttl" placeholder="Deribit cache TTL (s)"/>
-                        </setting>
-                        <setting>
-                            <field name="mock_0dte" placeholder="Mock 0DTE"/>
                         </setting>
                         <setting>
                             <field name="greeks_min_time_hours" placeholder="Greeks min time (hours)"/>

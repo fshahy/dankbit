@@ -62,7 +62,14 @@ def get_oi_snapshot(instrument):
     now = time.time()
 
     # cache key per currency
-    currency = "BTC" if instrument.startswith("BTC") else "ETH"
+    currency = "" 
+    
+    if instrument.upper() == "BTC":
+        currency = "BTC"
+    elif instrument.upper() == "ETH":
+        currency = "ETH"
+    else:
+        raise ValueError(f"Unknown instrument: {instrument}")
 
     # --- cache hit ---
     ts = _OI_CACHE_TS.get(currency, 0)

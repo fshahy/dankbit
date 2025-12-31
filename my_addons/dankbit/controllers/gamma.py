@@ -66,7 +66,6 @@ def portfolio_gamma(
     S,
     trades,
     r=0.0,
-    mock_0dte=False,
     mode="flow",
     min_hours=1.0,
     tau=6.0,
@@ -79,8 +78,6 @@ def portfolio_gamma(
     for trd in trades:
         hours_to_expiry = trd.get_hours_to_expiry()
         T = hours_to_expiry / (24.0 * 365.0)
-        if mock_0dte:
-            T = 0.0
 
         sigma = trd.iv / 100.0
         sign = _infer_sign(trd)

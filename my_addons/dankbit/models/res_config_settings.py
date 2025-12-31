@@ -37,28 +37,12 @@ class ResConfigSettings(models.TransientModel):
         string="Refresh interval",
         config_parameter="dankbit.refresh_interval"
     )
+
     show_red_line = fields.Boolean(
         string="Show red line",
         config_parameter="dankbit.show_red_line"
     )
-
-    from_days_ago = fields.Integer(
-        string="Data from days ago",
-        config_parameter="dankbit.from_days_ago",
-    )
-
-    last_hedging_time = fields.Datetime(
-        string="Last Hedging Time",
-        config_parameter="dankbit.last_hedging_time"
-    )
-
-    # plotting and API tuning
-    gamma_plot_scale = fields.Float(
-        string="Gamma plot scale (0 = auto)",
-        config_parameter="dankbit.gamma_plot_scale",
-        help="If 0 (default) the gamma plotting magnification is computed automatically."
-    )
-
+    
     deribit_timeout = fields.Float(
         string="Deribit API timeout (s)",
         config_parameter="dankbit.deribit_timeout",
@@ -69,11 +53,6 @@ class ResConfigSettings(models.TransientModel):
         string="Deribit cache TTL (s)",
         config_parameter="dankbit.deribit_cache_ttl",
         help="Time-to-live in seconds for cached Deribit responses (index/instruments)."
-    )
-
-    mock_0dte = fields.Boolean(
-        string="Mock 0DTE",
-        config_parameter="dankbit.mock_0dte"
     )
 
     greeks_min_time_hours = fields.Float(

@@ -36,8 +36,6 @@ class PlotWizard(models.TransientModel):
     def _plot(self, trades, dankbit_view_type):
         icp = self.env["ir.config_parameter"]
 
-        mock_0dte = icp.get_param("dankbit.mock_0dte")
-
         day_from_price = 0
         day_to_price = 1000
         steps = 1
@@ -71,8 +69,8 @@ class PlotWizard(models.TransientModel):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mock_0dte, mode="flow", tau=6)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=6)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=6)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, dankbit_view_type)
 
