@@ -240,7 +240,7 @@ class ChartController(http.Controller):
         )
 
     @http.route("/<string:instrument>/<int:strike>", type="http", auth="public", website=True)
-    def chart_png_strike(self, instrument, strike):
+    def chart_png_strike(self, instrument, strike, **params):
         plot_title = f"Strike {strike}"
         icp = request.env['ir.config_parameter']
 
@@ -260,6 +260,10 @@ class ChartController(http.Controller):
         show_red_line = icp.get_param("dankbit.show_red_line")
         start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
+
+        tau_param = params.get("tau", None)
+        if tau_param is not None:
+            tau = float(tau_param)
 
         trades = request.env['dankbit.trade'].search(
             domain=[
@@ -298,7 +302,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: {tau}",
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
