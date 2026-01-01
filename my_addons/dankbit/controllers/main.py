@@ -28,7 +28,6 @@ class ChartController(http.Controller):
         steps = 1
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
         start_ts = datetime.now() - timedelta(days=1)
@@ -57,7 +56,6 @@ class ChartController(http.Controller):
                                     day_to_price=day_to_price, 
                                     steps=steps, 
                                     refresh_interval=refresh_interval, 
-                                    show_red_line=show_red_line, 
                                     plot_title=plot_title, 
                                     mode=mode, 
                                     tau=tau)
@@ -79,7 +77,6 @@ class ChartController(http.Controller):
                                     day_to_price=day_to_price, 
                                     steps=steps, 
                                     refresh_interval=refresh_interval, 
-                                    show_red_line=show_red_line, 
                                     plot_title=plot_title, 
                                     mode=mode, 
                                     tau=tau)
@@ -97,7 +94,6 @@ class ChartController(http.Controller):
                          day_to_price, 
                          steps, 
                          refresh_interval, 
-                         show_red_line, 
                          plot_title, 
                          mode, 
                          tau):
@@ -125,7 +121,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
@@ -171,7 +167,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
@@ -214,7 +209,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, show_red_line, plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, False, plot_title)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
@@ -257,7 +252,6 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        show_red_line = icp.get_param("dankbit.show_red_line")
         start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
 
@@ -297,7 +291,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=tau)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", show_red_line, plot_title=plot_title)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title=plot_title)
         
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(

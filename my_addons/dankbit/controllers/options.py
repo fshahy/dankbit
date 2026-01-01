@@ -94,11 +94,13 @@ class OptionStrat:
             delta_curve = -md
             gamma_curve = -mg
             pnl_label = "MM P&L"
-        else:
+        elif view_type == "taker":
             pnl_curve = self.payoffs
             delta_curve = md
             gamma_curve = mg
             pnl_label = "Taker P&L"
+        else:
+            raise ValueError(f"Invalid view type: {view_type}")
 
         # =====================================================
         # DELTA AXIS (PRIMARY) — ZERO CENTERED
@@ -136,15 +138,26 @@ class OptionStrat:
             if gmax > 0:
                 axg.set_ylim(-gmax, gmax)
 
-        axg.fill_between(
-            self.STs,
-            gamma_curve,
-            0,
-            where=(gamma_curve > 0),
-            color="violet",
-            alpha=0.25,
-            interpolate=True,
-        )
+        if view_type == "mm":
+            axg.fill_between(
+                self.STs,
+                gamma_curve,
+                0,
+                where=(gamma_curve > 0),
+                color="violet",
+                alpha=0.25,
+                interpolate=True,
+            )
+        elif view_type == "taker":
+            axg.fill_between(
+                self.STs,
+                gamma_curve,
+                0,
+                where=(gamma_curve < 0),
+                color="violet",
+                alpha=0.25,
+                interpolate=True,
+            )
 
         # =====================================================
         # P&L AXIS (THIRD) — ZERO CENTERED

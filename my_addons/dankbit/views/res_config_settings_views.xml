@@ -12,9 +12,6 @@
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
-                            <field name="show_red_line" placeholder="Show Red Line"/>
-                        </setting>
-                        <setting>
                             <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
                         </setting>
                         <setting>

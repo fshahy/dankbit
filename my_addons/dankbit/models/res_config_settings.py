@@ -37,11 +37,6 @@ class ResConfigSettings(models.TransientModel):
         string="Refresh interval",
         config_parameter="dankbit.refresh_interval"
     )
-
-    show_red_line = fields.Boolean(
-        string="Show red line",
-        config_parameter="dankbit.show_red_line"
-    )
     
     deribit_timeout = fields.Float(
         string="Deribit API timeout (s)",
