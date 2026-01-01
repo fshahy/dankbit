@@ -61,18 +61,6 @@
             <search string="Search Trades">
                 <field name="name" string="Name"/>
                 <field name="strike" string="Strike"/>
-
-                <separator/>
-
-                <filter name="created_today" string="Created Today" 
-                        domain="[
-                            ('deribit_ts', '&gt;', datetime.datetime.combine(context_today(), datetime.time(0, 0, 0)))
-                        ]"/>
-
-                <filter name="created_last_6h" string="Created Last 6 Hours"
-                        domain="[
-                            ('deribit_ts', '>=', datetime.datetime.now() - datetime.timedelta(hours=6))
-                        ]"/>
                 
                 <separator/>
 
@@ -87,7 +75,7 @@
                 <separator/>
 
                 <filter name="only_block_trades" string="Only Block Trades" domain="[('is_block_trade', '=', True)]"/>
-                <filter name="is_not_block_trade" string="Is not Block Trade" domain="[('is_block_trade', '=', False)]"/>
+                <filter name="is_not_block_trade" string="Is Not Block Trade" domain="[('is_block_trade', '=', False)]"/>
 
                 <separator/>
 
