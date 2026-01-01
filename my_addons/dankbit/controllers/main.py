@@ -121,7 +121,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
 
@@ -216,7 +216,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
 
@@ -304,7 +304,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
 
@@ -436,9 +436,7 @@ class ChartController(http.Controller):
         gammas = np.asarray(gammas, dtype=float)
 
         # Keep only positive gamma values
-        # Note: Since this is taker gamma we need to find min gamma
-        # and return as max positive gamma
-        pos_gammas = gammas[gammas < 0.0] 
+        pos_gammas = gammas[gammas > 0.0] 
 
         if pos_gammas.size == 0:
             return 0  # explicit: no positive gamma regime
