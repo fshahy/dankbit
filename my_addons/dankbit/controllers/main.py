@@ -47,7 +47,7 @@ class ChartController(http.Controller):
 
             domain=[
                 ("name", "ilike", "BTC"),
-                ("is_block_trade", "=", False),
+                # ("is_block_trade", "=", False),
                 ("deribit_ts", ">=", start_ts),
             ]
             return self.chart_png_dealer_state(
@@ -70,7 +70,7 @@ class ChartController(http.Controller):
 
             domain=[
                 ("name", "ilike", "ETH"),
-                ("is_block_trade", "=", False),
+                # ("is_block_trade", "=", False),
                 ("deribit_ts", ">=", start_ts),
             ]
             return self.chart_png_dealer_state(instrument, 
@@ -178,7 +178,7 @@ class ChartController(http.Controller):
         domain=[
             ("name", "ilike", f"{instrument}"),
             ("deribit_ts", ">=", start_ts),
-            ("is_block_trade", "=", False),
+            # ("is_block_trade", "=", False),
         ]
 
         tau_param = params.get("tau", None)
@@ -270,7 +270,7 @@ class ChartController(http.Controller):
                 ("name", "ilike", f"{instrument}"),
                 ("strike", "=", int(strike)),
                 ("deribit_ts", ">=", start_ts),
-                ("is_block_trade", "=", False),
+                # ("is_block_trade", "=", False),
             ]
         )
 

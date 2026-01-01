@@ -240,7 +240,7 @@ class Trade(models.Model):
 
         trades = Trade.search([
             ("name", "=", instrument_name),
-            ("is_block_trade", "=", False),
+            # ("is_block_trade", "=", False),
             ("deribit_ts", ">", older.timestamp),
             ("deribit_ts", "<=", newer.timestamp),
             ("oi_reconciled", "=", False),
