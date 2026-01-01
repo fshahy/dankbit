@@ -68,8 +68,8 @@ class OptionStrat:
         view_type,
         show_red_line,
         plot_title,
-        width=8,
-        height=10,
+        width=18,
+        height=8,
     ):
         fig, ax = plt.subplots(figsize=(width, height))
         plt.xticks(rotation=90)
