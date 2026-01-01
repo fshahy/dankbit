@@ -43,35 +43,52 @@
 				<title><t t-esc="plot_title"/></title>
 
 				<style>
-					html, body { 
-						margin:0; 
-						padding:0; 
-						background:white; 
+					html, body {
+						margin: 0;
+						padding: 0;
+						background: white;
 					}
-					.wrap { 
-						display:flex; 
-						justify-content:center; 
-						align-items:flex-start; 
-						min-height:100vh; 
+
+					.wrap {
+						display: flex;
+						justify-content: center;
+						align-items: center;
 					}
-					img { 
-						max-width:100vw; 
-						max-height:100vh; 
-						height:auto; 
-						width:auto; 
-						display:block; 
+
+					img {
+						display: block;
+						max-width: 100vw;
+						height: auto;
+					}
+
+					.gamma-label {
+						text-align: center;
+						color: #c900ff;
+						margin: 0;
+						padding: 0;
 					}
 				</style>
 			</head>
 
 			<body>
+
 				<div class="wrap">
-				<img
-					t-att-src="'data:image/png;base64,%s' % image_b64"
-					alt="Dankbit plot"
-				/>
+					<img
+						t-att-src="'data:image/png;base64,%s' % image_b64"
+						alt="Dankbit plot"
+					/>
 				</div>
+
+				<h2 t-if="gamma_peak_value > 0" class="gamma-label">
+					Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
+				</h2>
+				<h2 t-if="gamma_peak_value == 0" class="gamma-label">
+					No Positive Gamma.
+				</h2>
+
 			</body>
 		</html>
 	</template>
+
+
 </odoo>

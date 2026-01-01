@@ -121,6 +121,10 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        if gamma_peak_value < 0:
+            gamma_peak_value = 0
+
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
@@ -143,6 +147,7 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - {plot_title}",
                 "refresh_interval": refresh_interval*5,
                 "image_b64": image_b64,
+                "gamma_peak_value": gamma_peak_value,
             }
         )
 
@@ -211,6 +216,10 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        if gamma_peak_value < 0:
+            gamma_peak_value = 0
+
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, False, plot_title)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
@@ -233,6 +242,7 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Today",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
+                "gamma_peak_value": gamma_peak_value,
             }
         )
 
@@ -294,6 +304,10 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=tau)
 
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
+        if gamma_peak_value < 0:
+            gamma_peak_value = 0
+
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title=plot_title)
         
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
@@ -316,6 +330,7 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - {plot_title}",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
+                "gamma_peak_value": gamma_peak_value,
             }
         )
 
@@ -416,3 +431,16 @@ class ChartController(http.Controller):
                 vol += abs(trade.amount)
 
         return round(vol)
+
+    def find_positive_gamma_peak(self, gammas):
+        gammas = np.asarray(gammas, dtype=float)
+
+        # Keep only positive gamma values
+        # Note: Since this is taker gamma we need to find min gamma
+        # and return as max positive gamma
+        pos_gammas = gammas[gammas < 0.0] 
+
+        if pos_gammas.size == 0:
+            return 0  # explicit: no positive gamma regime
+
+        return round(float(np.max(gammas)*10000))
