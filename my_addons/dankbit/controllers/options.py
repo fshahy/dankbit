@@ -220,14 +220,72 @@ class OptionStrat:
     # Signature (UNCHANGED)
     # =====================================================
     def add_dankbit_signature(self, ax, logo_path=None, alpha=0.5, fontsize=16, trade_count=None):
+        """
+        Legend stays top-right.
+        Dankbit™ signature sits immediately to the LEFT of the legend, with minimal spacing.
+        Zero overlap, minimal distance.
+        """
         fig = ax.figure
+
+        # --- Force legend into top-right ---
+        old_legend = ax.get_legend()
+        if old_legend:
+            handles, labels = old_legend.legendHandles, [t.get_text() for t in old_legend.texts]
+            legend = ax.legend(handles, labels,
+                            loc="upper right",
+                            framealpha=0.85)
+        else:
+            legend = ax.legend(loc="upper right", framealpha=0.85)
+
+        legend.get_frame().set_alpha(0.85)
+
+        # draw now so we can measure bbox
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+
+        # --- Legend bbox in axes coords ---
+        lbbox = legend.get_window_extent(renderer)
+        lbbox_axes = ax.transAxes.inverted().transform_bbox(lbbox)
+
+        # legend right edge (axes fraction)
+        legend_left_x  = lbbox_axes.x0
+        legend_top_y   = lbbox_axes.y1
+
+        # --- signature position: slightly left of legend ---
+        pad = 0.015    # small space between signature + legend
+        sig_x = legend_left_x - pad
+        sig_y = legend_top_y - 0.01
+
+        # clamp inside plot
+        if sig_x < 0.02:
+            sig_x = 0.02
+
+        # --- Draw logo ---
+        if logo_path:
+            try:
+                img = mpimg.imread(logo_path)
+                imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
+                ab = AnnotationBbox(
+                    imagebox,
+                    (sig_x, sig_y),
+                    xycoords="axes fraction",
+                    frameon=False,
+                    box_alignment=(1, 1),
+                )
+                ax.add_artist(ab)
+                return
+            except Exception:
+                pass
+
+        # --- Signature text ---
+        color = "#6c2bd9"
+
         t = ax.text(
-            0.98,
-            0.98,
+            sig_x, sig_y,
             "Dankbit™",
             transform=ax.transAxes,
             fontsize=fontsize,
-            color="#6c2bd9",
+            color=color,
             alpha=alpha,
             ha="right",
             va="top",
@@ -237,3 +295,18 @@ class OptionStrat:
         t.set_path_effects([
             path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
         ])
+
+        # --- Trade count under signature ---
+        if trade_count is not None:
+            ax.text(
+                sig_x,
+                sig_y - 0.045,
+                f"{trade_count} trades",
+                transform=ax.transAxes,
+                fontsize=fontsize * 0.55,
+                color=color,
+                alpha=alpha * 0.8,
+                ha="right",
+                va="top",
+                family="monospace",
+            )
