@@ -29,12 +29,13 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
-        start_ts = datetime.now() - timedelta(hours=tau)
 
         tau_param = params.get("tau", None)
         if tau_param is not None:
             tau = float(tau_param)
         mode = "flow"
+
+        start_ts = datetime.now() - timedelta(hours=tau)
 
         if instrument == "BTC":
             plot_title = f"Dealer State"
@@ -167,6 +168,11 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
+
+        tau_param = params.get("tau", None)
+        if tau_param is not None:
+            tau = float(tau_param)
+
         start_ts = datetime.now() - timedelta(hours=tau)
 
         domain=[
@@ -175,9 +181,6 @@ class ChartController(http.Controller):
             # ("is_block_trade", "=", False),
         ]
 
-        tau_param = params.get("tau", None)
-        if tau_param is not None:
-            tau = float(tau_param)
         mode = params.get("mode", "flow")
         if mode not in ["flow", "structure"]:
             raise ValueError(f"Unknown mode: {mode}")
@@ -252,11 +255,12 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
-        start_ts = datetime.now() - timedelta(hours=tau)
 
         tau_param = params.get("tau", None)
         if tau_param is not None:
             tau = float(tau_param)
+            
+        start_ts = datetime.now() - timedelta(hours=tau)
 
         trades = request.env['dankbit.trade'].search(
             domain=[
