@@ -43,9 +43,24 @@
 				<title><t t-esc="plot_title"/></title>
 
 				<style>
-					html, body { margin:0; padding:0; background:#0b0f14; }
-					.wrap { display:flex; justify-content:center; align-items:center; min-height:100vh; }
-					img { max-width:100vw; max-height:100vh; height:auto; width:auto; display:block; }
+					html, body { 
+						margin:0; 
+						padding:0; 
+						background:white; 
+					}
+					.wrap { 
+						display:flex; 
+						justify-content:center; 
+						align-items:flex-start; 
+						min-height:100vh; 
+					}
+					img { 
+						max-width:100vw; 
+						max-height:100vh; 
+						height:auto; 
+						width:auto; 
+						display:block; 
+					}
 				</style>
 			</head>
 
