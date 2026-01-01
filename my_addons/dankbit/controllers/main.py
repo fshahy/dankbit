@@ -21,7 +21,7 @@ class ChartController(http.Controller):
 
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
     def dispatcher(self, instrument, **params):
-        icp = request.env["ir.config_parameter"]
+        icp = request.env["ir.config_parameter"].sudo()
 
         day_from_price = 0
         day_to_price = 1000
