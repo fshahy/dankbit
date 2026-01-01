@@ -29,8 +29,7 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
-
-        start_ts = datetime.now() - timedelta(days=1)
+        start_ts = datetime.now() - timedelta(hours=tau)
 
         tau_param = params.get("tau", None)
         if tau_param is not None:
@@ -126,7 +125,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -167,8 +166,8 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
+        start_ts = datetime.now() - timedelta(hours=tau)
 
         domain=[
             ("name", "ilike", f"{instrument}"),
@@ -214,7 +213,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -252,8 +251,8 @@ class ChartController(http.Controller):
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        start_ts = datetime.now() - timedelta(days=1)
         tau = float(icp.get_param("dankbit.greeks_gamma_decay_tau_hours", default=6.0))
+        start_ts = datetime.now() - timedelta(hours=tau)
 
         tau_param = params.get("tau", None)
         if tau_param is not None:
@@ -296,7 +295,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: flow | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
