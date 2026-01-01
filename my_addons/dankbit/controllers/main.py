@@ -152,7 +152,7 @@ class ChartController(http.Controller):
             return f"<h3>Nothing here.</h3>"
         
         plot_title = view_type
-        icp = request.env["ir.config_parameter"]
+        icp = request.env["ir.config_parameter"].sudo()
 
         day_from_price = 0
         day_to_price = 1000
@@ -239,7 +239,7 @@ class ChartController(http.Controller):
     @http.route("/<string:instrument>/<int:strike>", type="http", auth="public", website=True)
     def chart_png_strike(self, instrument, strike, **params):
         plot_title = f"Strike {strike}"
-        icp = request.env['ir.config_parameter']
+        icp = request.env['ir.config_parameter'].sudo()
 
         day_from_price = 0
         day_to_price = 1000
@@ -321,7 +321,7 @@ class ChartController(http.Controller):
 
     @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
     def chart_png_full_oi(self, instrument):
-        icp = request.env["ir.config_parameter"]
+        icp = request.env["ir.config_parameter"].sudo()
 
         # --- price range ---
         if instrument.upper() == "BTC":
