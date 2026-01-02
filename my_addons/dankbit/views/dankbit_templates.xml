@@ -66,6 +66,7 @@
 						color: #c900ff;
 						margin: 0;
 						padding: 0;
+						font-size: 16pt;
 					}
 				</style>
 			</head>
@@ -79,12 +80,12 @@
 					/>
 				</div>
 
-				<h2 t-if="gamma_peak_value > 0" class="gamma-label">
+				<p t-if="gamma_peak_value > 0" class="gamma-label">
 					Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
-				</h2>
-				<h2 t-if="gamma_peak_value == 0" class="gamma-label">
+				</p>
+				<p t-if="gamma_peak_value == 0" class="gamma-label">
 					No Positive Gamma.
-				</h2>
+				</p>
 
 			</body>
 		</html>

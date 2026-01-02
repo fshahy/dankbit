@@ -124,6 +124,11 @@ class ChartController(http.Controller):
         gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
+        
+        if instrument.startswith("BTC"):
+            gamma_peak_value = round(gamma_peak_value*1000)
+        elif instrument.startswith("ETH"):
+            gamma_peak_value = round(gamma_peak_value*100)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title)
 
@@ -220,6 +225,11 @@ class ChartController(http.Controller):
         if gamma_peak_value < 0:
             gamma_peak_value = 0
 
+        if instrument.startswith("BTC"):
+            gamma_peak_value = round(gamma_peak_value*1000)
+        elif instrument.startswith("ETH"):
+            gamma_peak_value = round(gamma_peak_value*100)
+
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, view_type, False, plot_title)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
@@ -307,6 +317,11 @@ class ChartController(http.Controller):
         gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
+
+        if instrument.startswith("BTC"):
+            gamma_peak_value = round(gamma_peak_value*1000)
+        elif instrument.startswith("ETH"):
+            gamma_peak_value = round(gamma_peak_value*100)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title=plot_title)
         
@@ -441,4 +456,4 @@ class ChartController(http.Controller):
         if pos_gammas.size == 0:
             return 0  # explicit: no positive gamma regime
 
-        return round(float(np.max(gammas)*10000))
+        return np.max(gammas)
