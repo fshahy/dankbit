@@ -80,12 +80,14 @@
 					/>
 				</div>
 
-				<p t-if="gamma_peak_value > 0" class="gamma-label">
-					Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
-				</p>
-				<p t-if="gamma_peak_value == 0" class="gamma-label">
-					No Positive Gamma.
-				</p>
+				<t t-if="plot_name != 'full_oi'">
+					<p t-if="gamma_peak_value > 0" class="gamma-label">
+						Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
+					</p>
+					<p t-if="gamma_peak_value == 0" class="gamma-label">
+						No Positive Gamma.
+					</p>
+				</t>
 
 			</body>
 		</html>

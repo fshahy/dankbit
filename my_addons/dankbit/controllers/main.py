@@ -150,6 +150,7 @@ class ChartController(http.Controller):
         return request.render(
             "dankbit.dankbit_page",
             {
+                "plot_name": "dealer_state",
                 "plot_title": f"{instrument} - {plot_title}",
                 "refresh_interval": refresh_interval*5,
                 "image_b64": image_b64,
@@ -249,6 +250,7 @@ class ChartController(http.Controller):
         return request.render(
             "dankbit.dankbit_page",
             {
+                "plot_name": "today",
                 "plot_title": f"{instrument} - Today",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
@@ -349,6 +351,7 @@ class ChartController(http.Controller):
         return request.render(
             "dankbit.dankbit_page",
             {
+                "plot_name": "strike",
                 "plot_title": f"{instrument} - {plot_title}",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
@@ -428,6 +431,7 @@ class ChartController(http.Controller):
         return request.render(
             "dankbit.dankbit_page",
             {
+                "plot_name": "full_oi",
                 "plot_title": f"{instrument} - Taker Full OI",
                 "refresh_interval": 3600,
                 "image_b64": image_b64,
