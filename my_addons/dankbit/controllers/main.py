@@ -33,9 +33,18 @@ class ChartController(http.Controller):
         tau_param = params.get("tau", None)
         if tau_param is not None:
             tau = float(tau_param)
-        mode = "flow"
 
         start_ts = datetime.now() - timedelta(hours=tau)
+
+        domain=[
+            ("deribit_ts", ">=", start_ts),
+        ]
+
+        mode = params.get("mode", "flow")
+        if mode not in ["flow", "structure"]:
+            raise ValueError(f"Unknown mode: {mode}")
+        if mode and mode == "structure":
+            domain.append(("oi_reconciled", "=", True))
 
         if instrument == "BTC":
             plot_title = f"Dealer State"
@@ -44,11 +53,7 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
             steps = int(icp.get_param("dankbit.steps", default=100))
 
-            domain=[
-                ("name", "ilike", "BTC"),
-                # ("is_block_trade", "=", False),
-                ("deribit_ts", ">=", start_ts),
-            ]
+            domain.append(("name", "ilike", "BTC"))
             return self.chart_png_dealer_state(
                                     instrument,
                                     domain,
@@ -66,11 +71,7 @@ class ChartController(http.Controller):
             day_to_price = float(icp.get_param("dankbit.eth_to_price", default=150000))
             steps = int(icp.get_param("dankbit.eth_steps", default=100))
 
-            domain=[
-                ("name", "ilike", "ETH"),
-                # ("is_block_trade", "=", False),
-                ("deribit_ts", ">=", start_ts),
-            ]
+            domain.append(("name", "ilike", "ETH"))
             return self.chart_png_dealer_state(instrument, 
                                     domain, 
                                     day_from_price=day_from_price, 
@@ -188,7 +189,6 @@ class ChartController(http.Controller):
         domain=[
             ("name", "ilike", f"{instrument}"),
             ("deribit_ts", ">=", start_ts),
-            # ("is_block_trade", "=", False),
         ]
 
         mode = params.get("mode", "flow")
@@ -279,16 +279,23 @@ class ChartController(http.Controller):
         tau_param = params.get("tau", None)
         if tau_param is not None:
             tau = float(tau_param)
-            
+
         start_ts = datetime.now() - timedelta(hours=tau)
 
+        domain=[
+            ("name", "ilike", f"{instrument}"),
+            ("strike", "=", int(strike)),
+            ("deribit_ts", ">=", start_ts),
+        ]
+
+        mode = params.get("mode", "flow")
+        if mode not in ["flow", "structure"]:
+            raise ValueError(f"Unknown mode: {mode}")
+        if mode and mode == "structure":
+            domain.append(("oi_reconciled", "=", True))
+        
         trades = request.env['dankbit.trade'].search(
-            domain=[
-                ("name", "ilike", f"{instrument}"),
-                ("strike", "=", int(strike)),
-                ("deribit_ts", ">=", start_ts),
-                # ("is_block_trade", "=", False),
-            ]
+            domain=domain
         )
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
@@ -311,8 +318,8 @@ class ChartController(http.Controller):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=tau)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=tau)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
         gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
@@ -328,7 +335,7 @@ class ChartController(http.Controller):
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: flow | Tau: {tau}H",
+            f"{len(trades)} Trades | ATM Volume: {volume} | Mode: {mode} | Tau: {tau}H",
             transform=ax.transAxes,
             fontsize=14,
         )
