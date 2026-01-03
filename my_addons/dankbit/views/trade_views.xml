@@ -79,6 +79,10 @@
 
                 <separator/>
 
+                <filter name="only_oi_reconciled" string="Only OI Reconciled" domain="[('oi_reconciled', '=', True)]"/>
+                
+                <separator/>
+
                 <filter name="only_btc" string="Only BTC" domain="[('name', 'ilike', 'BTC')]"/>
                 <filter name="only_eth" string="Only ETH" domain="[('name', 'ilike', 'ETH')]"/>
 
