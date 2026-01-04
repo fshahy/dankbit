@@ -634,7 +634,7 @@ class Trade(models.Model):
             base_url = icp.get_param('web.base.url', default='http://localhost:8069')
 
         # Build the URL robustly and allow local hosts.
-        full_url = f"{base_url.rstrip('/')}/BTC?db=db1&screenshot=1"
+        full_url = f"{base_url.rstrip('/')}/BTC?screenshot=1"
         _logger.info("Taking screenshot using URL: %s", full_url)
 
         # timeout configurable (seconds)
