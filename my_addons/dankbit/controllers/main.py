@@ -151,9 +151,8 @@ class ChartController(http.Controller):
         plt.close(fig)
 
         if screenshot:
-            _logger.info("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
             buf.seek(0)
-            request.env["dankbit.screenshot"].create({
+            request.env["dankbit.screenshot"].sudo().create({
                 "name": f"{instrument} - Dealer State",
                 "timestamp": fields.Datetime.now(),
                 "image_png": base64.b64encode(buf.read()),

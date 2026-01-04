@@ -637,11 +637,7 @@ class Trade(models.Model):
         full_url = f"{base_url.rstrip('/')}/BTC?screenshot=1"
         _logger.info("Taking screenshot using URL: %s", full_url)
 
-        # timeout configurable (seconds)
-        try:
-            timeout = float(icp.get_param('dankbit.screenshot_timeout', default=3.0))
-        except Exception:
-            timeout = 3.0
+        timeout = 3.0
 
         try:
             response = requests.get(full_url, timeout=timeout)
@@ -661,7 +657,7 @@ class Trade(models.Model):
         except Exception as e:
             _msg = f"❌ Error calling {full_url}: {e}"
 
-        self.env['ir.logging'].sudo().create({
+        self.env['ir.logging'].create({
             'name': 'Dankbit Screenshot Taker',
             'type': 'server',
             'dbname': self._cr.dbname,
