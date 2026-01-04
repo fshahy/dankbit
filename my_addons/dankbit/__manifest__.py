@@ -17,6 +17,7 @@
         "views/dankbit_templates.xml",
         "wizard/plot_wizard_view.xml",
         "views/oi_snapshot_views.xml",
+        "views/screenshot_views.xml",
     ],
     "installable": True,
     "application": True,

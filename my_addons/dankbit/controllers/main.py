@@ -3,7 +3,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from io import BytesIO
 import logging
-from odoo import http
+from odoo import fields, http
 from odoo.http import request
 from . import options
 from . import delta
@@ -46,6 +46,8 @@ class ChartController(http.Controller):
         if mode and mode == "structure":
             domain.append(("oi_reconciled", "=", True))
 
+        screenshot = params.get("screenshot", None)
+
         if instrument == "BTC":
             plot_title = f"Dealer State"
 
@@ -63,7 +65,8 @@ class ChartController(http.Controller):
                                     refresh_interval=refresh_interval, 
                                     plot_title=plot_title, 
                                     mode=mode, 
-                                    tau=tau)
+                                    tau=tau,
+                                    screenshot=screenshot)
         elif instrument == "ETH":
             plot_title = f"Dealer State"
 
@@ -80,7 +83,8 @@ class ChartController(http.Controller):
                                     refresh_interval=refresh_interval, 
                                     plot_title=plot_title, 
                                     mode=mode, 
-                                    tau=tau)
+                                    tau=tau,
+                                    screenshot=screenshot)
         else:
             return request.make_response(
                 f"<h3>Route not found</h3><p>Instrument '{instrument}' is not supported.</p>",
@@ -97,7 +101,8 @@ class ChartController(http.Controller):
                          refresh_interval, 
                          plot_title, 
                          mode, 
-                         tau):
+                         tau,
+                         screenshot):
         trades = request.env["dankbit.trade"].search(domain=domain)
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
@@ -144,6 +149,15 @@ class ChartController(http.Controller):
         buf = BytesIO()
         fig.savefig(buf, format="png")
         plt.close(fig)
+
+        if screenshot:
+            _logger.info("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+            buf.seek(0)
+            request.env["dankbit.screenshot"].create({
+                "name": f"{instrument} - Dealer State",
+                "timestamp": fields.Datetime.now(),
+                "image_png": base64.b64encode(buf.read()),
+            })
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")

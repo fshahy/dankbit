@@ -623,6 +623,56 @@ class Trade(models.Model):
             ]
         ).unlink()
 
+    # run by scheduled action
+    def _take_screenshot(self):
+        # Use configured base URL so this works both on dankbit.com and locally.
+        icp = self.env['ir.config_parameter']
+        try:
+            base_url = icp.get_base_url()
+        except Exception:
+            # fallback to param (older Odoo versions)
+            base_url = icp.get_param('web.base.url', default='http://localhost:8069')
+
+        # Build the URL robustly and allow local hosts.
+        full_url = f"{base_url.rstrip('/')}/BTC?db=db1&screenshot=1"
+        _logger.info("Taking screenshot using URL: %s", full_url)
+
+        # timeout configurable (seconds)
+        try:
+            timeout = float(icp.get_param('dankbit.screenshot_timeout', default=3.0))
+        except Exception:
+            timeout = 3.0
+
+        try:
+            response = requests.get(full_url, timeout=timeout)
+            response.raise_for_status()
+            self.env.cr.commit()
+            _msg = f"✅ Called {full_url} — {response.status_code}"
+        except requests.exceptions.SSLError as e:
+            # Retry without SSL verification for local dev servers with self-signed certs
+            _logger.warning("SSL error when calling %s: %s — retrying with verify=False", full_url, e)
+            try:
+                response = requests.get(full_url, timeout=timeout, verify=False)
+                response.raise_for_status()
+                self.env.cr.commit()
+                _msg = f"✅ Called {full_url} (insecure) — {response.status_code}"
+            except Exception as e2:
+                _msg = f"❌ Error calling {full_url} (insecure retry): {e2}"
+        except Exception as e:
+            _msg = f"❌ Error calling {full_url}: {e}"
+
+        self.env['ir.logging'].sudo().create({
+            'name': 'Dankbit Screenshot Taker',
+            'type': 'server',
+            'dbname': self._cr.dbname,
+            'level': 'info',
+            'message': _msg,
+            'path': __name__,
+            'func': '_take_screenshot',
+            'line': '0',
+        })
+        return True
+
     def open_plot_wizard_taker(self):
         return {
             "type": "ir.actions.act_window",
@@ -656,3 +706,13 @@ class DankbitOISnapshot(models.Model):
     name = fields.Char(required=True, index=True)
     open_interest = fields.Float(required=True)
     timestamp = fields.Datetime(required=True, index=True)
+
+
+class DankbitScreenshot(models.Model):
+    _name = "dankbit.screenshot"
+    _description = "Dankbit Screenshot"
+    _order = "timestamp asc"
+
+    name = fields.Char(required=True)
+    timestamp = fields.Datetime(string="Timestamp", default=lambda self: fields.Datetime.now())
+    image_png = fields.Binary(string="Chart Image", attachment=True)
