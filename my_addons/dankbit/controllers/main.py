@@ -185,7 +185,11 @@ class ChartController(http.Controller):
         elif instrument.startswith("ETH"):
             gamma_peak_value = round(gamma_peak_value*100)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title, width=width, height=height)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
+                           "mm", False, 
+                           plot_title, 
+                           width=width, 
+                           height=height)
 
         volume = self._volume(trades)
         ax.text(
@@ -302,7 +306,8 @@ class ChartController(http.Controller):
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           view_type, False, plot_title,
+                           view_type, False, 
+                           plot_title,
                            width=width,
                            height=height)
 
@@ -404,7 +409,7 @@ class ChartController(http.Controller):
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "taker", False, 
+                           "mm", False, 
                            plot_title,
                            width=width,
                            height=height)
@@ -507,8 +512,9 @@ class ChartController(http.Controller):
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", 
-                           False, plot_title,
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
+                           "mm", False, 
+                           plot_title,
                            width=width,
                            height=height)
         
@@ -611,7 +617,8 @@ class ChartController(http.Controller):
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", False, 
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
+                           "mm", False, 
                            plot_title,
                            width=width,
                            height=height)
@@ -715,8 +722,9 @@ class ChartController(http.Controller):
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "taker", 
-                           False, plot_title,
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
+                           "mm", False, 
+                           plot_title,
                            width=width,
                            height=height)
         
@@ -826,7 +834,11 @@ class ChartController(http.Controller):
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, "mm", False, plot_title=plot_title, width=width, height=height)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
+                           "mm", False, 
+                           plot_title, 
+                           width=width, 
+                           height=height)
         
         volume = self._volume(trades)
         ax.text(
