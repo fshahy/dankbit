@@ -93,5 +93,62 @@
 		</html>
 	</template>
 
+	<template id="dankbit_dashboard" name="Dankbit 3-Column Dashboard">
+		<html>
+			<head>
+				<style>
+					html, body {
+						margin: 0;
+						padding: 0;
+						background: #0b0f14;
+					}
+
+					.db-row {
+						display: flex;
+						width: 100%;
+						height: 100vh;
+					}
+
+					.db-col {
+						flex: 1;
+						height: 100%;
+					}
+
+					.db-frame {
+						width: 100%;
+						height: 100%;
+						border: 0;
+						display: block;
+						background: #0b0f14;
+					}
+				</style>
+			</head>
+
+			<body>
+				<div class="db-row">
+					<div class="db-col">
+						<iframe
+							class="db-frame"
+							t-attf-src="/{{today}}/b?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+						/>
+					</div>
+
+					<div class="db-col">
+						<iframe
+							class="db-frame"
+							t-attf-src="/{{today}}/mm?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+						/>
+					</div>
+
+					<div class="db-col">
+						<iframe
+							class="db-frame"
+							t-attf-src="/{{today}}/s?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+						/>
+					</div>
+				</div>
+			</body>
+		</html>
+	</template>
 
 </odoo>

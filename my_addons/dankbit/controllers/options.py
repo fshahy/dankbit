@@ -72,7 +72,7 @@ class OptionStrat:
         height=8,
     ):
         fig, ax = plt.subplots(figsize=(width, height))
-        plt.xticks(rotation=45)
+        plt.xticks(rotation=90)
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))
