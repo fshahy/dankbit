@@ -31,7 +31,7 @@
 		</t>
 	</template>
 
-	<template id="dankbit_page" name="Dankbit Plot Minimal">
+	<template id="dankbit_page" name="Dankbit Plot">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
@@ -68,6 +68,22 @@
 						padding: 0;
 						font-size: 16pt;
 					}
+
+					.delta-label {
+						text-align: center;
+						color: green;
+						margin: 0;
+						padding: 0;
+						font-size: 16pt;
+					}
+
+					.maxpain-label {
+						text-align: center;
+						color: black;
+						margin: 0;
+						padding: 0;
+						font-size: 16pt;
+					}
 				</style>
 			</head>
 
@@ -80,15 +96,24 @@
 					/>
 				</div>
 
-				<t t-if="plot_name != 'full_oi'">
+				<t t-if="plot_name != 'oi'">
 					<p t-if="gamma_peak_value > 0" class="gamma-label">
 						Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
 					</p>
 					<p t-if="gamma_peak_value == 0" class="gamma-label">
 						No Positive Gamma.
 					</p>
+
+					<p class="delta-label">
+						Equilibrium = <t t-esc="equilibrium"/>
+					</p>
 				</t>
 
+				<t t-if="plot_name == 'oi'">
+					<p class="maxpain-label">
+						Max Pain = <t t-esc="equilibrium"/>
+					</p>				
+				</t>
 			</body>
 		</html>
 	</template>

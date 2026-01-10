@@ -115,7 +115,6 @@ class OptionStrat:
         ax.axhline(0, color="black", linewidth=1)
         ax.axvline(x=index_price, color="blue")
 
-        ax.set_ylabel("Delta (raw)", color="green")
         ax.tick_params(axis="y", labelcolor="green")
 
         # =====================================================
@@ -130,7 +129,6 @@ class OptionStrat:
             alpha=0.9,
             label="Gamma (raw)",
         )
-        axg.set_ylabel("Gamma exposure (raw)", color="violet")
         axg.tick_params(axis="y", labelcolor="violet")
 
         if np.any(np.isfinite(gamma_curve)):
@@ -195,39 +193,40 @@ class OptionStrat:
     # =====================================================
     # OI PLOT (UNCHANGED)
     # =====================================================
-    def plot_oi(self, index_price, oi_data):
+    def plot_oi(self, index_price, oi_data, plot_title):
         fig, ax = plt.subplots(figsize=(18, 8))
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            plt.yticks(list(range(0, 30001, 500))) 
+            plt.yticks(list(range(-1000000, 1000001, 100))) 
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-            plt.yticks(list(range(0, 100001, 1000)))
+            plt.yticks(list(range(-1000000, 1000001, 500)))
 
-        plt.xticks(rotation=45) 
+        plt.xticks(rotation=90) 
         ax.grid(True)
+        
+        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
+        now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
         if self.name.startswith("BTC"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color="green")
-                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color="red")
+                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
+                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
         elif self.name.startswith("ETH"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color="green")
-                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color="red")
+                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
+                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
 
-        utc_now = datetime.now(ZoneInfo("UTC"))
-        now = utc_now.strftime("%Y-%m-%d %H:%M")
-
-        ax.set_title(f"{self.name} | {now} UTC | Taker Full OI")
-        ax.axhline(0, color="black", linewidth=1, linestyle="-")
+        ax.set_title(f"{self.name} | {now} | {plot_title}")
+        ax.axhline(0, color='black', linewidth=1, linestyle='-')
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         # no legend here by default, but keep signature placement logic
         self.add_dankbit_signature(ax)
+        plt.show()
 
-        return fig
+        return fig, ax
 
     # =====================================================
     # Signature (UNCHANGED)

@@ -293,6 +293,9 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
+        # strikes = np.arange(from_price, to_price+1, 1000)
+        equilibrium = self.find_delta_zero_crossing(STs, market_deltas)
+
         gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
@@ -333,6 +336,7 @@ class ChartController(http.Controller):
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
                 "gamma_peak_value": gamma_peak_value,
+                "equilibrium": equilibrium,
             }
         )
 
@@ -866,67 +870,56 @@ class ChartController(http.Controller):
         )
 
     @http.route("/<string:instrument>/oi", type="http", auth="public", website=True)
-    def chart_png_full_oi(self, instrument):
-        icp = request.env["ir.config_parameter"].sudo()
+    def chart_png_oi(self, instrument, **params):
+        plot_title = "Today Full OI"
+        icp = request.env['ir.config_parameter'].sudo()
 
-        # --- price range ---
-        if instrument.upper() == "BTC":
-            day_from_price = float(icp.get_param("dankbit.from_price", default=100000))
-            day_to_price   = float(icp.get_param("dankbit.to_price", default=150000))
-            steps          = int(icp.get_param("dankbit.steps", default=100))
-            strike_step    = 1000
-        elif instrument.upper() == "ETH":
+        day_from_price = 0
+        day_to_price = 1000
+        steps = 1
+        strike_step = 1000
+        if instrument.startswith("BTC"):
+            day_from_price = float(icp.get_param("dankbit.from_price", default=100000)) 
+            day_to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
             day_from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            day_to_price   = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps          = int(icp.get_param("dankbit.eth_steps", default=10))
-            strike_step    = 25
-        else:
-            return "<h3>Unsupported instrument</h3>"
+            day_to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=10))
+            strike_step = 25
 
-        # ------------------------------------------------------------------
-        # REAL OI SOURCE (Deribit snapshot, NOT trades)
-        # ------------------------------------------------------------------
-        try:
-            # Expected to return list of dicts:
-            # { strike, option_type, open_interest }
-            oi_snapshot = oi.get_oi_snapshot(instrument)
-        except Exception as e:
-            _logger.exception("Failed to fetch Deribit OI snapshot")
-            return f"<h3>OI fetch failed: {e}</h3>"
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
-        # --- aggregate per strike ---
-        oi_map = {}
-        for row in oi_snapshot:
-            strike = int(row["strike"])
-            if strike < day_from_price or strike > day_to_price:
-                continue
-
-            if strike not in oi_map:
-                oi_map[strike] = {"call": 0.0, "put": 0.0}
-
-            oi_map[strike][row["option_type"]] += float(row["open_interest"])
-
-        # --- build sorted plot data ---
+        Vol = 0
+        Len = 0
         oi_data = []
         for strike in range(int(day_from_price), int(day_to_price), strike_step):
-            call_oi = oi_map.get(strike, {}).get("call", 0.0)
-            put_oi  = oi_map.get(strike, {}).get("put", 0.0)
-            oi_data.append([strike, call_oi, put_oi])
-            _logger.info([strike, call_oi, put_oi])
+            trades = request.env['dankbit.trade'].search(
+                domain=[
+                    ("name", "ilike", f"{instrument}"),
+                    ("strike", "=", strike),
+                    ("is_block_trade", "=", False),
+                ]
+            )
+            oi_call, oi_put = oi.calculate_oi(trades)
+            oi_data.append([strike, oi_call, oi_put])
+            Vol += self._volume(trades)
+            Len += len(trades)
 
-        # ------------------------------------------------------------------
-        # plotting (unchanged)
-        # ------------------------------------------------------------------
-        index_price = request.env["dankbit.trade"].get_index_price(instrument)
-        obj = options.OptionStrat(
-            instrument,
-            index_price,
-            day_from_price,
-            day_to_price,
-            steps
+        price_grid = np.linspace(day_from_price, day_to_price, steps)
+        max_pain_price = self.calculate_max_pain(oi_data, price_grid)
+
+        index_price = request.env['dankbit.trade'].get_index_price(instrument)
+        obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
+
+        fig, ax = obj.plot_oi(index_price, oi_data, plot_title)
+
+        ax.text(
+            0.01, 0.02,
+            f"{Len} Trades | Volume: {Vol}",
+            transform=ax.transAxes,
+            fontsize=14,
         )
-
-        fig = obj.plot_oi(index_price, oi_data)
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
@@ -937,12 +930,35 @@ class ChartController(http.Controller):
         return request.render(
             "dankbit.dankbit_page",
             {
-                "plot_name": "full_oi",
-                "plot_title": f"{instrument} - Taker Full OI",
-                "refresh_interval": 3600,
+                "plot_name": "oi",
+                "plot_title": f"{instrument} - Today Full OI",
+                "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
+                "equilibrium": max_pain_price,
             }
         )
+    
+    def calculate_max_pain(self, oi_data, price_grid):
+        """
+        oi_data: list of [strike, oi_call, oi_put]
+        price_grid: iterable of settlement prices
+        """
+        min_payout = float("inf")
+        max_pain_price = None
+
+        for S in price_grid:
+            total_payout = 0.0
+
+            for strike, oi_call, oi_put in oi_data:
+                call_payoff = max(S - strike, 0) * oi_call
+                put_payoff  = max(strike - S, 0) * oi_put
+                total_payout += call_payoff + put_payoff
+
+            if total_payout < min_payout:
+                min_payout = total_payout
+                max_pain_price = S
+
+        return round(max_pain_price)
 
     def _volume(self, trades):
         vol = 0.0
@@ -961,3 +977,27 @@ class ChartController(http.Controller):
             return 0  # explicit: no positive gamma regime
 
         return np.max(gammas)
+
+    def find_delta_zero_crossing(self, strikes, deltas):
+        strikes = np.asarray(strikes, dtype=float)
+        deltas  = np.asarray(deltas, dtype=float)
+
+        # Remove NaNs
+        mask = np.isfinite(deltas)
+        strikes, deltas = strikes[mask], deltas[mask]
+
+        # Find sign changes
+        sign_change = np.where(np.sign(deltas[:-1]) != np.sign(deltas[1:]))[0]
+
+        if len(sign_change) == 0:
+            return None  # no delta=0 exists in this window
+
+        i = sign_change[0]
+
+        # Linear interpolation for better precision
+        x0, x1 = strikes[i], strikes[i + 1]
+        y0, y1 = deltas[i], deltas[i + 1]
+
+        delta_zero = x0 - y0 * (x1 - x0) / (y1 - y0)
+        return round(float(delta_zero))
+
