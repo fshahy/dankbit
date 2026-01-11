@@ -6,7 +6,6 @@ from odoo import api, models, fields
 from ..controllers import options
 from ..controllers import delta
 from ..controllers import gamma
-import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -84,7 +83,7 @@ class PlotWizard(models.TransientModel):
         
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
         return buf.getvalue()
 
     def _atm_volume(self, trades, index_price, atm_pct=0.01):

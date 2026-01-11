@@ -9,7 +9,6 @@ from . import options
 from . import delta
 from . import gamma
 from . import oi
-import matplotlib.pyplot as plt
 
 
 _logger = logging.getLogger(__name__)
@@ -201,7 +200,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         if screenshot:
             buf.seek(0)
@@ -324,7 +323,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -428,7 +427,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -532,7 +531,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -637,7 +636,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -742,7 +741,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -854,7 +853,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -906,8 +905,8 @@ class ChartController(http.Controller):
             Vol += self._volume(trades)
             Len += len(trades)
 
-        price_grid = np.linspace(day_from_price, day_to_price, steps)
-        max_pain_price = self.calculate_max_pain(oi_data, price_grid)
+        # price_grid = np.linspace(day_from_price, day_to_price, steps)
+        max_pain_price = self.calculate_max_pain(oi_data)
 
         index_price = request.env['dankbit.trade'].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
@@ -923,7 +922,7 @@ class ChartController(http.Controller):
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
-        plt.close(fig)
+        del fig
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
@@ -938,11 +937,10 @@ class ChartController(http.Controller):
             }
         )
     
-    def calculate_max_pain(self, oi_data, price_grid):
-        """
-        oi_data: list of [strike, oi_call, oi_put]
-        price_grid: iterable of settlement prices
-        """
+    def calculate_max_pain(self, oi_data):
+        # Use strikes themselves as the price grid (correct for BTC/ETH)
+        price_grid = sorted({float(strike) for strike, _, _ in oi_data})
+
         min_payout = float("inf")
         max_pain_price = None
 
@@ -950,15 +948,18 @@ class ChartController(http.Controller):
             total_payout = 0.0
 
             for strike, oi_call, oi_put in oi_data:
-                call_payoff = max(S - strike, 0) * oi_call
-                put_payoff  = max(strike - S, 0) * oi_put
-                total_payout += call_payoff + put_payoff
+                strike = float(strike)
+
+                if S > strike:
+                    total_payout += (S - strike) * float(oi_call)
+                elif S < strike:
+                    total_payout += (strike - S) * float(oi_put)
 
             if total_payout < min_payout:
                 min_payout = total_payout
                 max_pain_price = S
 
-        return round(max_pain_price)
+        return max_pain_price
 
     def _volume(self, trades):
         vol = 0.0

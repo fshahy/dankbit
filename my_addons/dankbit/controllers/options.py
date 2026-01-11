@@ -4,12 +4,15 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
-import matplotlib.pyplot as plt
+
+# ✅ Server-safe Matplotlib (NO pyplot!)
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.ticker import MultipleLocator
 import matplotlib.image as mpimg
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import matplotlib.patheffects as path_effects
-from odoo.http import request as _odoo_request
+
 
 _logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class OptionStrat:
             self.instruments.append(o)
 
     # =========================================================
-    # BASELINE PLOT — THREE SEPARATE AXES, ZERO CENTERED
+    # BASELINE PLOT — SERVER-SAFE (NO pyplot), EXPLICIT FIG/AXES
     # =========================================================
     def plot(
         self,
@@ -71,9 +74,15 @@ class OptionStrat:
         width=18,
         height=8,
     ):
-        fig, ax = plt.subplots(figsize=(width, height))
-        plt.xticks(rotation=90)
+        # ✅ Create a fresh figure per request (no global state)
+        fig = Figure(figsize=(width, height), dpi=120)
+        FigureCanvas(fig)  # attach Agg canvas so fig.canvas.draw() works reliably
+        ax = fig.add_subplot(111)
 
+        # Rotate x tick labels (pyplot-free)
+        ax.tick_params(axis="x", labelrotation=90)
+
+        # Tick spacing
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))
         elif self.name.startswith("ETH"):
@@ -84,6 +93,7 @@ class OptionStrat:
         md = np.asarray(market_delta, dtype=float) if market_delta is not None else np.zeros_like(self.STs)
         mg = np.asarray(market_gammas, dtype=float) if market_gammas is not None else np.zeros_like(self.STs)
 
+        # Resample if sizes mismatch
         if md.size != self.STs.size:
             md = np.interp(self.STs, np.linspace(self.STs.min(), self.STs.max(), md.size), md)
         if mg.size != self.STs.size:
@@ -102,6 +112,9 @@ class OptionStrat:
         else:
             raise ValueError(f"Invalid view type: {view_type}")
 
+        # Clip x-range so nothing from outside the domain “sticks”
+        ax.set_xlim(float(self.STs.min()), float(self.STs.max()))
+
         # =====================================================
         # DELTA AXIS (PRIMARY) — ZERO CENTERED
         # =====================================================
@@ -114,7 +127,6 @@ class OptionStrat:
 
         ax.axhline(0, color="black", linewidth=1)
         ax.axvline(x=index_price, color="blue")
-
         ax.tick_params(axis="y", labelcolor="green")
 
         # =====================================================
@@ -127,7 +139,7 @@ class OptionStrat:
             color="violet",
             linewidth=2.0,
             alpha=0.9,
-            label="Gamma (raw)",
+            label="Gamma",
         )
         axg.tick_params(axis="y", labelcolor="violet")
 
@@ -160,6 +172,7 @@ class OptionStrat:
         # =====================================================
         # P&L AXIS (THIRD) — ZERO CENTERED
         # =====================================================
+        axp = None
         if show_red_line:
             axp = ax.twinx()
             axp.spines["right"].set_position(("outward", 60))
@@ -175,12 +188,12 @@ class OptionStrat:
         ax.set_title(f"{self.name} | {now} UTC | {plot_title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
+        # Combine legends from all axes
         h1, l1 = ax.get_legend_handles_labels()
         h2, l2 = axg.get_legend_handles_labels()
         h = h1 + h2
         l = l1 + l2
-
-        if show_red_line:
+        if show_red_line and axp is not None:
             h3, l3 = axp.get_legend_handles_labels()
             h += h3
             l += l3
@@ -191,45 +204,52 @@ class OptionStrat:
         return fig, ax
 
     # =====================================================
-    # OI PLOT (UNCHANGED)
+    # OI PLOT — SERVER-SAFE (NO pyplot)
     # =====================================================
     def plot_oi(self, index_price, oi_data, plot_title):
-        fig, ax = plt.subplots(figsize=(18, 8))
+        fig = Figure(figsize=(18, 8), dpi=120)
+        FigureCanvas(fig)
+        ax = fig.add_subplot(111)
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            plt.yticks(list(range(-1000000, 1000001, 100))) 
+            ax.set_yticks(list(range(-1000000, 1000001, 100)))
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-            plt.yticks(list(range(-1000000, 1000001, 500)))
+            ax.set_yticks(list(range(-1000000, 1000001, 500)))
 
-        plt.xticks(rotation=90) 
+        ax.tick_params(axis="x", labelrotation=90)
         ax.grid(True)
-        
+
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
+        # Keep bars on THIS AXIS ONLY (no pyplot)
         if self.name.startswith("BTC"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 400/2, float(oi[1]), width=400, color='green')
-                plt.bar(float(oi[0]) + 400/2, float(oi[2]), width=400, color='red')
+                strike = float(oi[0])
+                calls = float(oi[1])
+                puts = float(oi[2])
+                ax.bar(strike - 400 / 2, calls, width=400, color="green")
+                ax.bar(strike + 400 / 2, puts, width=400, color="red")
         elif self.name.startswith("ETH"):
             for oi in oi_data:
-                plt.bar(float(oi[0]) - 10/2, float(oi[1]), width=10, color='green')
-                plt.bar(float(oi[0]) + 10/2, float(oi[2]), width=10, color='red')
+                strike = float(oi[0])
+                calls = float(oi[1])
+                puts = float(oi[2])
+                ax.bar(strike - 10 / 2, calls, width=10, color="green")
+                ax.bar(strike + 10 / 2, puts, width=10, color="red")
 
         ax.set_title(f"{self.name} | {now} | {plot_title}")
-        ax.axhline(0, color='black', linewidth=1, linestyle='-')
+        ax.axhline(0, color="black", linewidth=1, linestyle="-")
         ax.axvline(x=index_price, color="blue")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
-        # no legend here by default, but keep signature placement logic
-        self.add_dankbit_signature(ax)
-        plt.show()
 
+        self.add_dankbit_signature(ax)
         return fig, ax
 
     # =====================================================
-    # Signature (UNCHANGED)
+    # Signature (server-safe: ensure canvas exists)
     # =====================================================
     def add_dankbit_signature(self, ax, logo_path=None, alpha=0.5, fontsize=16, trade_count=None):
         """
@@ -239,13 +259,15 @@ class OptionStrat:
         """
         fig = ax.figure
 
+        # Ensure we have a canvas attached (needed for bbox measurement)
+        if getattr(fig, "canvas", None) is None:
+            FigureCanvas(fig)
+
         # --- Force legend into top-right ---
         old_legend = ax.get_legend()
         if old_legend:
             handles, labels = old_legend.legendHandles, [t.get_text() for t in old_legend.texts]
-            legend = ax.legend(handles, labels,
-                            loc="upper right",
-                            framealpha=0.85)
+            legend = ax.legend(handles, labels, loc="upper right", framealpha=0.85)
         else:
             legend = ax.legend(loc="upper right", framealpha=0.85)
 
@@ -259,12 +281,11 @@ class OptionStrat:
         lbbox = legend.get_window_extent(renderer)
         lbbox_axes = ax.transAxes.inverted().transform_bbox(lbbox)
 
-        # legend right edge (axes fraction)
-        legend_left_x  = lbbox_axes.x0
-        legend_top_y   = lbbox_axes.y1
+        legend_left_x = lbbox_axes.x0
+        legend_top_y = lbbox_axes.y1
 
         # --- signature position: slightly left of legend ---
-        pad = 0.015    # small space between signature + legend
+        pad = 0.015
         sig_x = legend_left_x - pad
         sig_y = legend_top_y - 0.01
 
@@ -291,9 +312,9 @@ class OptionStrat:
 
         # --- Signature text ---
         color = "#6c2bd9"
-
         t = ax.text(
-            sig_x, sig_y,
+            sig_x,
+            sig_y,
             "Dankbit™",
             transform=ax.transAxes,
             fontsize=fontsize,
@@ -304,9 +325,7 @@ class OptionStrat:
             fontweight="bold",
             family="monospace",
         )
-        t.set_path_effects([
-            path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")
-        ])
+        t.set_path_effects([path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")])
 
         # --- Trade count under signature ---
         if trade_count is not None:
