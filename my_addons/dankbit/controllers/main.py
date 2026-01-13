@@ -292,9 +292,6 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        # strikes = np.arange(from_price, to_price+1, 1000)
-        equilibrium = self.find_delta_zero_crossing(STs, market_deltas)
-
         gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
         if gamma_peak_value < 0:
             gamma_peak_value = 0
@@ -335,7 +332,6 @@ class ChartController(http.Controller):
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
                 "gamma_peak_value": gamma_peak_value,
-                "equilibrium": equilibrium,
             }
         )
 
@@ -905,9 +901,6 @@ class ChartController(http.Controller):
             Vol += self._volume(trades)
             Len += len(trades)
 
-        # price_grid = np.linspace(day_from_price, day_to_price, steps)
-        max_pain_price = self.calculate_max_pain(oi_data)
-
         index_price = request.env['dankbit.trade'].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, day_from_price, day_to_price, steps)
 
@@ -933,34 +926,9 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Today Full OI",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
-                "equilibrium": max_pain_price,
             }
         )
     
-    def calculate_max_pain(self, oi_data):
-        # Use strikes themselves as the price grid (correct for BTC/ETH)
-        price_grid = sorted({float(strike) for strike, _, _ in oi_data})
-
-        min_payout = float("inf")
-        max_pain_price = None
-
-        for S in price_grid:
-            total_payout = 0.0
-
-            for strike, oi_call, oi_put in oi_data:
-                strike = float(strike)
-
-                if S > strike:
-                    total_payout += (S - strike) * float(oi_call)
-                elif S < strike:
-                    total_payout += (strike - S) * float(oi_put)
-
-            if total_payout < min_payout:
-                min_payout = total_payout
-                max_pain_price = S
-
-        return max_pain_price
-
     def _volume(self, trades):
         vol = 0.0
         for trade in trades:
@@ -978,27 +946,3 @@ class ChartController(http.Controller):
             return 0  # explicit: no positive gamma regime
 
         return np.max(gammas)
-
-    def find_delta_zero_crossing(self, strikes, deltas):
-        strikes = np.asarray(strikes, dtype=float)
-        deltas  = np.asarray(deltas, dtype=float)
-
-        # Remove NaNs
-        mask = np.isfinite(deltas)
-        strikes, deltas = strikes[mask], deltas[mask]
-
-        # Find sign changes
-        sign_change = np.where(np.sign(deltas[:-1]) != np.sign(deltas[1:]))[0]
-
-        if len(sign_change) == 0:
-            return None  # no delta=0 exists in this window
-
-        i = sign_change[0]
-
-        # Linear interpolation for better precision
-        x0, x1 = strikes[i], strikes[i + 1]
-        y0, y1 = deltas[i], deltas[i + 1]
-
-        delta_zero = x0 - y0 * (x1 - x0) / (y1 - y0)
-        return round(float(delta_zero))
-

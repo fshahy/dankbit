@@ -212,11 +212,27 @@ class OptionStrat:
         ax = fig.add_subplot(111)
 
         if self.name.startswith("BTC"):
-            ax.xaxis.set_major_locator(MultipleLocator(1000))  # Tick every 1000
-            ax.set_yticks(list(range(-1000000, 1000001, 100)))
+            ax.xaxis.set_major_locator(MultipleLocator(1000))
+            ax.set_yticks(list(range(-1000, 1001, 10)))
+            bar_width = 400
+            label_offset = 1
         elif self.name.startswith("ETH"):
-            ax.xaxis.set_major_locator(MultipleLocator(25))  # Tick every 25
-            ax.set_yticks(list(range(-1000000, 1000001, 500)))
+            ax.xaxis.set_major_locator(MultipleLocator(25))
+            ax.set_yticks(list(range(-10000, 10001, 50)))
+            bar_width = 10
+            label_offset = 2
+
+        def _get_offeset_with_sign(oi):
+            if oi > 0:
+                return label_offset
+            else:
+                return -label_offset
+            
+        def _get_va(oi):
+            if oi > 0:
+                return "bottom"
+            else:
+                return "top"
 
         ax.tick_params(axis="x", labelrotation=90)
         ax.grid(True)
@@ -224,21 +240,46 @@ class OptionStrat:
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
         now = berlin_time.strftime("%Y-%m-%d %H:%M")
 
-        # Keep bars on THIS AXIS ONLY (no pyplot)
-        if self.name.startswith("BTC"):
-            for oi in oi_data:
-                strike = float(oi[0])
-                calls = float(oi[1])
-                puts = float(oi[2])
-                ax.bar(strike - 400 / 2, calls, width=400, color="green")
-                ax.bar(strike + 400 / 2, puts, width=400, color="red")
-        elif self.name.startswith("ETH"):
-            for oi in oi_data:
-                strike = float(oi[0])
-                calls = float(oi[1])
-                puts = float(oi[2])
-                ax.bar(strike - 10 / 2, calls, width=10, color="green")
-                ax.bar(strike + 10 / 2, puts, width=10, color="red")
+        # ---- helper for readable OI labels ----
+        def fmt_oi(v):
+            # v = abs(v)
+            if v >= 1_000_000:
+                return f"{v/1_000_000:.1f}M"
+            if v >= 1_000:
+                return f"{v/1_000:.1f}k"
+            return f"{int(v)}"
+
+        # ---- bars + labels ----
+        for oi in oi_data:
+            strike = float(oi[0])
+            calls = float(oi[1])
+            puts = float(oi[2])
+
+            # Calls
+            ax.bar(strike - bar_width / 2, calls, width=bar_width, color="green")
+            if calls != 0:
+                ax.text(
+                    strike - bar_width / 2,
+                    calls + _get_offeset_with_sign(calls),
+                    fmt_oi(calls),
+                    ha="center",
+                    va=_get_va(calls),
+                    fontsize=12,
+                    color="green",
+                )
+
+            # Puts
+            ax.bar(strike + bar_width / 2, puts, width=bar_width, color="red")
+            if puts != 0:
+                ax.text(
+                    strike + bar_width / 2,
+                    puts + _get_offeset_with_sign(puts),
+                    fmt_oi(puts),
+                    ha="center",
+                    va=_get_va(puts),
+                    fontsize=12,
+                    color="red",
+                )
 
         ax.set_title(f"{self.name} | {now} | {plot_title}")
         ax.axhline(0, color="black", linewidth=1, linestyle="-")
