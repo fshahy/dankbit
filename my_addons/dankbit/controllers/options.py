@@ -234,7 +234,7 @@ class OptionStrat:
             else:
                 return "top"
 
-        ax.tick_params(axis="x", labelrotation=90)
+        ax.tick_params(axis="x", labelrotation=45)
         ax.grid(True)
 
         berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
