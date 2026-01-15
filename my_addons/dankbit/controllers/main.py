@@ -888,7 +888,8 @@ class ChartController(http.Controller):
         Vol = 0
         Len = 0
         oi_data = []
-        for strike in range(int(day_from_price), int(day_to_price), strike_step):
+        strikes = range(int(day_from_price), int(day_to_price), strike_step)
+        for strike in strikes:
             trades = request.env['dankbit.trade'].search(
                 domain=[
                     ("name", "ilike", f"{instrument}"),
@@ -926,6 +927,7 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Today Full OI",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
+                "oi_data": oi_data,
             }
         )
     

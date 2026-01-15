@@ -213,12 +213,12 @@ class OptionStrat:
 
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))
-            ax.set_yticks(list(range(-1000, 1001, 10)))
+            ax.set_yticks(list(range(-1000, 1001, 100)))
             bar_width = 400
             label_offset = 1
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(25))
-            ax.set_yticks(list(range(-10000, 10001, 50)))
+            ax.set_yticks(list(range(-10000, 10001, 500)))
             bar_width = 10
             label_offset = 2
 
