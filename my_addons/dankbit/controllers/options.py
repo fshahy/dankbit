@@ -256,10 +256,10 @@ class OptionStrat:
             puts = float(oi[2])
 
             # Calls
-            ax.bar(strike - bar_width / 2, calls, width=bar_width, color="green")
+            ax.bar(strike + bar_width / 2, calls, width=bar_width, color="green")
             if calls != 0:
                 ax.text(
-                    strike - bar_width / 2,
+                    strike + bar_width / 2,
                     calls + _get_offeset_with_sign(calls),
                     fmt_oi(calls),
                     ha="center",
@@ -269,10 +269,10 @@ class OptionStrat:
                 )
 
             # Puts
-            ax.bar(strike + bar_width / 2, puts, width=bar_width, color="red")
+            ax.bar(strike - bar_width / 2, puts, width=bar_width, color="red")
             if puts != 0:
                 ax.text(
-                    strike + bar_width / 2,
+                    strike - bar_width / 2,
                     puts + _get_offeset_with_sign(puts),
                     fmt_oi(puts),
                     ha="center",
