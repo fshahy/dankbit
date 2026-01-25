@@ -87,26 +87,11 @@
 						No Positive Gamma.
 					</p>
 				</t>
-				<t t-if="plot_name == 'oi'">
-					<div style="display:flex; justify-content:center; align-items:center;">
-						<t t-foreach="oi_data" t-as="oid">
-							<div style="margin-right:20px;">
-								<div>
-									<t t-esc="oid[0]"/>
-								</div>
-								<div>
-									<t t-esc="round(oid[1])"/>,
-									<t t-esc="round(oid[2])"/>
-								</div>
-							</div>
-						</t>
-					</div>
-				</t>
 			</body>
 		</html>
 	</template>
 
-	<template id="dankbit_dashboard" name="Dankbit 3-Column Dashboard">
+	<template id="dankbit_dashboard" name="Dankbit Dashboard">
 		<html>
 			<head>
 				<style>
