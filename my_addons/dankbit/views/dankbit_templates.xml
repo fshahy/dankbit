@@ -83,9 +83,6 @@
 					<p t-if="gamma_peak_value > 0" class="gamma-label">
 						Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
 					</p>
-					<p t-if="gamma_peak_value == 0" class="gamma-label">
-						No Positive Gamma.
-					</p>
 				</t>
 			</body>
 		</html>
@@ -127,21 +124,21 @@
 					<div class="db-col">
 						<iframe
 							class="db-frame"
-							t-attf-src="/{{today}}/b?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+							t-attf-src="/{{today}}/p?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
 						/>
 					</div>
 
 					<div class="db-col">
 						<iframe
 							class="db-frame"
-							t-attf-src="/{{today}}/mm?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+							t-attf-src="/{{today}}/taker?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
 						/>
 					</div>
 
 					<div class="db-col">
 						<iframe
 							class="db-frame"
-							t-attf-src="/{{today}}/s?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
+							t-attf-src="/{{today}}/c?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
 						/>
 					</div>
 				</div>

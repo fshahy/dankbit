@@ -175,25 +175,19 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-        
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title, 
                            width=width, 
                            height=height)
 
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -292,14 +286,7 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
@@ -311,9 +298,10 @@ class ChartController(http.Controller):
                            height=height)
 
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -395,28 +383,22 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title,
                            width=width,
                            height=height)
         
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -499,28 +481,22 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title,
                            width=width,
                            height=height)
         
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -604,28 +580,22 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title,
                            width=width,
                            height=height)
         
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -709,28 +679,22 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title,
                            width=width,
                            height=height)
         
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -821,28 +785,22 @@ class ChartController(http.Controller):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode=mode, tau=tau)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode=mode, tau=tau)
 
-        gamma_peak_value = self.find_positive_gamma_peak(-market_gammas)
-        if gamma_peak_value < 0:
-            gamma_peak_value = 0
-
-        if instrument.startswith("BTC"):
-            gamma_peak_value = round(gamma_peak_value*1000)
-        elif instrument.startswith("ETH"):
-            gamma_peak_value = round(gamma_peak_value*100)
+        gamma_peak_value = self.find_positive_gamma_peak(market_gammas)
 
         width = int(params.get("width", 18))
         height = int(params.get("height", 8))
 
         fig, ax = obj.plot(index_price, market_deltas, market_gammas, 
-                           "mm", False, 
+                           "taker", False, 
                            plot_title, 
                            width=width, 
                            height=height)
         
         volume = self._volume(trades)
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume}",
+            f"{len(trades)} Trades | Volume: {volume} | {last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M')}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -947,4 +905,4 @@ class ChartController(http.Controller):
         if pos_gammas.size == 0:
             return 0  # explicit: no positive gamma regime
 
-        return np.max(gammas)
+        return round(np.max(gammas)*1000)

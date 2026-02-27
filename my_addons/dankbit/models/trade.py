@@ -518,6 +518,21 @@ class Trade(models.Model):
 
             _logger.info("Finished fetching trades for %s", inst_name)
 
+    @api.model
+    def get_last_trade(self, instrument_name):
+        """
+        Returns the latest trade for a given instrument
+        ordered by timestamp descending.
+        """
+        if not instrument_name:
+            return self.browse()
+
+        return self.search(
+            [("name", "ilike", instrument_name)],
+            order="deribit_ts desc, id desc",
+            limit=1,
+        )
+
     def _get_instruments(self):
         URL = "https://www.deribit.com/api/v2/public/get_instruments"
 
