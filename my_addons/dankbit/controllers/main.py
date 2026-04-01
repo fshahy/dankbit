@@ -69,6 +69,7 @@ class ChartController(http.Controller):
 
         domain=[
             ("deribit_ts", ">=", start_ts),
+            ("expiration", ">=", datetime.now()),
         ]
 
         mode = params.get("mode", "flow")
@@ -149,6 +150,7 @@ class ChartController(http.Controller):
                          screenshot,
                          width,
                          height):
+        _logger.info(f"Generating dealer state for {instrument} with domain {domain} and mode {mode}")
         trades = request.env["dankbit.trade"].search(domain=domain)
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
