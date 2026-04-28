@@ -81,16 +81,7 @@ def portfolio_gamma(
 
         sigma = trd.iv / 100.0
         sign = _infer_sign(trd)
-
-        if mode == "flow":
-            weight = trd.amount
-        elif mode == "structure":
-            weight = trd.oi_impact
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
-
-        if not weight:
-            continue
+        weight = trd.amount
 
         gamma = bs_gamma(
             S=S,
@@ -115,7 +106,7 @@ def portfolio_gamma(
             gamma *= impact
 
         # ----------------------------------------------------
-        # Time decay (FLOW mode only)
+        # Time decay (FLOW mode)
         # ----------------------------------------------------
         if mode == "flow" and trd.deribit_ts:
             ts = trd.deribit_ts
@@ -132,15 +123,8 @@ def portfolio_gamma(
         # Persistence (STRUCTURE mode)
         # ----------------------------------------------------
         if mode == "structure":
-            if trd.oi_impact is None:
-                persistence = 1.0
-            elif trd.amount:
-                persistence = min(
-                    1.0,
-                    abs(trd.oi_impact) / max(abs(trd.amount), 1e-6)
-                )
-            else:
-                persistence = 0.0
+            gamma *= 1.0
+            persistence = 1.0
         else:
             persistence = 1.0
 

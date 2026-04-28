@@ -61,9 +61,9 @@
 						height: auto;
 					}
 
-					.gamma-label {
+					.delta-label {
 						text-align: center;
-						color: #c900ff;
+						color: green;
 						margin: 0;
 						padding: 0;
 						font-size: 16pt;
@@ -80,8 +80,8 @@
 				</div>
 
 				<t t-if="plot_name != 'oi'">
-					<p t-if="gamma_peak_value > 0" class="gamma-label">
-						Magnified Gamma Peak: <t t-esc="gamma_peak_value"/>
+					<p class="delta-label">
+						Current Delta: <t t-esc="current_delta"/>
 					</p>
 				</t>
 			</body>

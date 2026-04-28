@@ -52,16 +52,7 @@ def portfolio_delta(S, trades, r=0.0, mode="flow", min_hours=1.0, tau=6.0):
 
         sigma = trd.iv / 100.0
         sign = _infer_sign(trd)
-
-        if mode == "flow":
-            weight = trd.amount
-        elif mode == "structure":
-            weight = trd.oi_impact
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
-
-        if not weight:
-            continue
+        weight = trd.amount
 
         delta = bs_delta(
             S=S,
@@ -87,15 +78,8 @@ def portfolio_delta(S, trades, r=0.0, mode="flow", min_hours=1.0, tau=6.0):
 
         # --- Persistence (structure smoothing) ---
         if mode == "structure":
-            if trd.oi_impact is None:
-                persistence = 1.0
-            elif trd.amount:
-                persistence = min(
-                    1.0,
-                    abs(trd.oi_impact) / max(abs(trd.amount), 1e-6)
-                )
-            else:
-                persistence = 0.0
+            delta *= 1.0
+            persistence = 1.0
         else:
             persistence = 1.0
 
