@@ -16,10 +16,6 @@ _DERIBIT_CACHE = {
     "instruments": {"ts": 0, "value": None},
 }
 
-# Simple in-memory cache for OI per instrument
-# { instrument_name: {'ts': epoch_seconds, 'value': float} }
-_DERIBIT_OI_CACHE = {}
-
 def _safe_deribit_request(
     url,
     params,
@@ -82,17 +78,6 @@ class Trade(models.Model):
         default=False,
         help="True if this trade came from a Deribit block trade event."
     )
-    oi_impact = fields.Float(
-        string="OI Impact",
-        default=0.0,
-        help="Allocated OI change for this trade"
-    )
-    oi_reconciled = fields.Boolean(
-        string="OI Reconciled",
-        default=False,
-        index=True,
-        help="Whether OI impact has been reconciled"
-    )
 
     def get_hours_to_expiry(self):
         """
@@ -112,187 +97,10 @@ class Trade(models.Model):
         return max(seconds / 3600.0, 0.0)
 
     @staticmethod
-    def fetch_deribit_open_interest(instrument_name: str):
-        DERIBIT_URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
-        CACHE_TTL = 15.0
-
-        now_ts = time_module.time()
-        cached = _DERIBIT_OI_CACHE.get(instrument_name)
-
-        # prune old cache entries occasionally
-        if len(_DERIBIT_OI_CACHE) > 5000:
-            cutoff = now_ts - 300
-            for k in list(_DERIBIT_OI_CACHE.keys()):
-                if _DERIBIT_OI_CACHE[k]["ts"] < cutoff:
-                    _DERIBIT_OI_CACHE.pop(k, None)
-
-        if cached and (now_ts - cached["ts"] < CACHE_TTL):
-            return cached["value"]
-
-        data = _safe_deribit_request(
-            DERIBIT_URL,
-            params={"instrument_name": instrument_name},
-            timeout=10.0,
-        )
-
-        if not data or "result" not in data or not data["result"]:
-            # network / API failure → use cache if possible
-            if cached:
-                _logger.warning("OI fetch failed for %s, using cached value", instrument_name)
-                return cached["value"]
-
-            # no cache → signal failure
-            _logger.warning("OI fetch failed for %s, no cache available", instrument_name)
-            return None
-
-        oi = float(data["result"][0].get("open_interest", 0.0))
-
-        _DERIBIT_OI_CACHE[instrument_name] = {
-            "ts": now_ts,
-            "value": oi,
-        }
-        return oi
-    
-    @staticmethod
     def expiry_window():
         now = datetime.now(timezone.utc)
         return (now + timedelta(hours=32)).timestamp() * 1000
-            
-    def _cron_fetch_oi_snapshots(self):
-        Snapshot = self.env["dankbit.oi_snapshot"]
-        now = fields.Datetime.now()
-
-        # 1) Get authoritative instrument list from Deribit
-        instruments = self._get_instruments()
-
-        if not instruments:
-            _logger.warning("No instruments returned from Deribit for OI snapshot.")
-            return
-
-        # 2) Snapshot OI for every eligible option instrument
-        window = self.expiry_window()
-
-        for inst in instruments:
-            try:
-                if inst.get("kind") != "option":
-                    continue
-
-                instrument_name = inst.get("instrument_name")
-                expiration_ts = inst.get("expiration_timestamp")
-
-                if not instrument_name or not expiration_ts or expiration_ts > window:
-                    continue
-
-                # polite pacing (Deribit friendly)
-                time_module.sleep(0.03 + random.random() * 0.02)
-
-                oi = self.fetch_deribit_open_interest(instrument_name)
-                if oi is None:
-                    continue
-
-                last = Snapshot.search(
-                    [("name", "=", instrument_name)],
-                    order="timestamp desc",
-                    limit=1
-                )
-                if last and (now - last.timestamp).total_seconds() < 60:
-                    continue
-
-                Snapshot.create({
-                    "name": instrument_name,
-                    "open_interest": oi,
-                    "timestamp": now,
-                })
-                _logger.info(
-                    "OI snapshot taken for %s: %.2f",
-                    instrument_name,
-                    oi,
-                )
-
-            except Exception as e:
-                _logger.warning(
-                    "OI snapshot failed for %s: %s",
-                    inst.get("instrument_name"),
-                    e,
-                )
-                # IMPORTANT: rollback to keep cron alive
-                self.env.cr.rollback()
-                continue
-
-    def reconcile_oi_impact(self, instrument_name):
-        Trade = self.env["dankbit.trade"]
-        Snapshot = self.env["dankbit.oi_snapshot"]
-
-        snaps = Snapshot.search(
-            [("name", "=", instrument_name)],
-            order="timestamp desc",
-            limit=2,
-        )
-        if len(snaps) < 2:
-            return
-
-        newer, older = snaps[0], snaps[1]
-
-        if newer.timestamp <= older.timestamp:
-            return
-
-        delta_oi = float(newer.open_interest) - float(older.open_interest)
-
-        trades = Trade.search([
-            ("name", "=", instrument_name),
-            # ("is_block_trade", "=", False),
-            ("deribit_ts", ">", older.timestamp),
-            ("deribit_ts", "<=", newer.timestamp),
-            ("oi_reconciled", "=", False),
-        ])
-
-        if not trades:
-            return
-
-        if delta_oi == 0.0:
-            trades.write({"oi_impact": 0.0, "oi_reconciled": True})
-            return
-
-        total_volume = sum(abs(t.amount or 0.0) for t in trades)
-        if total_volume <= 0.0:
-            trades.write({"oi_impact": 0.0, "oi_reconciled": True})
-            return
-
-        for t in trades:
-            weight = abs(t.amount or 0.0) / total_volume
-            t.oi_impact = delta_oi * weight
-            t.oi_reconciled = True
-            _logger.info(
-                "Reconciled OI impact for trade %s: %.2f (weight %.4f)",
-                t.deribit_trade_identifier,
-                t.oi_impact,
-                weight,
-            )
-
-    def _cron_reconcile_oi(self):
-        Snapshot = self.env["dankbit.oi_snapshot"]
-
-        # get instruments that actually have snapshots
-        groups = Snapshot.read_group(
-            domain=[
-                ("timestamp", ">=", fields.Datetime.now() - timedelta(hours=1)),
-            ],
-            fields=["name"],
-            groupby=["name"],
-        )
-
-        for g in groups:
-            instrument = g.get("name")
-            if not instrument:
-                continue
-
-            try:
-                self.reconcile_oi_impact(instrument)
-            except Exception:
-                self.env.cr.rollback()
-                _logger.exception("OI reconciliation failed for %s", instrument)
-                continue
-
+    
     @api.depends("expiration")
     def _compute_days_to_expiry(self):
         """Compute remaining days until expiration from current UTC date."""
@@ -631,13 +439,6 @@ class Trade(models.Model):
             ]
         ).write({"active": False})
 
-    def _delete_old_oi_snapshots(self):
-        self.env["dankbit.oi_snapshot"].search(
-            domain=[
-                ("create_date", "<", datetime.now() - timedelta(hours=1)), 
-            ]
-        ).unlink()
-
     # run by scheduled action
     def _take_screenshot(self):
         # Use configured base URL so this works both on dankbit.com and locally.
@@ -707,16 +508,6 @@ class Trade(models.Model):
                 "dankbit_view_type": "mm",
             }
         }
-
-
-class DankbitOISnapshot(models.Model):
-    _name = "dankbit.oi_snapshot"
-    _description = "Option Open Interest Snapshot"
-    _order = "timestamp desc"
-
-    name = fields.Char(required=True, index=True)
-    open_interest = fields.Float(required=True)
-    timestamp = fields.Datetime(required=True, index=True)
 
 
 class DankbitScreenshot(models.Model):

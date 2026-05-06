@@ -68,15 +68,15 @@ class PlotWizard(models.TransientModel):
                     obj.short_put(trade.strike, trade.price * trade.index_price)
 
         STs = np.arange(day_from_price, day_to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05, mode="flow", tau=6)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05, mode="flow", tau=6)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, dankbit_view_type, True, dankbit_view_type)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, True)
 
         volume = self._atm_volume(trades, float(index_price), atm_pct=0.01)
         ax.text(
             0.01, 0.02,
-            f"{len(trades)} Trades (24H) | ATM Volume: {volume} | Mode: flow | Tau: 6.0H",
+            f"{len(trades)} Trades (24H) | ATM Volume: {volume}",
             transform=ax.transAxes,
             fontsize=14,
         )

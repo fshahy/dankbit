@@ -1,11 +1,10 @@
-import math
-from datetime import datetime, timezone
 import numpy as np
 from scipy.stats import norm
 
 
 # ============================================================
-# Pure Black–Scholes Gamma (NO decay, NO memory)
+# Black–Scholes Dollar Gamma: Γ * S²
+# Represents the dollar change in delta per $1 move in spot.
 # ============================================================
 def bs_gamma(S, K, T, r, sigma, min_time_hours=1.0):
     S = np.asarray(S, dtype=float)
@@ -21,31 +20,8 @@ def bs_gamma(S, K, T, r, sigma, min_time_hours=1.0):
         + (r + 0.5 * sigma_eff ** 2) * T_eff
     ) / (sigma_eff * np.sqrt(T_eff))
 
-    return norm.pdf(d1) / (S * sigma_eff * np.sqrt(T_eff))
-
-
-# ============================================================
-# Gamma impact zone (radius)
-# ΔS ≈ S * σ * √T
-# ============================================================
-def gamma_impact_radius(S, sigma, T, min_time_hours=1.0):
-    eps_years = min_time_hours / (24.0 * 365.0)
-    T_eff = max(T, eps_years)
-    return S * sigma * np.sqrt(T_eff)
-
-
-# ============================================================
-# Impact weighting (smooth decay outside zone)
-# ============================================================
-def gamma_impact_weight(S, K, radius):
-    S = np.asarray(S, dtype=float)
-    radius = np.asarray(radius, dtype=float)
-
-    # Avoid divide-by-zero safely
-    safe_radius = np.maximum(radius, 1e-12)
-
-    dist = np.abs(S - K)
-    return np.exp(- (dist / safe_radius) ** 2)
+    gamma = norm.pdf(d1) / (S * sigma_eff * np.sqrt(T_eff))
+    return gamma * S ** 2
 
 
 # ============================================================
@@ -60,20 +36,10 @@ def _infer_sign(trd):
 
 
 # ============================================================
-# Portfolio Gamma (with impact zone)
+# Portfolio Dollar Gamma (GEX)
 # ============================================================
-def portfolio_gamma(
-    S,
-    trades,
-    r=0.0,
-    mode="flow",
-    min_hours=1.0,
-    tau=6.0,
-    use_impact_zone=True,
-):
+def portfolio_gamma(S, trades, r=0.0, min_hours=1.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
-    tau_seconds = float(tau) * 3600.0
-    now = datetime.now(timezone.utc)
 
     for trd in trades:
         hours_to_expiry = trd.get_hours_to_expiry()
@@ -92,42 +58,6 @@ def portfolio_gamma(
             min_time_hours=min_hours,
         )
 
-        # ----------------------------------------------------
-        # Gamma impact zone weighting
-        # ----------------------------------------------------
-        if use_impact_zone:
-            radius = gamma_impact_radius(
-                S=S,
-                sigma=sigma,
-                T=T,
-                min_time_hours=min_hours,
-            )
-            impact = gamma_impact_weight(S, trd.strike, radius)
-            gamma *= impact
-
-        # ----------------------------------------------------
-        # Time decay (FLOW mode)
-        # ----------------------------------------------------
-        if mode == "flow" and trd.deribit_ts:
-            ts = trd.deribit_ts
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-
-            dt = (now - ts).total_seconds()
-            if dt > 0:
-                gamma *= math.exp(-dt / tau_seconds)
-            else:
-                gamma *= 0.0
-
-        # ----------------------------------------------------
-        # Persistence (STRUCTURE mode)
-        # ----------------------------------------------------
-        if mode == "structure":
-            gamma *= 1.0
-            persistence = 1.0
-        else:
-            persistence = 1.0
-
-        total += sign * weight * gamma * persistence
+        total += sign * weight * gamma
 
     return total

@@ -79,69 +79,10 @@
 					/>
 				</div>
 
-				<t t-if="plot_name != 'oi'">
-					<p class="delta-label">
-						Current Delta: <t t-esc="current_delta"/>
-					</p>
-				</t>
-			</body>
-		</html>
-	</template>
 
-	<template id="dankbit_dashboard" name="Dankbit Dashboard">
-		<html>
-			<head>
-				<style>
-					html, body {
-						margin: 0;
-						padding: 0;
-						background: #0b0f14;
-					}
-
-					.db-row {
-						display: flex;
-						width: 100%;
-						height: 100vh;
-					}
-
-					.db-col {
-						flex: 1;
-						height: 100%;
-					}
-
-					.db-frame {
-						width: 100%;
-						height: 100%;
-						border: 0;
-						display: block;
-						background: #0b0f14;
-					}
-				</style>
-			</head>
-
-			<body>
-				<div class="db-row">
-					<div class="db-col">
-						<iframe
-							class="db-frame"
-							t-attf-src="/{{today}}/p?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
-						/>
-					</div>
-
-					<div class="db-col">
-						<iframe
-							class="db-frame"
-							t-attf-src="/{{today}}/taker?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
-						/>
-					</div>
-
-					<div class="db-col">
-						<iframe
-							class="db-frame"
-							t-attf-src="/{{today}}/c?width={{width}}&amp;height={{height}}&amp;from_price={{from_price}}&amp;to_price={{to_price}}"
-						/>
-					</div>
-				</div>
+				<p class="delta-label">
+					Current Delta: <t t-esc="current_delta"/>
+				</p>
 			</body>
 		</html>
 	</template>

@@ -139,22 +139,6 @@ async def ws_call(ws, method, params=None):
 
 
 # -----------------------------------------------------
-# Authentication
-# -----------------------------------------------------
-async def authenticate(ws):
-    params = {
-        "grant_type": "client_credentials",
-        "client_id": os.getenv("DERIBIT_KEY"),
-        "client_secret": os.getenv("DERIBIT_SECRET"),
-    }
-    resp = await ws_call(ws, "public/auth", params)
-    if "error" in resp:
-        raise Exception(f"Auth failed: {resp}")
-    log.info("Authenticated.")
-    return True
-
-
-# -----------------------------------------------------
 # Fetch BTC + ETH option instruments
 # -----------------------------------------------------
 async def fetch_instruments(ws):
@@ -222,10 +206,7 @@ async def run():
                 ping_timeout=20,
             ) as ws:
 
-                # 1) Auth
-                await authenticate(ws)
-
-                # 2) Fetch instruments
+                # 1) Fetch instruments
                 log.info("Fetching instrument list…")
                 channels = await fetch_instruments(ws)
                 log.info(f"Found {len(channels)} option channels to subscribe.")

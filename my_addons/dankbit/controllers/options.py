@@ -68,9 +68,7 @@ class OptionStrat:
         index_price,
         market_delta,
         market_gammas,
-        view_type,
         show_red_line,
-        plot_title,
         width=18,
         height=8,
     ):
@@ -99,18 +97,10 @@ class OptionStrat:
         if mg.size != self.STs.size:
             mg = np.interp(self.STs, np.linspace(self.STs.min(), self.STs.max(), mg.size), mg)
 
-        if view_type == "mm":
-            pnl_curve = -self.payoffs
-            delta_curve = -md
-            gamma_curve = -mg
-            pnl_label = "MM P&L"
-        elif view_type == "taker":
-            pnl_curve = self.payoffs
-            delta_curve = md
-            gamma_curve = mg
-            pnl_label = "Taker P&L"
-        else:
-            raise ValueError(f"Invalid view type: {view_type}")
+        pnl_curve = self.payoffs
+        delta_curve = md
+        gamma_curve = mg
+        pnl_label = "Taker P&L"
 
         # Clip x-range so nothing from outside the domain “sticks”
         ax.set_xlim(float(self.STs.min()), float(self.STs.max()))
@@ -148,26 +138,15 @@ class OptionStrat:
             if gmax > 0:
                 axg.set_ylim(-gmax, gmax)
 
-        if view_type == "mm":
-            axg.fill_between(
-                self.STs,
-                gamma_curve,
-                0,
-                where=(gamma_curve > 0),
-                color="violet",
-                alpha=0.25,
-                interpolate=True,
-            )
-        elif view_type == "taker":
-            axg.fill_between(
-                self.STs,
-                gamma_curve,
-                0,
-                where=(gamma_curve < 0),
-                color="violet",
-                alpha=0.25,
-                interpolate=True,
-            )
+        axg.fill_between(
+            self.STs,
+            gamma_curve,
+            0,
+            where=(gamma_curve < 0),
+            color="violet",
+            alpha=0.25,
+            interpolate=True,
+        )
 
         # =====================================================
         # P&L AXIS (THIRD) — ZERO CENTERED
@@ -183,9 +162,9 @@ class OptionStrat:
                 pmax = float(np.max(np.abs(pnl_curve)))
                 if pmax > 0:
                     axp.set_ylim(-pmax, pmax)
-
+        
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
-        ax.set_title(f"{self.name} | {now} UTC | {plot_title}")
+        ax.set_title(f"{self.name} | {now} UTC")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
         # Combine legends from all axes
@@ -199,92 +178,6 @@ class OptionStrat:
             l += l3
 
         ax.legend(h, l, loc="upper right", framealpha=0.85)
-
-        self.add_dankbit_signature(ax)
-        return fig, ax
-
-    # =====================================================
-    # OI PLOT — SERVER-SAFE (NO pyplot)
-    # =====================================================
-    def plot_oi(self, index_price, oi_data, plot_title):
-        fig = Figure(figsize=(18, 8), dpi=120)
-        FigureCanvas(fig)
-        ax = fig.add_subplot(111)
-
-        if self.name.startswith("BTC"):
-            ax.xaxis.set_major_locator(MultipleLocator(1000))
-            ax.set_yticks(list(range(-1000, 1001, 100)))
-            bar_width = 400
-            label_offset = 1
-        elif self.name.startswith("ETH"):
-            ax.xaxis.set_major_locator(MultipleLocator(25))
-            ax.set_yticks(list(range(-10000, 10001, 500)))
-            bar_width = 10
-            label_offset = 2
-
-        def _get_offeset_with_sign(oi):
-            if oi > 0:
-                return label_offset
-            else:
-                return -label_offset
-            
-        def _get_va(oi):
-            if oi > 0:
-                return "bottom"
-            else:
-                return "top"
-
-        ax.tick_params(axis="x", labelrotation=45)
-        ax.grid(True)
-
-        berlin_time = datetime.now(ZoneInfo("Europe/Berlin"))
-        now = berlin_time.strftime("%Y-%m-%d %H:%M")
-
-        # ---- helper for readable OI labels ----
-        def fmt_oi(v):
-            # v = abs(v)
-            if v >= 1_000_000:
-                return f"{v/1_000_000:.1f}M"
-            if v >= 1_000:
-                return f"{v/1_000:.1f}k"
-            return f"{int(v)}"
-
-        # ---- bars + labels ----
-        for oi in oi_data:
-            strike = float(oi[0])
-            calls = float(oi[1])
-            puts = float(oi[2])
-
-            # Calls
-            ax.bar(strike + bar_width / 2, calls, width=bar_width, color="green")
-            if calls != 0:
-                ax.text(
-                    strike + bar_width / 2,
-                    calls + _get_offeset_with_sign(calls),
-                    fmt_oi(calls),
-                    ha="center",
-                    va=_get_va(calls),
-                    fontsize=12,
-                    color="green",
-                )
-
-            # Puts
-            ax.bar(strike - bar_width / 2, puts, width=bar_width, color="red")
-            if puts != 0:
-                ax.text(
-                    strike - bar_width / 2,
-                    puts + _get_offeset_with_sign(puts),
-                    fmt_oi(puts),
-                    ha="center",
-                    va=_get_va(puts),
-                    fontsize=12,
-                    color="red",
-                )
-
-        ax.set_title(f"{self.name} | {now} | {plot_title}")
-        ax.axhline(0, color="black", linewidth=1, linestyle="-")
-        ax.axvline(x=index_price, color="blue")
-        ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
         self.add_dankbit_signature(ax)
         return fig, ax

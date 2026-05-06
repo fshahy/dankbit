@@ -1,5 +1,3 @@
-import math
-from datetime import datetime, timezone
 import numpy as np
 from scipy.stats import norm
 
@@ -41,10 +39,8 @@ def _infer_sign(trd):
 # ============================================================
 # Portfolio Delta (FLOW decays, STRUCTURE does not)
 # ============================================================
-def portfolio_delta(S, trades, r=0.0, mode="flow", min_hours=1.0, tau=6.0):
+def portfolio_delta(S, trades, r=0.0, min_hours=1.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
-    tau_seconds = float(tau) * 3600.0
-    now = datetime.now(timezone.utc)
 
     for trd in trades:
         hours_to_expiry = trd.get_hours_to_expiry()
@@ -64,25 +60,6 @@ def portfolio_delta(S, trades, r=0.0, mode="flow", min_hours=1.0, tau=6.0):
             min_time_hours=min_hours,
         )
 
-        # --- Apply decay ONLY in FLOW mode ---
-        if mode == "flow" and trd.deribit_ts:
-            ts = trd.deribit_ts
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-
-            dt = (now - ts).total_seconds()
-            if dt > 0:
-                delta *= math.exp(-dt / tau_seconds)
-            else:
-                delta *= 0.0
-
-        # --- Persistence (structure smoothing) ---
-        if mode == "structure":
-            delta *= 1.0
-            persistence = 1.0
-        else:
-            persistence = 1.0
-
-        total += sign * weight * delta * persistence
+        total += sign * weight * delta
 
     return total
