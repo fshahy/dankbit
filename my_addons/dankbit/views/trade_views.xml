@@ -24,8 +24,6 @@
                         <field name="deribit_trade_identifier" />
                         <field name="is_block_trade" />
                         <field name="block_trade_id" />
-                        <field name="oi_impact" />
-                        <field name="oi_reconciled" />
                     </group>
                 </sheet>
             </form>
@@ -48,8 +46,6 @@
                 <field name="index_price" />
                 <field name="is_block_trade" />
                 <field name="block_trade_id" />
-                <field name="oi_impact" />
-                <field name="oi_reconciled" />
             </list>
         </field>
     </record>
@@ -77,10 +73,6 @@
                 <filter name="only_block_trades" string="Only Block Trades" domain="[('is_block_trade', '=', True)]"/>
                 <filter name="is_not_block_trade" string="Is Not Block Trade" domain="[('is_block_trade', '=', False)]"/>
 
-                <separator/>
-
-                <filter name="only_oi_reconciled" string="Only OI Reconciled" domain="[('oi_reconciled', '=', True)]"/>
-                
                 <separator/>
 
                 <filter name="only_btc" string="Only BTC" domain="[('name', 'ilike', 'BTC')]"/>
