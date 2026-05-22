@@ -45,6 +45,8 @@ services:
       - POSTGRES_DB=${DANKBIT_POSTGRES_DB:-db1}
       - POSTGRES_USER=odoo
       - POSTGRES_PASSWORD=odoo
+      - DERIBIT_KEY=${DERIBIT_KEY}
+      - DERIBIT_SECRET=${DERIBIT_SECRET}
     depends_on:
       - db
 

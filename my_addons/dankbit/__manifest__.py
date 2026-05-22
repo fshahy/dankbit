@@ -4,7 +4,6 @@
     "version": "18.0.0.0.2",
     "category": "Options Greeks",
     "author": "Farid Shahy <fshahy@gmail.com>",
-    "license": "MIT",
     "summary": "",
     "description": "",
     "depends": ["website"],
