@@ -153,20 +153,20 @@ class Trade(models.Model):
         except Exception:
             cache_ttl = 30.0
 
-        # consult cache first
+        # consult cache first — keyed by currency to avoid BTC/ETH collision
+        currency = "BTC" if instrument.startswith("BTC") else "ETH"
+        cache_key = f"index_price_{currency}"
         now_ts = time_module.time()
-        cached = _DERIBIT_CACHE.get("index_price", {})
+        cached = _DERIBIT_CACHE.get(cache_key, {})
         if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < cache_ttl):
             return cached.get("value")
 
-        _logger.info("------------------- get_index_price -------------------")
         data = _safe_deribit_request(URL, params=params, timeout=timeout)
         if data and isinstance(data, dict):
             val = data.get("result", {}).get("index_price", 0.0)
-            _DERIBIT_CACHE["index_price"] = {"ts": now_ts, "value": val}
+            _DERIBIT_CACHE[cache_key] = {"ts": now_ts, "value": val}
             return val
         else:
-            # on failure, fall back to last cached value if available
             if cached and cached.get("value") is not None:
                 _logger.warning("get_index_price: using stale cached value")
                 return cached.get("value")
@@ -315,6 +315,9 @@ class Trade(models.Model):
             self.env.cr.commit()
 
             _logger.info("Finished fetching trades for %s", inst_name)
+
+            # polite pause between instruments to avoid hammering Deribit
+            time_module.sleep(0.1 + random.random() * 0.05)
 
     @api.model
     def get_last_trade(self, instrument_name):

@@ -257,7 +257,7 @@ async def run():
                     for t in trades:
                         instr = t.get("instrument_name", "???")
                         try:
-                            log.info(
+                            log.debug(
                                 f"{instr} | {t.get('direction')} | "
                                 f"price {t.get('price')} | amount {t.get('amount')}"
                             )

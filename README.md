@@ -41,7 +41,7 @@ Deribit WebSocket API  ──►  dankbit_ws (Python)  ──►  PostgreSQL
 Two Docker services:
 
 - **`web`** — Odoo 18 with the `dankbit` addon. Serves chart pages and the Odoo backend.
-- **`dankbit_ws`** — Lightweight Python service. Connects anonymously to Deribit's public WebSocket and streams option trades directly into PostgreSQL.
+- **`dankbit_ws`** — Lightweight Python service. Authenticates with Deribit's WebSocket API using API credentials and streams option trades directly into PostgreSQL. 
 
 ---
 
@@ -53,9 +53,7 @@ Two Docker services:
 | `/ETH-30MAY26` | ETH options for a specific expiry |
 | `/help` | Payoff diagram reference |
 
-Always navigate to a specific expiry. `/BTC` and `/ETH` without an expiry aggregate all trades across all expiries and produce a meaningless chart.
-
-Query parameters: `from_price`, `to_price`, `width`, `height`.
+Expiry codes follow Deribit's naming convention (e.g. `7MAY26`). Refer to Deribit for available expiries.
 
 Charts auto-refresh every 5 minutes by default (configurable in Settings).
 
@@ -92,6 +90,8 @@ docker compose up -d
 
 Open `http://localhost:8069`, create a database (any name — set `DANKBIT_POSTGRES_DB` in `.env` to match), then install the **Dankbit** app from the Apps menu.
 
+> The database starts empty. Trades accumulate in real time via the WebSocket service. Charts become more meaningful as more trades are collected — a fresh instance will show sparse data until enough history builds up.
+
 ### 5. Enable cron jobs
 
 Two scheduled actions run automatically once a day:
@@ -115,7 +115,6 @@ Settings → Dankbit:
 | From / To / Steps (ETH) | Same for ETH | 2000 / 5000 / 50 |
 | Refresh Interval | Page auto-refresh in seconds | 60 |
 | Deribit API timeout | HTTP request timeout | 5s |
-| Greeks min time (hours) | Floor on T to avoid singularity | 1h |
 
 ---
 

@@ -17,10 +17,6 @@
                         <setting>
                             <field name="deribit_cache_ttl" placeholder="Deribit cache TTL (s)"/>
                         </setting>
-                        <setting>
-                            <field name="greeks_min_time_hours" placeholder="Greeks min time (hours)"/>
-                        </setting>
-
                     </block>
 
                     <block title="BTC Settings" id="dankbit_graph_settings" groups="base.group_no_one">

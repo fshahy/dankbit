@@ -45,7 +45,7 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
                                                         ▼
                                                Odoo 18 (web:8069)
                                                         │
-                                               /BTC, /ETH routes
+                                               /BTC-7MAY26, /ETH-30MAY26
                                                (PNG chart responses)
 ```
 
@@ -61,7 +61,7 @@ The addon depends only on `website`. Key components:
 
 **Models:**
 - `dankbit.trade` — Core model. Fields map directly to Deribit trade fields. `strike` and `option_type` are computed from `name` (instrument name like `BTC-29NOV24-98000-P`). `days_to_expiry` is UTC-safe. `get_hours_to_expiry()` returns continuous time used in Black-Scholes.
-- `res.config.settings` extension — Chart price ranges, refresh interval, Black-Scholes floor (`greeks_min_time_hours`), and Deribit cache TTL.
+- `res.config.settings` extension — Chart price ranges, refresh interval, and Deribit cache TTL.
 
 **Controllers:**
 - `main.py` — Route handler for `/<instrument>` (e.g. `/BTC-7MAY26`, `/ETH-30MAY26`). Rejects bare `/BTC` and `/ETH` with 404. Builds `OptionStrat`, calls delta/gamma aggregators, returns PNG.
@@ -88,7 +88,7 @@ The DB connection uses `autocommit=True` — no explicit transaction management 
 | `/ETH-30MAY26` | ETH options for a specific expiry |
 | `/help` | Payoff diagram reference page |
 
-Always use a specific expiry in the URL. `/BTC` and `/ETH` (without expiry) are technically supported but should not be used — they aggregate all trades across all expiries, which is a very large dataset and produces a meaningless chart.
+Always use a specific expiry in the URL. `/BTC` and `/ETH` without an expiry return 404.
 
 Query params: `from_price`, `to_price` (price range), `width`, `height` (figure inches).
 

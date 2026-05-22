@@ -50,9 +50,4 @@ class ResConfigSettings(models.TransientModel):
         help="Time-to-live in seconds for cached Deribit responses (index/instruments)."
     )
 
-    greeks_min_time_hours = fields.Float(
-        string="Greeks min time (hours)",
-        config_parameter="dankbit.greeks_min_time_hours",
-        help="Minimum time to expiry (in hours) used in Greeks calculations to avoid singularities."
-    )
 
