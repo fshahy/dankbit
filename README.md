@@ -20,6 +20,10 @@ The blue vertical line marks current spot. Current delta at spot is shown below 
 
 **Reading the gamma curve:** negative GEX means takers are net short gamma → market makers are net long gamma → MMs sell into rallies and buy dips, pinning spot. The deepest trough is the primary gamma wall.
 
+**Trading futures with GEX:**
+- **Avoid directional trades when GEX is negative** (violet filled area) — MMs are net long gamma and hedge by fading every move. The market tends to pin and mean-revert. Breakouts fail.
+- **Prefer directional trades when GEX is positive** (no fill) — MMs are net short gamma and must hedge pro-cyclically (buy into rallies, sell into dips), adding fuel to trending moves.
+
 ---
 
 ## Architecture
@@ -43,11 +47,11 @@ Two Docker services:
 
 | URL | Description |
 |---|---|
-| `/BTC` | All active BTC options |
-| `/ETH` | All active ETH options |
 | `/BTC-7MAY26` | BTC options for a specific expiry |
 | `/ETH-30MAY26` | ETH options for a specific expiry |
 | `/help` | Payoff diagram reference |
+
+Always navigate to a specific expiry. `/BTC` and `/ETH` without an expiry aggregate all trades across all expiries and produce a meaningless chart.
 
 Query parameters: `from_price`, `to_price`, `width`, `height`.
 
@@ -60,7 +64,7 @@ Charts auto-refresh every 5 minutes by default (configurable in Settings).
 ### Prerequisites
 
 - Docker and Docker Compose
-- A Deribit connection is anonymous — no API credentials needed
+- Deribit API credentials (`DERIBIT_KEY`, `DERIBIT_SECRET`) — set in `.env`
 
 ### 1. Clone
 
@@ -84,14 +88,14 @@ docker compose up -d
 
 ### 4. Initialise Odoo
 
-Open `http://localhost:8069`, create a database named `db1`, then install the **Dankbit** app from the Apps menu.
+Open `http://localhost:8069`, create a database (any name — set `DANKBIT_POSTGRES_DB` in `.env` to match), then install the **Dankbit** app from the Apps menu.
 
 ### 5. Enable cron jobs
 
-In Odoo → Settings → Technical → Scheduled Actions, activate:
+Two scheduled actions run automatically once a day:
 
-- **Dankbit - Get Last Trades** — fetches recent trades via Deribit REST (backup / backfill)
-- **Dankbit - Delete Expired Trades** — archives expired instruments daily
+- **Dankbit - Get Last Trades** — ensures no trades were missed (e.g. during brief downtime) by pulling recent history from the Deribit REST API
+- **Dankbit - Delete Expired Trades** — archives expired instruments
 
 The WebSocket service (`dankbit_ws`) handles real-time ingestion automatically on startup.
 

@@ -18,6 +18,9 @@ class ChartController(http.Controller):
 
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
     def chart_png_all(self, instrument, **params):
+        if instrument.upper() in ("BTC", "ETH"):
+            return request.not_found()
+
         icp = request.env["ir.config_parameter"].sudo()
 
         day_from_price = 0
@@ -44,19 +47,14 @@ class ChartController(http.Controller):
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, from_price, to_price, steps)
-        is_call = []
-
-        # trades = [t for t in trades if from_price <= t.strike <= to_price]
 
         for trade in trades:
             if trade.option_type == "call":
-                is_call.append(True)
                 if trade.direction == "buy":
                     obj.long_call(trade.strike, trade.price * trade.index_price)
                 elif trade.direction == "sell":
                     obj.short_call(trade.strike, trade.price * trade.index_price)
             elif trade.option_type == "put":
-                is_call.append(False)
                 if trade.direction == "buy":
                     obj.long_put(trade.strike, trade.price * trade.index_price)
                 elif trade.direction == "sell":

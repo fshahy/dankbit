@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -9,24 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.ticker import MultipleLocator
-import matplotlib.image as mpimg
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import matplotlib.patheffects as path_effects
-
-
-_logger = logging.getLogger(__name__)
-
-
-class Option:
-    def __init__(self, type_, K, price, direction):
-        self.type = type_
-        self.K = K
-        self.price = price
-        self.direction = direction
-
-    def __repr__(self):
-        direction = "long" if self.direction == 1 else "short"
-        return f"Option(type={self.type},K={self.K}, price={self.price},direction={direction})"
 
 
 class OptionStrat:
@@ -35,30 +17,18 @@ class OptionStrat:
         self.S0 = S0
         self.STs = np.arange(from_price, to_price, step, dtype=np.float64)
         self.payoffs = np.zeros_like(self.STs, dtype=np.float64)
-        self.longs = np.zeros_like(self.STs, dtype=np.float64)
-        self.shorts = np.zeros_like(self.STs, dtype=np.float64)
-        self.instruments = []
 
     def long_call(self, K, C, Q=1):
         self.payoffs += (np.maximum(self.STs - K, 0) - C) * Q
-        self._add_to_self("call", K, C, 1, Q)
 
     def short_call(self, K, C, Q=1):
         self.payoffs += (-np.maximum(self.STs - K, 0) + C) * Q
-        self._add_to_self("call", K, C, -1, Q)
 
     def long_put(self, K, P, Q=1):
         self.payoffs += (np.maximum(K - self.STs, 0) - P) * Q
-        self._add_to_self("put", K, P, 1, Q)
 
     def short_put(self, K, P, Q=1):
         self.payoffs += (-np.maximum(K - self.STs, 0) + P) * Q
-        self._add_to_self("put", K, P, -1, Q)
-
-    def _add_to_self(self, type_, K, price, direction, Q):
-        o = Option(type_, K, price, direction)
-        for _ in range(Q):
-            self.instruments.append(o)
 
     # =========================================================
     # BASELINE PLOT — SERVER-SAFE (NO pyplot), EXPLICIT FIG/AXES
@@ -185,12 +155,7 @@ class OptionStrat:
     # =====================================================
     # Signature (server-safe: ensure canvas exists)
     # =====================================================
-    def add_dankbit_signature(self, ax, logo_path=None, alpha=0.5, fontsize=16, trade_count=None):
-        """
-        Legend stays top-right.
-        Dankbit™ signature sits immediately to the LEFT of the legend, with minimal spacing.
-        Zero overlap, minimal distance.
-        """
+    def add_dankbit_signature(self, ax, alpha=0.5, fontsize=16):
         fig = ax.figure
 
         # Ensure we have a canvas attached (needed for bbox measurement)
@@ -227,23 +192,6 @@ class OptionStrat:
         if sig_x < 0.02:
             sig_x = 0.02
 
-        # --- Draw logo ---
-        if logo_path:
-            try:
-                img = mpimg.imread(logo_path)
-                imagebox = OffsetImage(img, zoom=0.07, alpha=alpha)
-                ab = AnnotationBbox(
-                    imagebox,
-                    (sig_x, sig_y),
-                    xycoords="axes fraction",
-                    frameon=False,
-                    box_alignment=(1, 1),
-                )
-                ax.add_artist(ab)
-                return
-            except Exception:
-                pass
-
         # --- Signature text ---
         color = "#6c2bd9"
         t = ax.text(
@@ -260,18 +208,3 @@ class OptionStrat:
             family="monospace",
         )
         t.set_path_effects([path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")])
-
-        # --- Trade count under signature ---
-        if trade_count is not None:
-            ax.text(
-                sig_x,
-                sig_y - 0.045,
-                f"{trade_count} trades",
-                transform=ax.transAxes,
-                fontsize=fontsize * 0.55,
-                color=color,
-                alpha=alpha * 0.8,
-                ha="right",
-                va="top",
-                family="monospace",
-            )

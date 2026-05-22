@@ -1,6 +1,5 @@
 from io import BytesIO
 import base64
-import logging
 
 from odoo import api, models, fields
 from ..controllers import options
@@ -8,8 +7,6 @@ from ..controllers import delta
 from ..controllers import gamma
 import numpy as np
 
-
-_logger = logging.getLogger(__name__)
 
 class PlotWizard(models.TransientModel):
     _name = "dankbit.plot_wizard"
@@ -51,17 +48,14 @@ class PlotWizard(models.TransientModel):
         index_price = self.env["dankbit.trade"].get_index_price(instrument)
         # Note: here it is possible that users selects multiple instruments.
         obj = options.OptionStrat(f"{instrument} | Plotting {len(trades)} trade(s)", index_price, day_from_price, day_to_price, steps)
-        is_call = []
 
         for trade in trades:
             if trade.option_type == "call":
-                is_call.append(True)
                 if trade.direction == "buy":
                     obj.long_call(trade.strike, trade.price * trade.index_price)
                 elif trade.direction == "sell":
                     obj.short_call(trade.strike, trade.price * trade.index_price)
             elif trade.option_type == "put":
-                is_call.append(False)
                 if trade.direction == "buy":
                     obj.long_put(trade.strike, trade.price * trade.index_price)
                 elif trade.direction == "sell":
