@@ -151,6 +151,10 @@ dankbit/
 
 ---
 
+## Inspiration
+
+Inspired by [Thales OSS](https://oss.thales-mfi.com/).
+
 ## License
 
 MIT
