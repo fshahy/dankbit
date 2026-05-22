@@ -1,15 +1,12 @@
 import base64
 import numpy as np
 from io import BytesIO
-import logging
 from odoo import http
 from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
 
-
-_logger = logging.getLogger(__name__)
 
 class ChartController(http.Controller):
     @http.route("/help", auth="public", type="http", website=True)
@@ -73,12 +70,18 @@ class ChartController(http.Controller):
                            width=width,
                            height=height)
 
-        volume = self._volume(trades)
+        net_calls, net_puts = self._net_volume(trades)
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
         ax.text(
-            0.01, 0.02,
-            f"{len(trades)} Trades | Volume: {volume} | {last_ts}",
+            0.01, 0.04,
+            f"{len(trades)} Trades | Net Calls: {net_calls:+.2f} | Net Puts: {net_puts:+.2f}",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+        ax.text(
+            0.01, 0.01,
+            f"Last trade: {last_ts}",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -100,12 +103,15 @@ class ChartController(http.Controller):
             }
         )
 
-    def _volume(self, trades):
-        vol = 0.0
-        for trade in trades:
-            vol += abs(trade.amount)
-
-        return round(vol)
+    def _net_volume(self, trades):
+        net_calls = net_puts = 0.0
+        for t in trades:
+            signed = t.amount if t.direction == "buy" else -t.amount
+            if t.option_type == "call":
+                net_calls += signed
+            elif t.option_type == "put":
+                net_puts += signed
+        return round(net_calls, 2), round(net_puts, 2)
 
     def find_current_delta(self, STs, market_deltas, index_price):
         STs = np.asarray(STs, dtype=float)

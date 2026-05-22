@@ -1,8 +1,8 @@
 # Dankbit
 
-Options flow analytics for Deribit — built on Odoo 18.
+Structural options analytics for Deribit — built on Odoo 18.
 
-Ingests BTC and ETH options trades in real time and renders Delta and Dollar Gamma (GEX) curves across a configurable price range. Designed for spotting gamma walls, pin risk, and dealer hedging pressure ahead of expiry.
+Aggregates all BTC and ETH options trades for a given expiry and renders Delta and Dollar Gamma (GEX) curves across a configurable price range. Designed for understanding where dealers are structurally positioned — gamma walls, pin risk, and hedging pressure — not for tracking real-time flow.
 
 ![Dankbit Chart](docs/chart_example.png)
 
@@ -15,6 +15,8 @@ Ingests BTC and ETH options trades in real time and renders Delta and Dollar Gam
 | Delta | Green | Aggregate taker portfolio delta across spot prices |
 | Gamma (GEX) | Violet | Dollar gamma — `Γ × S²` — dealer hedging pressure |
 | Taker P&L | Red | Aggregate payoff at expiry (optional) |
+
+The chart footer shows net volume separately for calls and puts (in BTC or ETH). Positive = takers net bought, negative = takers net sold.
 
 The blue vertical line marks current spot. Current delta at spot is shown below the chart.
 

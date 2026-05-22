@@ -53,7 +53,7 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
 1. **WebSocket (primary):** `dankbit_ws_service/dankbit_ws_batch.py` — connects to Deribit, authenticates, fetches all BTC+ETH option instruments, subscribes to `trades.<instrument>.raw` channels in chunks of 400, inserts rows directly into PostgreSQL with `ON CONFLICT IGNORE` on `deribit_trade_identifier`.
 2. **REST backfill:** `Trade.get_last_trades()` — runs daily via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
 
-**Chart rendering:** Per-expiry routes like `/BTC-7MAY26` query all active trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG rendered with matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). `/BTC` and `/ETH` without an expiry return 404.
+**Chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate *all* trades for that expiry (structural positioning, not real-time flow), compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG rendered with matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). `/BTC` and `/ETH` without an expiry return 404.
 
 ## Odoo Addon (`my_addons/dankbit/`)
 

@@ -81,21 +81,6 @@ class PlotWizard(models.TransientModel):
         return buf.getvalue()
 
     def _atm_volume(self, trades, index_price, atm_pct=0.01):
-        """
-        Calculate ATM volume.
-        
-        trades: iterable of trade records (must have .strike and .amount)
-        index_price: current underlying price
-        atm_pct: ATM band as percentage (default ±1%)
-        
-        Returns: float
-        """
         lower = index_price * (1.0 - atm_pct)
         upper = index_price * (1.0 + atm_pct)
-
-        vol = 0.0
-        for trade in trades:
-            if lower <= trade.strike <= upper:
-                vol += abs(trade.amount)
-
-        return round(vol)
+        return round(sum(abs(t.amount) for t in trades if lower <= t.strike <= upper), 2)
