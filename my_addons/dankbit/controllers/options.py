@@ -39,6 +39,7 @@ class OptionStrat:
         market_delta,
         market_gammas,
         show_red_line,
+        title="-",
         width=18,
         height=8,
     ):
@@ -134,7 +135,7 @@ class OptionStrat:
                     axp.set_ylim(-pmax, pmax)
         
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
-        ax.set_title(f"{self.name} | {now} UTC")
+        ax.set_title(f"{self.name} | {now} UTC | {title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
         # Combine legends from all axes

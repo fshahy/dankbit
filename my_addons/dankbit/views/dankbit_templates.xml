@@ -61,13 +61,15 @@
 						height: auto;
 					}
 
-					.delta-label {
+					.gamma-label {
 						text-align: center;
-						color: green;
 						margin: 0;
 						padding: 0;
-						font-size: 16pt;
+						font-size: 14pt;
 					}
+
+					.gamma-peak { color: darkorange; }
+					.gamma-bottom { color: crimson; }
 				</style>
 			</head>
 
@@ -79,10 +81,100 @@
 					/>
 				</div>
 
-
-				<p class="delta-label">
-					Current Delta: <t t-esc="current_delta"/>
+				<p class="gamma-label">
+					<span class="gamma-peak">γ Peaks:
+						<t t-foreach="gamma_peaks" t-as="p">
+							<t t-esc="'${:,.0f}'.format(p)"/><t t-if="not p_last">, </t>
+						</t>
+						<t t-if="not gamma_peaks">—</t>
+					</span>
+					&#160;|&#160;
+					<span class="gamma-bottom">γ Bottoms:
+						<t t-foreach="gamma_bottoms" t-as="p">
+							<t t-esc="'${:,.0f}'.format(p)"/><t t-if="not p_last">, </t>
+						</t>
+						<t t-if="not gamma_bottoms">—</t>
+					</span>
 				</p>
+			</body>
+		</html>
+	</template>
+
+
+	<template id="dankbit_slideshow" name="Dankbit Slideshow">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="instrument"/> — Slideshow</title>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: white; }
+					.slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+					.slide.active { display: block; }
+					.slide iframe { width: 100%; height: 100%; border: none; }
+					.indicator {
+						position: fixed; top: 8px; right: 12px;
+						font-family: monospace; font-size: 14pt;
+						color: #333; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#swipe-overlay {
+						position: fixed; top: 0; left: 0;
+						width: 100%; height: 100%;
+						z-index: 5;
+					}
+				</style>
+			</head>
+			<body>
+				<div class="indicator" id="ind"/>
+				<div id="swipe-overlay"/>
+				<t t-foreach="hours_list" t-as="h">
+					<div class="slide"
+						t-att-data-src="'/%s/%d' % (instrument, h)"
+						t-att-data-label="str(h) + 'h'">
+						<iframe/>
+					</div>
+				</t>
+				<script>//<![CDATA[
+					const slides = document.querySelectorAll('.slide');
+					const ind = document.getElementById('ind');
+					let cur = 0;
+
+					function show(i) {
+						slides[cur].classList.remove('active');
+						cur = ((i % slides.length) + slides.length) % slides.length;
+						const slide = slides[cur];
+						const iframe = slide.querySelector('iframe');
+						if (!iframe.dataset.loaded) {
+							iframe.src = slide.dataset.src;
+							iframe.dataset.loaded = '1';
+						}
+						slide.classList.add('active');
+						ind.textContent = slide.dataset.label;
+					}
+
+					show(0);
+
+					document.addEventListener('keydown', e => {
+						if (e.key === 'ArrowRight') show(cur + 1);
+						else if (e.key === 'ArrowLeft') show(cur - 1);
+					});
+
+					let touchX = null;
+					const overlay = document.getElementById('swipe-overlay');
+					overlay.addEventListener('touchstart', e => {
+						touchX = e.touches[0].clientX;
+					}, { passive: true });
+					overlay.addEventListener('touchend', e => {
+						if (touchX === null) return;
+						const dx = e.changedTouches[0].clientX - touchX;
+						touchX = null;
+						if (Math.abs(dx) < 40) return;
+						show(dx < 0 ? cur + 1 : cur - 1);
+					}, { passive: true });
+				//]]></script>
 			</body>
 		</html>
 	</template>

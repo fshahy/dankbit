@@ -53,7 +53,7 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
 1. **WebSocket (primary):** `dankbit_ws_service/dankbit_ws_batch.py` — connects to Deribit, authenticates, fetches all BTC+ETH option instruments, subscribes to `trades.<instrument>.raw` channels in chunks of 400, inserts rows directly into PostgreSQL with `ON CONFLICT IGNORE` on `deribit_trade_identifier`.
 2. **REST backfill:** `Trade.get_last_trades()` — runs daily via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
 
-**Chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate *all* trades for that expiry (structural positioning, not real-time flow), compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG rendered with matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). `/BTC` and `/ETH` without an expiry return 404.
+**Chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate *all* trades for that expiry (structural positioning, not real-time flow), compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG rendered with matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). `/BTC` and `/ETH` without an expiry return 404. Below the chart the page shows gamma peak prices (darkorange) and gamma bottom prices (crimson) detected from the gamma curve.
 
 ## Odoo Addon (`my_addons/dankbit/`)
 
@@ -64,7 +64,9 @@ The addon depends only on `website`. Key components:
 - `res.config.settings` extension — Chart price ranges, refresh interval, and Deribit cache TTL.
 
 **Controllers:**
-- `main.py` — Route handler for `/<instrument>` (e.g. `/BTC-7MAY26`, `/ETH-30MAY26`). Rejects bare `/BTC` and `/ETH` with 404. Builds `OptionStrat`, calls delta/gamma aggregators, returns PNG.
+- `main.py` — Route handler for `/<instrument>` and `/<instrument>/<hours>`. Rejects bare `/BTC` and `/ETH` with 404. Builds `OptionStrat`, calls delta/gamma aggregators, returns PNG. Key helpers:
+  - `find_gamma_extremes(STs, gamma_curve, top_n=3, min_fraction=0.15)` — finds local maxima (peaks) and minima (bottoms) of the gamma curve, filtered to those exceeding 15% of the global abs-gamma max, returning the top 3 of each sorted by magnitude.
+  - `_net_volume(trades)` — returns `(net_calls, net_puts)` signed by direction.
 - `delta.py` / `gamma.py` — Pure Black-Scholes functions. Dollar gamma is `Γ × S²`. No side effects.
 - `options.py` — `OptionStrat` class. Accumulates legs, then `plot()` returns a matplotlib `Figure`. Uses Agg backend; do not import `pyplot` here.
 

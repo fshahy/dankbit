@@ -174,7 +174,9 @@ class Trade(models.Model):
             return 0.0
 
     def _get_latest_trade_ts_for_instrument(self, instrument_name: str):
-        return self.search([("name", "=", instrument_name)], order="deribit_ts desc", limit=1)
+        return self.with_context(active_test=False).search(
+            [("name", "=", instrument_name)], order="deribit_ts desc", limit=1
+        )
 
     # ========== FETCHING & INGESTION ==========
 
@@ -200,7 +202,6 @@ class Trade(models.Model):
             timeout = 5.0
 
         URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
-        now_ts = int(time_module.time() * 1000)
 
         # critical: if DB already contains full history → always start from last trade timestamp
         # NEVER limit by "days ago" again
@@ -228,6 +229,12 @@ class Trade(models.Model):
             else:
                 # fallback (fresh DB case, or an instrument with zero trades)
                 start_ts = base_start
+
+            now_ts = int(time_module.time() * 1000)
+
+            if start_ts >= now_ts:
+                _logger.debug("Skipping %s — already up to date (start_ts=%s >= now_ts=%s)", inst_name, start_ts, now_ts)
+                continue
 
             _logger.info(
                 "Fetching trades for %s from %s → %s",
@@ -386,40 +393,35 @@ class Trade(models.Model):
         return all_instruments
 
     def _create_new_trade(self, trade, expiration_ts):
+        deribit_dt = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc)
+        exp_dt = datetime.fromtimestamp(expiration_ts / 1000, tz=timezone.utc) if expiration_ts else None
+
+        vals = {
+            "name": trade.get("instrument_name"),
+            "iv": trade.get("iv"),
+            "index_price": trade.get("index_price"),
+            "price": trade.get("price"),
+            "mark_price": trade.get("mark_price"),
+            "direction": trade.get("direction"),
+            "trade_seq": trade.get("trade_seq"),
+            "deribit_trade_identifier": trade.get("trade_id"),
+            "amount": trade.get("amount"),
+            "deribit_ts": fields.Datetime.to_string(deribit_dt),
+            "expiration": fields.Datetime.to_string(exp_dt) if exp_dt else False,
+            "is_block_trade": bool(
+                trade.get("is_block_trade")
+                or trade.get("block_trade")
+                or trade.get("block_trade_id")
+            ),
+            "block_trade_id": trade.get("block_trade_id"),
+        }
+
         try:
-            deribit_dt = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc)
-            exp_dt = datetime.fromtimestamp(expiration_ts / 1000, tz=timezone.utc) if expiration_ts else None
-
-            vals = {
-                "name": trade.get("instrument_name"),
-                "iv": trade.get("iv"),
-                "index_price": trade.get("index_price"),
-                "price": trade.get("price"),
-                "mark_price": trade.get("mark_price"),
-                "direction": trade.get("direction"),
-                "trade_seq": trade.get("trade_seq"),
-                "deribit_trade_identifier": trade.get("trade_id"),
-                "amount": trade.get("amount"),
-                "deribit_ts": fields.Datetime.to_string(deribit_dt),
-                "expiration": fields.Datetime.to_string(exp_dt) if exp_dt else False,
-                "is_block_trade": bool(
-                    trade.get("is_block_trade")
-                    or trade.get("block_trade")
-                    or trade.get("block_trade_id")
-                ),
-                "block_trade_id": trade.get("block_trade_id"),
-            }
-
-            self.env["dankbit.trade"].create(vals)
-
+            with self.env.cr.savepoint():
+                self.env["dankbit.trade"].create(vals)
         except Exception as e:
-            # VERY IMPORTANT: rollback poisoned transaction
-            self.env.cr.rollback()
-
-            # duplicate trade → safe to ignore
             if "deribit_trade_identifier" in str(e):
-                return
-
+                return  # WS already inserted this trade — skip silently
             _logger.exception("Failed to create trade %s", trade.get("trade_id"))
             raise
 
