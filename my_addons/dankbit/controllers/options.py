@@ -55,7 +55,7 @@ class OptionStrat:
         if self.name.startswith("BTC"):
             ax.xaxis.set_major_locator(MultipleLocator(1000))
         elif self.name.startswith("ETH"):
-            ax.xaxis.set_major_locator(MultipleLocator(50))
+            ax.xaxis.set_major_locator(MultipleLocator(100))
 
         ax.grid(True)
 

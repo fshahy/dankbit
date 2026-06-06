@@ -3,28 +3,32 @@
 		<t t-call="website.layout">
 			<div class="container my-5">
 				<div class="row text-center">
-					<!-- Row 1 -->
+					<!-- Row 1: Long -->
 					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Long Call</p>
 						<img src="/dankbit/static/src/img/LC.png"
 							class="img-fluid rounded shadow-sm"
-							alt="Image 1" />
+							alt="Long Call" />
 					</div>
 					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Long Put</p>
 						<img src="/dankbit/static/src/img/LP.png"
 							class="img-fluid rounded shadow-sm"
-							alt="Image 2" />
+							alt="Long Put" />
 					</div>
 
-					<!-- Row 2 -->
+					<!-- Row 2: Short -->
 					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Short Call</p>
 						<img src="/dankbit/static/src/img/SC.png"
 							class="img-fluid rounded shadow-sm"
-							alt="Image 3" />
+							alt="Short Call" />
 					</div>
 					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Short Put</p>
 						<img src="/dankbit/static/src/img/SP.png"
 							class="img-fluid rounded shadow-sm"
-							alt="Image 4" />
+							alt="Short Put" />
 					</div>
 				</div>
 			</div>
@@ -68,8 +72,7 @@
 						font-size: 14pt;
 					}
 
-					.gamma-peak { color: darkorange; }
-					.gamma-bottom { color: crimson; }
+					.gamma-nearest { color: violet; }
 				</style>
 			</head>
 
@@ -82,18 +85,11 @@
 				</div>
 
 				<p class="gamma-label">
-					<span class="gamma-peak">γ Peaks:
-						<t t-foreach="gamma_peaks" t-as="p">
-							<t t-esc="'${:,.0f}'.format(p)"/><t t-if="not p_last">, </t>
+					<span class="gamma-nearest">γ Nearest:
+						<t t-if="gamma_nearest">
+							<t t-esc="'${:,.0f}'.format(gamma_nearest)"/>
 						</t>
-						<t t-if="not gamma_peaks">—</t>
-					</span>
-					&#160;|&#160;
-					<span class="gamma-bottom">γ Bottoms:
-						<t t-foreach="gamma_bottoms" t-as="p">
-							<t t-esc="'${:,.0f}'.format(p)"/><t t-if="not p_last">, </t>
-						</t>
-						<t t-if="not gamma_bottoms">—</t>
+						<t t-else="">—</t>
 					</span>
 				</p>
 			</body>

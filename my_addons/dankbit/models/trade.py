@@ -445,15 +445,3 @@ class Trade(models.Model):
                 "dankbit_view_type": "taker",
             }
         }
-
-    def open_plot_wizard_mm(self):
-        return {
-            "type": "ir.actions.act_window",
-            "res_model": "dankbit.plot_wizard",
-            "view_mode": "form",
-            "view_id": self.env.ref("dankbit.view_plot_wizard_form").id,
-            "target": "new",
-            "context": {
-                "dankbit_view_type": "mm",
-            }
-        }

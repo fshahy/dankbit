@@ -16,18 +16,13 @@ class ChartController(http.Controller):
 
     @http.route("/<string:instrument>/s", type="http", auth="public", website=True)
     def chart_slideshow(self, instrument):
-        if instrument.upper() in ("BTC", "ETH"):
-            return request.not_found()
         return request.render("dankbit.dankbit_slideshow", {
             "instrument": instrument,
-            "hours_list": [1, 2, 4, 6, 8, 10, 12],
+            "hours_list": [1, 2, 4, 6, 8, 10, 12, 24],
         })
 
     @http.route("/<string:instrument>/<int:hours>", type="http", auth="public", website=True)
     def chart_png_hours(self, instrument, hours):
-        if instrument.upper() in ("BTC", "ETH"):
-            return request.not_found()
-
         icp = request.env["ir.config_parameter"].sudo()
 
         from_price = 0
@@ -47,6 +42,7 @@ class ChartController(http.Controller):
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
         domain = [
             ("name", "ilike", f"{instrument}"),
+            ("expiration", ">=", datetime.now()),
             ("deribit_ts", ">=", cutoff),
         ]
 
@@ -70,7 +66,7 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, steps)
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
-        gamma_peaks, gamma_bottoms = self.find_gamma_extremes(STs, market_gammas)
+        gamma_nearest = self.find_gamma_extreme(STs, market_gammas, index_price)
 
         fig, ax = obj.plot(index_price,
                            market_deltas,
@@ -80,12 +76,11 @@ class ChartController(http.Controller):
                            width=18,
                            height=8)
 
-        net_calls, net_puts = self._net_volume(trades)
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
         ax.text(
             0.01, 0.04,
-            f"{len(trades)} Trades ({hours}h) | Net Calls: {net_calls:+.2f} | Net Puts: {net_puts:+.2f}",
+            f"{len(trades)} Trades ({hours}h)",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -109,16 +104,12 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Last {hours}h",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
-                "gamma_peaks": [p for p, _ in gamma_peaks],
-                "gamma_bottoms": [p for p, _ in gamma_bottoms],
+                "gamma_nearest": gamma_nearest,
             }
         )
 
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
     def chart_png_all(self, instrument):
-        if instrument.upper() in ("BTC", "ETH"):
-            return request.not_found()
-
         icp = request.env["ir.config_parameter"].sudo()
 
         from_price = 0
@@ -137,7 +128,11 @@ class ChartController(http.Controller):
 
         domain=[
             ("name", "ilike", f"{instrument}"),
+            ("expiration", ">=", datetime.now()),
         ]
+
+        if instrument.upper() in ("BTC", "ETH"):
+            refresh_interval = 3600
 
         trades = request.env["dankbit.trade"].search(domain=domain)
 
@@ -159,22 +154,21 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, steps)
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
-        gamma_peaks, gamma_bottoms = self.find_gamma_extremes(STs, market_gammas)
+        gamma_nearest = self.find_gamma_extreme(STs, market_gammas, index_price)
 
         fig, ax = obj.plot(index_price,
                            market_deltas,
                            market_gammas,
                            False,
-                           title="All",
+                           title="Structure",
                            width=18,
                            height=8)
 
-        net_calls, net_puts = self._net_volume(trades)
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
         ax.text(
             0.01, 0.04,
-            f"{len(trades)} Trades | Net Calls: {net_calls:+.2f} | Net Puts: {net_puts:+.2f}",
+            f"{len(trades)} Trades",
             transform=ax.transAxes,
             fontsize=14,
         )
@@ -198,50 +192,36 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - All",
                 "refresh_interval": refresh_interval*5,
                 "image_b64": image_b64,
-                # "current_delta": current_delta,
-                "gamma_peaks": [p for p, _ in gamma_peaks],
-                "gamma_bottoms": [p for p, _ in gamma_bottoms],
+                "gamma_nearest": gamma_nearest,
             }
         )
 
-    def _net_volume(self, trades):
-        net_calls = net_puts = 0.0
-        for t in trades:
-            signed = t.amount if t.direction == "buy" else -t.amount
-            if t.option_type == "call":
-                net_calls += signed
-            elif t.option_type == "put":
-                net_puts += signed
-        return round(net_calls, 2), round(net_puts, 2)
-
-    def find_gamma_extremes(self, STs, gamma_curve, top_n=3, min_fraction=0.15):
-        """Return (peaks, bottoms) — lists of (price, gamma_value) for local maxima/minima
-        of the gamma curve that exceed min_fraction of the global abs-gamma max."""
+    def find_gamma_extreme(self, STs, gamma_curve, current_price, min_fraction=0.15):
+        """Return the price of the local gamma extremum (peak or bottom) nearest to
+        current_price that exceeds min_fraction of the global abs-gamma max, or None."""
         STs = np.asarray(STs, dtype=float)
         g = np.asarray(gamma_curve, dtype=float)
 
         if g.size < 3:
-            return [], []
+            return None
 
         finite = np.isfinite(g)
         if not np.any(finite):
-            return [], []
+            return None
 
         g_max = np.max(np.abs(g[finite]))
         if g_max == 0:
-            return [], []
+            return None
 
         threshold = min_fraction * g_max
-        peaks, bottoms = [], []
+        extrema = []
 
         for i in range(1, len(g) - 1):
             if not np.isfinite(g[i]):
                 continue
             if g[i] > g[i - 1] and g[i] > g[i + 1] and g[i] > threshold:
-                peaks.append((float(STs[i]), float(g[i])))
+                extrema.append(float(STs[i]))
             elif g[i] < g[i - 1] and g[i] < g[i + 1] and g[i] < -threshold:
-                bottoms.append((float(STs[i]), float(g[i])))
+                extrema.append(float(STs[i]))
 
-        peaks = sorted(peaks, key=lambda x: x[1], reverse=True)[:top_n]
-        bottoms = sorted(bottoms, key=lambda x: x[1])[:top_n]
-        return peaks, bottoms
+        return min(extrema, key=lambda p: abs(p - current_price)) if extrema else None
