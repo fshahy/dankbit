@@ -4,7 +4,6 @@ import os
 import websockets
 import logging
 import psycopg2
-from psycopg2.extras import execute_values
 from datetime import datetime, timezone
 import time
 
@@ -257,8 +256,8 @@ async def run():
                     for t in trades:
                         instr = t.get("instrument_name", "???")
                         try:
-                            log.debug(
-                                f"{instr} | {t.get('direction')} | "
+                            log.info(
+                                f"trade: {instr} | {t.get('direction')} | "
                                 f"price {t.get('price')} | amount {t.get('amount')}"
                             )
                             insert_trade(t)
