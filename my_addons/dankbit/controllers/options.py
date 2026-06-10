@@ -135,7 +135,7 @@ class OptionStrat:
                     axp.set_ylim(-pmax, pmax)
         
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
-        ax.set_title(f"{self.name} | {title}")
+        ax.set_title(f"{self.name} | {now} UTC | {title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
 
         # Combine legends from all axes
@@ -148,9 +148,9 @@ class OptionStrat:
             h += h3
             l += l3
 
-        # ax.legend(h, l, loc="upper right", framealpha=0.85)
+        ax.legend(h, l, loc="upper right", framealpha=0.85)
 
-        # self.add_dankbit_signature(ax)
+        self.add_dankbit_signature(ax)
         return fig, ax
 
     # =====================================================

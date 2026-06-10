@@ -112,31 +112,31 @@ class ChartController(http.Controller):
     def chart_png_all(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-
-        if instrument.upper() in ("BTC", "ETH"):
-            refresh_interval = 180
-
-        index_price = request.env["dankbit.trade"].get_index_price(instrument)
-
+        from_price = 0
+        to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
         if instrument.startswith("ETH"):
-            radius = 500
-            steps = int(icp.get_param("dankbit.eth_steps", default=10))
-        else:
-            radius = 8000
-            steps = int(icp.get_param("dankbit.steps", default=5))
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
-        from_price = index_price - radius
-        to_price = index_price + radius
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
         domain=[
             ("name", "ilike", f"{instrument}"),
             ("expiration", ">=", datetime.now()),
-            ("strike", ">=", from_price),
-            ("strike", "<=", to_price),
         ]
 
+        if instrument.upper() in ("BTC", "ETH"):
+            refresh_interval = 3600
+
         trades = request.env["dankbit.trade"].search(domain=domain)
+
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, from_price, to_price, steps)
 
         for trade in trades:
@@ -161,8 +161,8 @@ class ChartController(http.Controller):
                            market_gammas,
                            False,
                            title="Structure",
-                           width=3,
-                           height=7)
+                           width=18,
+                           height=8)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -172,12 +172,12 @@ class ChartController(http.Controller):
             transform=ax.transAxes,
             fontsize=14,
         )
-        # ax.text(
-        #     0.01, 0.01,
-        #     f"Last trade: {last_ts}",
-        #     transform=ax.transAxes,
-        #     fontsize=14,
-        # )
+        ax.text(
+            0.01, 0.01,
+            f"Last trade: {last_ts}",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
 
         buf = BytesIO()
         fig.savefig(buf, format="png")
