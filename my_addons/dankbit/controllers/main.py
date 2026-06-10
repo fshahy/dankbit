@@ -2,6 +2,7 @@ import base64
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from matplotlib import transforms as mtransforms
 from odoo import http
 from odoo.http import request
 from . import options
@@ -18,7 +19,7 @@ class ChartController(http.Controller):
     def chart_slideshow(self, instrument):
         return request.render("dankbit.dankbit_slideshow", {
             "instrument": instrument,
-            "hours_list": [1, 2, 4, 6, 8, 10, 12, 24],
+            "hours_list": [0, 4, 6],
         })
 
     @http.route("/<string:instrument>/<int:hours>", type="http", auth="public", website=True)
@@ -66,8 +67,6 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, steps)
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
-        gamma_nearest = self.find_gamma_extreme(STs, market_gammas, index_price)
-
         fig, ax = obj.plot(index_price,
                            market_deltas,
                            market_gammas,
@@ -75,6 +74,28 @@ class ChartController(http.Controller):
                            title=f"{hours}H",
                            width=18,
                            height=8)
+
+        trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        d_arr = np.asarray(market_deltas, dtype=float)
+        g_arr = np.asarray(market_gammas, dtype=float)
+        d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
+        g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
+
+        for px, gval in self.find_all_gamma_extrema(STs, market_gammas):
+            ax.axvline(x=px, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+
+            # pick the y fraction furthest from both curves
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
+                    fontsize=9, ha="center", va="top" if y > 0.5 else "bottom")
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -104,7 +125,6 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Last {hours}h",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
-                "gamma_nearest": gamma_nearest,
             }
         )
 
@@ -154,8 +174,6 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, steps)
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
-        gamma_nearest = self.find_gamma_extreme(STs, market_gammas, index_price)
-
         fig, ax = obj.plot(index_price,
                            market_deltas,
                            market_gammas,
@@ -163,6 +181,28 @@ class ChartController(http.Controller):
                            title="Structure",
                            width=18,
                            height=8)
+
+        trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        d_arr = np.asarray(market_deltas, dtype=float)
+        g_arr = np.asarray(market_gammas, dtype=float)
+        d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
+        g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
+
+        for px, gval in self.find_all_gamma_extrema(STs, market_gammas):
+            ax.axvline(x=px, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+
+            # pick the y fraction furthest from both curves
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
+                    fontsize=9, ha="center", va="top" if y > 0.5 else "bottom")
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -192,26 +232,23 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - All",
                 "refresh_interval": refresh_interval*5,
                 "image_b64": image_b64,
-                "gamma_nearest": gamma_nearest,
             }
         )
 
-    def find_gamma_extreme(self, STs, gamma_curve, current_price, min_fraction=0.15):
-        """Return the price of the local gamma extremum (peak or bottom) nearest to
-        current_price that exceeds min_fraction of the global abs-gamma max, or None."""
+    def find_all_gamma_extrema(self, STs, gamma_curve, min_fraction=0.15):
         STs = np.asarray(STs, dtype=float)
         g = np.asarray(gamma_curve, dtype=float)
 
         if g.size < 3:
-            return None
+            return []
 
         finite = np.isfinite(g)
         if not np.any(finite):
-            return None
+            return []
 
         g_max = np.max(np.abs(g[finite]))
         if g_max == 0:
-            return None
+            return []
 
         threshold = min_fraction * g_max
         extrema = []
@@ -220,8 +257,8 @@ class ChartController(http.Controller):
             if not np.isfinite(g[i]):
                 continue
             if g[i] > g[i - 1] and g[i] > g[i + 1] and g[i] > threshold:
-                extrema.append(float(STs[i]))
+                extrema.append((float(STs[i]), float(g[i])))
             elif g[i] < g[i - 1] and g[i] < g[i + 1] and g[i] < -threshold:
-                extrema.append(float(STs[i]))
+                extrema.append((float(STs[i]), float(g[i])))
 
-        return min(extrema, key=lambda p: abs(p - current_price)) if extrema else None
+        return extrema

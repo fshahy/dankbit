@@ -84,14 +84,6 @@
 					/>
 				</div>
 
-				<p class="gamma-label">
-					<span class="gamma-nearest">γ Nearest:
-						<t t-if="gamma_nearest">
-							<t t-esc="'${:,.0f}'.format(gamma_nearest)"/>
-						</t>
-						<t t-else="">—</t>
-					</span>
-				</p>
 			</body>
 		</html>
 	</template>
@@ -128,8 +120,8 @@
 				<div id="swipe-overlay"/>
 				<t t-foreach="hours_list" t-as="h">
 					<div class="slide"
-						t-att-data-src="'/%s/%d' % (instrument, h)"
-						t-att-data-label="str(h) + 'h'">
+						t-att-data-src="'/%s' % instrument if h == 0 else '/%s/%d' % (instrument, h)"
+						t-att-data-label="'All' if h == 0 else str(h) + 'h'">
 						<iframe/>
 					</div>
 				</t>
