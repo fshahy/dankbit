@@ -53,7 +53,7 @@ class OptionStrat:
 
         # Tick spacing
         if self.name.startswith("BTC"):
-            ax.xaxis.set_major_locator(MultipleLocator(1000))
+            ax.xaxis.set_major_locator(MultipleLocator(2000))
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(100))
 
@@ -148,9 +148,9 @@ class OptionStrat:
             h += h3
             l += l3
 
-        ax.legend(h, l, loc="upper right", framealpha=0.85)
+        # ax.legend(h, l, loc="upper right", framealpha=0.85)
 
-        self.add_dankbit_signature(ax)
+        # self.add_dankbit_signature(ax)
         return fig, ax
 
     # =====================================================

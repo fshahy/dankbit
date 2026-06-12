@@ -10,6 +10,26 @@ from . import delta
 from . import gamma
 
 
+class _AggTrade:
+    """SQL-aggregated trade row — duck-typed for portfolio_delta/gamma."""
+    __slots__ = ("strike", "option_type", "direction", "amount", "iv", "_expiration")
+
+    def __init__(self, strike, option_type, direction, expiration, amount, iv):
+        self.strike = strike
+        self.option_type = option_type
+        self.direction = direction
+        self.amount = amount
+        self.iv = iv
+        self._expiration = expiration
+
+    def get_hours_to_expiry(self):
+        if not self._expiration:
+            return 0.0
+        now = datetime.now(timezone.utc)
+        exp = self._expiration if self._expiration.tzinfo else self._expiration.replace(tzinfo=timezone.utc)
+        return max((exp - now).total_seconds() / 3600.0, 0.0)
+
+
 class ChartController(http.Controller):
     @http.route("/help", auth="public", type="http", website=True)
     def help_page(self):
@@ -95,7 +115,8 @@ class ChartController(http.Controller):
             y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
 
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
-                    fontsize=9, ha="center", va="top" if y > 0.5 else "bottom")
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -146,34 +167,46 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
-        domain=[
-            ("name", "ilike", f"{instrument}"),
-            ("expiration", ">=", datetime.now()),
-        ]
-
         if instrument.upper() in ("BTC", "ETH"):
             refresh_interval = 3600
 
-        trades = request.env["dankbit.trade"].search(domain=domain)
+        cr = request.env.cr
+        cr.execute("""
+            SELECT
+                strike,
+                option_type,
+                direction,
+                expiration,
+                SUM(amount)                                AS total_amount,
+                SUM(iv * amount) / NULLIF(SUM(amount), 0) AS weighted_iv,
+                COUNT(*)                                   AS trade_count
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND active = TRUE
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{instrument}%',))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0],
+                option_type=row[1],
+                direction=row[2],
+                expiration=row[3],
+                amount=float(row[4]),
+                iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
         obj = options.OptionStrat(instrument, index_price, from_price, to_price, steps)
 
-        for trade in trades:
-            if trade.option_type == "call":
-                if trade.direction == "buy":
-                    obj.long_call(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_call(trade.strike, trade.price * trade.index_price)
-            elif trade.option_type == "put":
-                if trade.direction == "buy":
-                    obj.long_put(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    obj.short_put(trade.strike, trade.price * trade.index_price)
-
         STs = np.arange(from_price, to_price, steps)
-        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
-        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        market_deltas = delta.portfolio_delta(STs, agg_trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, agg_trades, 0.05)
         fig, ax = obj.plot(index_price,
                            market_deltas,
                            market_gammas,
@@ -202,13 +235,14 @@ class ChartController(http.Controller):
             y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
 
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
-                    fontsize=9, ha="center", va="top" if y > 0.5 else "bottom")
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
         ax.text(
             0.01, 0.04,
-            f"{len(trades)} Trades",
+            f"{trade_count} Trades",
             transform=ax.transAxes,
             fontsize=14,
         )
