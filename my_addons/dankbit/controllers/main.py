@@ -167,9 +167,6 @@ class ChartController(http.Controller):
 
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
-        if instrument.upper() in ("BTC", "ETH"):
-            refresh_interval = 3600
-
         cr = request.env.cr
         cr.execute("""
             SELECT
