@@ -39,7 +39,7 @@ class ChartController(http.Controller):
     def chart_slideshow(self, instrument):
         return request.render("dankbit.dankbit_slideshow", {
             "instrument": instrument,
-            "hours_list": [0, 4, 6],
+            "hours_list": [0, 4, 8, 12, 24],
         })
 
     @http.route("/<string:instrument>/<int:hours>", type="http", auth="public", website=True)

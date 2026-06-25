@@ -53,7 +53,7 @@ class OptionStrat:
 
         # Tick spacing
         if self.name.startswith("BTC"):
-            ax.xaxis.set_major_locator(MultipleLocator(1000))
+            ax.xaxis.set_major_locator(MultipleLocator(2000))
         elif self.name.startswith("ETH"):
             ax.xaxis.set_major_locator(MultipleLocator(100))
 
