@@ -101,8 +101,8 @@ class ChartController(http.Controller):
         d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
         g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
 
-        for px, gval in self.find_all_gamma_extrema(STs, market_gammas):
-            ax.axvline(x=px, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)
+        for px, gval in self.find_gamma_peaks(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
 
             # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
             g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
@@ -114,7 +114,16 @@ class ChartController(http.Controller):
             occupied_bot = min(g_norm, d_norm)
             y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
 
-            ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for px in self.find_gamma_zero_crossings(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+            y = 0.04 if d_norm > 0.5 else 0.96
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
@@ -218,8 +227,8 @@ class ChartController(http.Controller):
         d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
         g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
 
-        for px, gval in self.find_all_gamma_extrema(STs, market_gammas):
-            ax.axvline(x=px, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)
+        for px, gval in self.find_gamma_peaks(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
 
             # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
             g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
@@ -231,7 +240,16 @@ class ChartController(http.Controller):
             occupied_bot = min(g_norm, d_norm)
             y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
 
-            ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for px in self.find_gamma_zero_crossings(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+            y = 0.04 if d_norm > 0.5 else 0.96
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
@@ -337,8 +355,8 @@ class ChartController(http.Controller):
         d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
         g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
 
-        for px, gval in self.find_all_gamma_extrema(STs, market_gammas):
-            ax.axvline(x=px, color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)
+        for px, gval in self.find_gamma_peaks(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
 
             g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
             d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
@@ -348,7 +366,16 @@ class ChartController(http.Controller):
             occupied_bot = min(g_norm, d_norm)
             y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
 
-            ax.text(px, y, f"${px:,.0f}", transform=trans, color="darkorange",
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for px in self.find_gamma_zero_crossings(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+            y = 0.04 if d_norm > 0.5 else 0.96
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
@@ -356,7 +383,7 @@ class ChartController(http.Controller):
         if _leg:
             _h = list(_leg.legendHandles)
             _l = [t.get_text() for t in _leg.texts]
-            ax.legend(_h + [Line2D([0], [0], color="darkorange", linewidth=1.2, linestyle="--", alpha=0.8)],
+            ax.legend(_h + [Line2D([0], [0], color="black", linewidth=1.2, linestyle="--", alpha=0.8)],
                       _l + ["Gamma Extrema"], loc="upper right", framealpha=0.85)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
@@ -390,7 +417,7 @@ class ChartController(http.Controller):
             }
         )
 
-    def find_all_gamma_extrema(self, STs, gamma_curve, min_fraction=0.15):
+    def find_gamma_peaks(self, STs, gamma_curve, min_fraction=0.15):
         STs = np.asarray(STs, dtype=float)
         g = np.asarray(gamma_curve, dtype=float)
 
@@ -413,7 +440,20 @@ class ChartController(http.Controller):
                 continue
             if g[i] > g[i - 1] and g[i] > g[i + 1] and g[i] > threshold:
                 extrema.append((float(STs[i]), float(g[i])))
-            elif g[i] < g[i - 1] and g[i] < g[i + 1] and g[i] < -threshold:
-                extrema.append((float(STs[i]), float(g[i])))
 
         return extrema
+
+    def find_gamma_zero_crossings(self, STs, gamma_curve):
+        STs = np.asarray(STs, dtype=float)
+        g = np.asarray(gamma_curve, dtype=float)
+
+        crossings = []
+        for i in range(len(g) - 1):
+            if not (np.isfinite(g[i]) and np.isfinite(g[i + 1])):
+                continue
+            if g[i] * g[i + 1] < 0:
+                # linear interpolation to the exact zero
+                px = STs[i] - g[i] * (STs[i + 1] - STs[i]) / (g[i + 1] - g[i])
+                crossings.append(float(px))
+
+        return crossings
