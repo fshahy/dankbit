@@ -1,4 +1,5 @@
 import base64
+import json
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -284,6 +285,157 @@ class ChartController(http.Controller):
             }
         )
 
+    @http.route("/i/<string:instrument>", type="http", auth="public", website=True)
+    def chart_png_until(self, instrument):
+        # instrument is e.g. "BTC-3JUL26" — asset prefix + expiry, no strike/type
+        parts = instrument.split("-", 1)
+        if len(parts) != 2:
+            return request.not_found()
+        asset = parts[0].upper()
+        expiry_str = parts[1].upper()
+
+        try:
+            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(
+                hour=8, tzinfo=timezone.utc
+            )
+        except ValueError:
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+
+        from_price = 0
+        to_price = 1000
+        steps = 1
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT
+                strike,
+                option_type,
+                direction,
+                expiration,
+                SUM(amount)                                AS total_amount,
+                SUM(iv * amount) / NULLIF(SUM(amount), 0) AS weighted_iv,
+                COUNT(*)                                   AS trade_count
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND expiration <= %s
+              AND active = TRUE
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', expiry_dt))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0],
+                option_type=row[1],
+                direction=row[2],
+                expiration=row[3],
+                amount=float(row[4]),
+                iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        obj = options.OptionStrat(asset, index_price, from_price, to_price, steps)
+
+        STs = np.arange(from_price, to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, agg_trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, agg_trades, 0.05)
+        fig, ax = obj.plot(index_price,
+                           market_deltas,
+                           market_gammas,
+                           False,
+                           title=f"Until {expiry_str}",
+                           width=18,
+                           height=8)
+
+        trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        d_arr = np.asarray(market_deltas, dtype=float)
+        g_arr = np.asarray(market_gammas, dtype=float)
+        d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
+        g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
+
+        for px, gval in self.find_gamma_peaks(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for px in self.find_gamma_zero_crossings(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+            y = 0.04 if d_norm > 0.5 else 0.96
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                ax.axvline(x=px, color="green", linewidth=1.2, linestyle="-", alpha=0.8)
+                g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
+                y = 0.04 if g_norm > 0.5 else 0.96
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color="green",
+                        fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                        rotation=90)
+
+        last_trade = request.env["dankbit.trade"].get_last_trade(asset)
+        last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
+        ax.text(
+            0.01, 0.04,
+            f"{trade_count} Trades (until {expiry_str})",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+        ax.text(
+            0.01, 0.01,
+            f"Last trade: {last_ts}",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        del fig
+
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_name": f"Until {expiry_str}",
+                "plot_title": f"{asset} - Until {expiry_str}",
+                "refresh_interval": refresh_interval,
+                "image_b64": image_b64,
+            }
+        )
+
     @http.route("/<string:instrument>/D<int:days>", type="http", auth="public", website=True)
     def chart_png_days(self, instrument, days):
         icp = request.env["ir.config_parameter"].sudo()
@@ -457,3 +609,119 @@ class ChartController(http.Controller):
                 crossings.append(float(px))
 
         return crossings
+
+    # ------------------------------------------------------------------
+    # JSON API endpoints
+    # ------------------------------------------------------------------
+
+    @http.route("/api/delta-zero/<string:instrument>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_json(self, instrument):
+        parts = instrument.upper().split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                json.dumps({"error": "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-3JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        asset, expiry_str = parts
+        try:
+            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
+        except ValueError:
+            return request.make_response(
+                json.dumps({"error": "Invalid expiry format — expected DDMMMYY e.g. 3JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND expiration <= %s
+              AND active = TRUE
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', expiry_dt))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append(px)
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        payload = {
+            "asset": asset,
+            "expiry": expiry_str,
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    # ------------------------------------------------------------------
+    # TradingView Lightweight Charts pages
+    # ------------------------------------------------------------------
+
+    @http.route("/chart/<string:instrument>", type="http", auth="public", website=True)
+    def chart_tv(self, instrument):
+        instrument = instrument.upper()
+        parts = instrument.split("-", 1)
+        asset = parts[0]
+
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+
+        if len(parts) == 1:
+            return request.not_found()
+
+        expiry_str = parts[1]
+        try:
+            datetime.strptime(expiry_str, "%d%b%y")
+        except ValueError:
+            return request.not_found()
+
+        return request.render("dankbit.dankbit_tv_chart_until", {
+            "instrument": instrument,
+            "asset": asset,
+            "expiry": expiry_str,
+            "refresh_interval": refresh_interval,
+        })

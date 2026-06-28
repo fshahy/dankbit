@@ -167,4 +167,164 @@
 		</html>
 	</template>
 
+	<template id="dankbit_tv_chart_until" name="Dankbit TV Chart Until Expiry">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="asset"/> until <t t-esc="expiry"/> — Delta Chart</title>
+				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
+					#chart-container { width: 100%; height: 100%; }
+					#status {
+						position: fixed; bottom: 8px; left: 12px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#legend {
+						position: fixed; bottom: 8px; right: 12px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 4px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#tf-bar {
+						position: fixed; top: 8px; left: 12px;
+						display: flex; gap: 4px; z-index: 10;
+					}
+					.tf-btn {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+					}
+					.tf-btn:hover { background: #f0f0f0; }
+					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+				</style>
+			</head>
+			<body>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div id="chart-container"/>
+				<div id="status">Loading…</div>
+				<div id="legend"><span style="color:green">■</span> Delta = 0</div>
+				<div id="tf-bar">
+					<button class="tf-btn" onclick="setTf('5m')">5m</button>
+					<button class="tf-btn" onclick="setTf('1h')">1h</button>
+					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn" onclick="setTf('1d')">1d</button>
+					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
+				</div>
+				<script>//<![CDATA[
+					const cfg        = document.getElementById('cfg').dataset;
+					const INSTRUMENT = cfg.instrument;
+					const ASSET      = cfg.asset;
+					const REFRESH    = parseInt(cfg.refresh, 10) * 1000;
+					const SYMBOL     = ASSET + 'USDT';
+					const DZ_URL     = '/api/delta-zero/' + INSTRUMENT;
+					let   INTERVAL   = '4h';
+					const klineUrl   = (iv, limit) => 'https://api.binance.com/api/v3/klines?symbol=' + SYMBOL + '&interval=' + iv + '&limit=' + limit;
+
+					const berlinOffset = (() => {
+						const d = new Date();
+						const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+						const ber = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
+						return (ber - utc) / 1000;
+					})();
+
+					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+						width: window.innerWidth, height: window.innerHeight,
+						layout: { background: { type: 'solid', color: '#ffffff' }, textColor: '#333333' },
+						grid: { vertLines: { color: '#e8e8e8' }, horzLines: { color: '#e8e8e8' } },
+						crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+						rightPriceScale: { borderColor: '#cccccc' },
+						timeScale: { borderColor: '#cccccc', timeVisible: true, secondsVisible: false },
+						localization: {
+							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
+								timeZone: 'UTC',
+								month: 'short', day: 'numeric',
+								hour: '2-digit', minute: '2-digit',
+							}),
+						},
+					});
+
+					window.addEventListener('resize', () => chart.resize(window.innerWidth, window.innerHeight));
+
+					const series = chart.addCandlestickSeries({
+						upColor: '#26a69a', downColor: '#ef5350',
+						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+					});
+
+					let priceLines = [];
+
+					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function toCandle(k) {
+						return { time: Math.floor(k[0] / 1000) + berlinOffset, open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]) };
+					}
+
+					async function loadCandles() {
+						const klines = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						series.setData(klines.map(toCandle));
+					}
+
+					async function updateLatestCandle() {
+						const klines = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						if (!klines.length) return;
+						series.update(toCandle(klines[klines.length - 1]));
+					}
+
+					async function setTf(iv) {
+						INTERVAL = iv;
+						document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.textContent === iv));
+						await loadCandles();
+						chart.timeScale().fitContent();
+					}
+
+					async function refreshDeltaZero() {
+						const data = await (await fetch(DZ_URL)).json();
+						priceLines.forEach(l => series.removePriceLine(l));
+						priceLines = [];
+						(data.delta_zero || []).forEach(price => {
+							priceLines.push(series.createPriceLine({
+								price, color: 'green', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: 'Δ=0',
+							}));
+						});
+						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
+						setStatus(INSTRUMENT + '  ·  ' + (data.delta_zero || []).length + ' Δ=0 levels  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
+					}
+
+					async function init() {
+						try { await loadCandles(); await refreshDeltaZero(); chart.timeScale().fitContent(); }
+						catch (e) { setStatus('Error: ' + e.message); }
+					}
+					function saveChart() {
+						const canvases = document.getElementById('chart-container').querySelectorAll('canvas');
+						if (!canvases.length) return;
+						const w = canvases[0].width, h = canvases[0].height;
+						const out = document.createElement('canvas');
+						out.width = w; out.height = h;
+						const ctx = out.getContext('2d');
+						ctx.fillStyle = '#ffffff';
+						ctx.fillRect(0, 0, w, h);
+						canvases.forEach(c => ctx.drawImage(c, 0, 0));
+						const a = document.createElement('a');
+						a.href = out.toDataURL('image/png');
+						a.download = INSTRUMENT + '_delta_' + new Date().toISOString().slice(0,16).replace('T','_') + '.png';
+						a.click();
+					}
+
+					init();
+					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshDeltaZero, REFRESH);
+				//]]></script>
+			</body>
+		</html>
+	</template>
+
 </odoo>
