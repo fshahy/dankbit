@@ -45,15 +45,21 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
                                                         ▼
                                                Odoo 18 (web:8069)
                                                         │
-                                               /BTC-7MAY26, /ETH-30MAY26
-                                               (PNG chart responses)
+                               ┌───────────────────────┤
+                               │                       │
+                        PNG charts                TradingView
+                  /BTC-7MAY26, /i/BTC-4JUL26     /chart/BTC
 ```
 
 **Trade data enters two ways:**
 1. **WebSocket (primary):** `dankbit_ws_service/dankbit_ws_batch.py` — connects to Deribit, authenticates, fetches all BTC+ETH option instruments, subscribes to `trades.<instrument>.raw` channels in chunks of 400, inserts rows directly into PostgreSQL with `ON CONFLICT IGNORE` on `deribit_trade_identifier`.
 2. **REST backfill:** `Trade.get_last_trades()` — runs daily via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
 
-**Chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate *all* trades for that expiry (structural positioning, not real-time flow), compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG rendered with matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). `/BTC` and `/ETH` without an expiry return 404. Below the chart the page shows gamma peak prices (darkorange) and gamma bottom prices (crimson) detected from the gamma curve.
+**PNG chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate all trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG via matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). Overlaid lines: gamma peaks (dashed black), gamma=0 crossings (solid black). The `/i/<instrument>` route additionally overlays a delta=0 line (green).
+
+**TradingView chart:** `/chart/BTC` and `/chart/ETH` serve a Lightweight Charts v4 page with live XT.com perpetual futures candles (proxied server-side) and price lines refreshed on `dankbit.refresh_interval`:
+- Delta=0 lines (3 sets): Weekly, Monthly, All expiries — lower price=green, upper price=red, middle prices=gray, midpoint (when exactly 2 crossings)=black LargeDashed
+- Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`
 
 ## Odoo Addon (`my_addons/dankbit/`)
 
@@ -61,18 +67,30 @@ The addon depends only on `website`. Key components:
 
 **Models:**
 - `dankbit.trade` — Core model. Fields map directly to Deribit trade fields. `strike` and `option_type` are computed from `name` (instrument name like `BTC-29NOV24-98000-P`). `days_to_expiry` is UTC-safe. `get_hours_to_expiry()` returns continuous time used in Black-Scholes.
-- `res.config.settings` extension — Chart price ranges, refresh interval, and Deribit cache TTL.
+- `res.config.settings` extension — Chart price ranges, refresh interval, Deribit cache TTL, weekly/monthly expiries for BTC and ETH.
 
-**Controllers:**
-- `main.py` — Route handler for `/<instrument>` and `/<instrument>/<hours>`. Rejects bare `/BTC` and `/ETH` with 404. Builds `OptionStrat`, calls delta/gamma aggregators, returns PNG. Key helpers:
-  - `find_gamma_extremes(STs, gamma_curve, top_n=3, min_fraction=0.15)` — finds local maxima (peaks) and minima (bottoms) of the gamma curve, filtered to those exceeding 15% of the global abs-gamma max, returning the top 3 of each sorted by magnitude.
-  - `_net_volume(trades)` — returns `(net_calls, net_puts)` signed by direction.
+**Controllers (`main.py`):**
+- PNG routes: `/<instrument>`, `/<instrument>/<hours>`, `/<instrument>/D<days>`, `/i/<instrument>`
+- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`
+- TradingView page: `/chart/<asset>` (reads weekly expiry from settings, returns 404 for unconfigured assets)
+- Key helpers:
+  - `find_gamma_peaks(STs, gamma_curve, min_fraction)` — local maxima of the gamma curve
+  - `find_gamma_bottoms(STs, gamma_curve, min_fraction)` — local minima of the gamma curve
+  - `find_gamma_zero_crossings(STs, gamma_curve)` — linear interpolation for gamma=0 crossings
 - `delta.py` / `gamma.py` — Pure Black-Scholes functions. Dollar gamma is `Γ × S²`. No side effects.
 - `options.py` — `OptionStrat` class. Accumulates legs, then `plot()` returns a matplotlib `Figure`. Uses Agg backend; do not import `pyplot` here.
 
+**Settings fields (`res.config.settings`):**
+- `from_price`, `to_price`, `steps` — BTC chart price range
+- `eth_from_price`, `eth_to_price`, `eth_steps` — ETH chart price range
+- `refresh_interval` — page auto-refresh interval (seconds)
+- `deribit_timeout`, `deribit_cache_ttl` — Deribit API behaviour
+- `weekly_expiry`, `monthly_expiry` — BTC expiry strings (e.g. `BTC-4JUL26`)
+- `eth_weekly_expiry`, `eth_monthly_expiry` — ETH expiry strings (e.g. `ETH-4JUL26`)
+
 **Scheduled crons (data/ir_cron.xml):**
-- Daily: `get_last_trades()` — active by default; ensures no trades were missed (e.g. during brief downtime)
-- Daily: `_delete_expired_trades()` — active by default; archives expired trades
+- Daily: `get_last_trades()` — ensures no trades were missed (e.g. during brief downtime)
+- Daily: `_delete_expired_trades()` — archives expired trades
 
 **Caching:** `trade.py` uses a module-level `_DERIBIT_CACHE` dict (key → `{ts, value}`) for Deribit index price and instrument lookups. TTL is configurable via settings (`deribit_cache_ttl`, default 300s).
 
@@ -86,13 +104,23 @@ The DB connection uses `autocommit=True` — no explicit transaction management 
 
 | URL | Description |
 |-----|-------------|
-| `/BTC-7MAY26` | BTC options for a specific expiry |
-| `/ETH-30MAY26` | ETH options for a specific expiry |
+| `/BTC-7MAY26` | BTC PNG chart for a specific expiry |
+| `/ETH-30MAY26` | ETH PNG chart for a specific expiry |
+| `/i/BTC-4JUL26` | PNG chart for all expiries up to selected date; includes delta=0 line |
+| `/chart/BTC` | Live TradingView chart; reads weekly expiry from settings |
+| `/chart/ETH` | Live TradingView chart for ETH |
 | `/help` | Payoff diagram reference page |
 
-Always use a specific expiry in the URL. `/BTC` and `/ETH` without an expiry return 404.
+Query params for PNG routes: `from_price`, `to_price` (price range), `width`, `height` (figure inches).
 
-Query params: `from_price`, `to_price` (price range), `width`, `height` (figure inches).
+## TradingView Chart Notes
+
+- Candles sourced from XT.com perpetual futures via `/api/klines/<asset>` proxy (avoids CORS)
+- Candles refresh every 5 seconds; delta=0 lines refresh on `dankbit.refresh_interval`
+- Berlin timezone applied via `berlinOffset` computed from `Intl` API
+- Timeframe buttons: 5m / 1h / 4h (default) / 1d — each sets a per-timeframe visible window via `applyVisibleRange()`
+- Ruler tool: click twice on chart to measure price-to-price percentage
+- Do **not** change `title:` values in `createPriceLine()` calls — the user maintains these manually
 
 ## Odoo Gotchas
 
@@ -100,8 +128,9 @@ Query params: `from_price`, `to_price` (price range), `width`, `height` (figure 
 
 ## Odoo Module Reload
 
-Python changes to `my_addons/` take effect after `docker compose restart web`. XML/view changes require upgrading the module in Odoo UI (Settings → Activate developer mode → Apps → Dankbit → Upgrade) or via:
+Python changes to `my_addons/` take effect after `docker compose restart web`. XML/view changes and new model fields require upgrading the module:
 
 ```bash
 docker compose exec web odoo -d <db_name> -u dankbit --stop-after-init
+docker compose restart web
 ```

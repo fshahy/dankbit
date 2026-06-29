@@ -172,7 +172,7 @@
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> until <t t-esc="expiry"/> — Delta Chart</title>
+				<title><t t-esc="asset"/> <t t-esc="expiry"/> — Delta Chart</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -217,11 +217,11 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="legend"><span style="color:green">■</span> WΔ=0 &#160; <span style="color:darkorange">■</span> MΔ=0 &#160; <span style="color:blue">■</span> Δ=0</div>
+				<div id="legend"><span style="color:green">■</span> low &#160; <span style="color:red">■</span> high &#160; <span style="color:#888">W/M/All</span> &#160; <span style="color:violet">■</span> γ peak/bottom</div>
 				<div id="tf-bar">
-					<button class="tf-btn active" onclick="setTf('5m')">5m</button>
+					<button class="tf-btn" onclick="setTf('5m')">5m</button>
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
 					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
@@ -237,7 +237,9 @@
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
-					let   INTERVAL         = '5m';
+					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
+					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
+					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					const berlinOffset = (() => {
@@ -273,6 +275,8 @@
 					let priceLines = [];
 					let monthlyLines = [];
 					let allLines = [];
+					let weeklyGammaLines = [];
+					let monthlyGammaLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -280,10 +284,22 @@
 						return { time: Math.floor(k.t / 1000) + berlinOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
+					const TF_WINDOW = { '5m': 2, '1h': 14, '4h': 21, '1d': 180 };
+
+					function applyVisibleRange() {
+						const days = TF_WINDOW[INTERVAL] || 21;
+						const now  = Math.floor(Date.now() / 1000) + berlinOffset;
+						chart.timeScale().setVisibleRange({
+							from: now - days * 86400,
+							to:   now + days * 86400 * 0.03,
+						});
+					}
+
 					async function loadCandles() {
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
 						series.setData(klines.map(toCandle));
+						applyVisibleRange();
 					}
 
 					async function updateLatestCandle() {
@@ -297,30 +313,35 @@
 						INTERVAL = iv;
 						document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.textContent === iv));
 						await loadCandles();
-						chart.timeScale().fitContent();
+					}
+
+					function dzLineColor(idx, total) {
+						if (idx === 0) return 'green';
+						if (idx === total - 1) return 'red';
+						return 'gray';
 					}
 
 					async function refreshDeltaZero() {
 						const data = await (await fetch(DZ_URL)).json();
 						priceLines.forEach(l => series.removePriceLine(l));
 						priceLines = [];
-						(data.delta_zero || []).forEach(price => {
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach((price, idx) => {
 							priceLines.push(series.createPriceLine({
-								price, color: 'green', lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: 'Weekly Δ=0',
+								axisLabelVisible: true, title: 'Weekly',
 							}));
 						});
-						if ((data.delta_zero || []).length === 2) {
-							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+						if (zeros.length === 2) {
 							priceLines.push(series.createPriceLine({
-								price: mid, color: 'green', lineWidth: 1,
+								price: (zeros[0] + zeros[1]) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
 								axisLabelVisible: true, title: 'Middle Weekly',
 							}));
 						}
 						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
-						setStatus(INSTRUMENT + '  ·  ' + (data.delta_zero || []).length + ' WΔ=0 levels  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
+						setStatus(INSTRUMENT + '  ·  ' +  (data.trade_count || 0) + ' trades  ·  ' + ts);
 					}
 
 					async function refreshMonthlyDeltaZero() {
@@ -328,17 +349,17 @@
 						const data = await (await fetch(MDZ_URL)).json();
 						monthlyLines.forEach(l => series.removePriceLine(l));
 						monthlyLines = [];
-						(data.delta_zero || []).forEach(price => {
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach((price, idx) => {
 							monthlyLines.push(series.createPriceLine({
-								price, color: 'darkorange', lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: 'Monthly Δ=0',
+								axisLabelVisible: true, title: 'Monthly',
 							}));
 						});
-						if ((data.delta_zero || []).length === 2) {
-							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+						if (zeros.length === 2) {
 							monthlyLines.push(series.createPriceLine({
-								price: mid, color: 'darkorange', lineWidth: 1,
+								price: (zeros[0] + zeros[1]) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
 								axisLabelVisible: true, title: 'Middle Monthly',
 							}));
@@ -349,21 +370,51 @@
 						const data = await (await fetch(ADZ_URL)).json();
 						allLines.forEach(l => series.removePriceLine(l));
 						allLines = [];
-						(data.delta_zero || []).forEach(price => {
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach((price, idx) => {
 							allLines.push(series.createPriceLine({
-								price, color: 'blue', lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: 'All Δ=0',
+								axisLabelVisible: true, title: 'All',
 							}));
 						});
-						if ((data.delta_zero || []).length === 2) {
-							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+						if (zeros.length === 2) {
 							allLines.push(series.createPriceLine({
-								price: mid, color: 'blue', lineWidth: 1,
+								price: (zeros[0] + zeros[1]) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
 								axisLabelVisible: true, title: 'Middle All',
 							}));
 						}
+					}
+
+					function drawGammaLines(data, lineStore, lineWidth, prefix) {
+						lineStore.forEach(l => series.removePriceLine(l));
+						lineStore.length = 0;
+						(data.peaks || []).forEach(price => {
+							lineStore.push(series.createPriceLine({
+								price, color: 'violet', lineWidth,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: prefix + ' GP',
+							}));
+						});
+						(data.bottoms || []).forEach(price => {
+							lineStore.push(series.createPriceLine({
+								price, color: 'violet', lineWidth,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: prefix + ' GB',
+							}));
+						});
+					}
+
+					async function refreshWeeklyGamma() {
+						const data = await (await fetch(GL_W_URL)).json();
+						drawGammaLines(data, weeklyGammaLines, 2, 'Weekly');
+					}
+
+					async function refreshMonthlyGamma() {
+						if (!GL_M_URL) return;
+						const data = await (await fetch(GL_M_URL)).json();
+						drawGammaLines(data, monthlyGammaLines, 1, 'Monthly');
 					}
 
 					let rulerActive = false;
@@ -407,7 +458,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); chart.timeScale().fitContent(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -431,6 +482,8 @@
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
+					setInterval(refreshWeeklyGamma, REFRESH);
+					setInterval(refreshMonthlyGamma, REFRESH);
 				//]]></script>
 			</body>
 		</html>

@@ -596,6 +596,32 @@ class ChartController(http.Controller):
 
         return extrema
 
+    def find_gamma_bottoms(self, STs, gamma_curve, min_fraction=0.15):
+        STs = np.asarray(STs, dtype=float)
+        g = np.asarray(gamma_curve, dtype=float)
+
+        if g.size < 3:
+            return []
+
+        finite = np.isfinite(g)
+        if not np.any(finite):
+            return []
+
+        g_max = np.max(np.abs(g[finite]))
+        if g_max == 0:
+            return []
+
+        threshold = min_fraction * g_max
+        extrema = []
+
+        for i in range(1, len(g) - 1):
+            if not np.isfinite(g[i]):
+                continue
+            if g[i] < g[i - 1] and g[i] < g[i + 1] and g[i] < -threshold:
+                extrema.append((float(STs[i]), float(g[i])))
+
+        return extrema
+
     def find_gamma_zero_crossings(self, STs, gamma_curve):
         STs = np.asarray(STs, dtype=float)
         g = np.asarray(gamma_curve, dtype=float)
@@ -750,6 +776,80 @@ class ChartController(http.Controller):
             "asset": asset,
             "delta_zero": crossings,
             "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
+    def gamma_levels_json(self, instrument):
+        parts = instrument.upper().split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                json.dumps({"error": "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        asset, expiry_str = parts
+        try:
+            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
+        except ValueError:
+            return request.make_response(
+                json.dumps({"error": "Invalid expiry format — expected DDMMMYY e.g. 4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND expiration <= %s
+              AND active = TRUE
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', expiry_dt))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        g_arr = gamma.portfolio_gamma(STs, agg_trades, 0.05)
+
+        peaks   = [px for px, _ in self.find_gamma_peaks(STs, g_arr)]
+        bottoms = [px for px, _ in self.find_gamma_bottoms(STs, g_arr)]
+
+        payload = {
+            "asset": asset,
+            "expiry": expiry_str,
+            "peaks": peaks,
+            "bottoms": bottoms,
             "trade_count": trade_count,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
