@@ -29,6 +29,12 @@
                         <setting>
                             <field name="steps" placeholder="Steps"/>
                         </setting>
+                        <setting>
+                            <field name="weekly_expiry" placeholder="e.g. BTC-3JUL26"/>
+                        </setting>
+                        <setting>
+                            <field name="monthly_expiry" placeholder="e.g. BTC-31JUL26"/>
+                        </setting>
                     </block>
 
                     <block title="ETH Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">
@@ -40,6 +46,12 @@
                         </setting>
                         <setting>
                             <field name="eth_steps" placeholder="ETH Steps"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_weekly_expiry" placeholder="e.g. ETH-4JUL26"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_monthly_expiry" placeholder="e.g. ETH-26SEP26"/>
                         </setting>
                     </block>
                  </app>

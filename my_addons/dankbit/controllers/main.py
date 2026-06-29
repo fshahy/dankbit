@@ -1,5 +1,6 @@
 import base64
 import json
+import requests as _requests
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -694,15 +695,86 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route("/api/delta-zero-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_all_json(self, asset):
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND active = TRUE
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%',))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append(px)
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        payload = {
+            "asset": asset,
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def klines_proxy(self, asset, interval="4h", limit="500"):
+        symbol = asset.lower() + "_usdt"
+        url = f"https://fapi.xt.com/future/market/v1/public/q/kline?symbol={symbol}&interval={interval}&limit={limit}"
+        resp = _requests.get(url, timeout=10)
+        return request.make_response(
+            resp.content,
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     # ------------------------------------------------------------------
     # TradingView Lightweight Charts pages
     # ------------------------------------------------------------------
 
-    @http.route("/chart/<string:instrument>", type="http", auth="public", website=True)
-    def chart_tv(self, instrument):
-        instrument = instrument.upper()
-        parts = instrument.split("-", 1)
-        asset = parts[0]
+    @http.route("/chart/<string:asset>", type="http", auth="public", website=True)
+    def chart_tv(self, asset):
+        asset = asset.upper()
 
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
@@ -710,18 +782,36 @@ class ChartController(http.Controller):
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
-        if len(parts) == 1:
-            return request.not_found()
+        if asset.startswith("ETH"):
+            weekly_param = "dankbit.eth_weekly_expiry"
+            monthly_param = "dankbit.eth_monthly_expiry"
+        else:
+            weekly_param = "dankbit.weekly_expiry"
+            monthly_param = "dankbit.monthly_expiry"
+
+        instrument = icp.get_param(weekly_param, default="").upper()
+
+        if not instrument:
+            return request.make_response(
+                f"Weekly Expiry for {asset} is not configured. Set it in Settings → Dankbit.",
+                headers=[("Content-Type", "text/plain")],
+            )
+
+        parts = instrument.split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                f"Weekly Expiry '{instrument}' is invalid — expected format: {asset}-3JUL26.",
+                headers=[("Content-Type", "text/plain")],
+            )
 
         expiry_str = parts[1]
-        try:
-            datetime.strptime(expiry_str, "%d%b%y")
-        except ValueError:
-            return request.not_found()
+
+        monthly_instrument = icp.get_param(monthly_param, default="").upper()
 
         return request.render("dankbit.dankbit_tv_chart_until", {
             "instrument": instrument,
             "asset": asset,
             "expiry": expiry_str,
+            "monthly_instrument": monthly_instrument,
             "refresh_interval": refresh_interval,
         })

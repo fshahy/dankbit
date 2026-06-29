@@ -196,6 +196,13 @@
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; z-index: 10;
 					}
+					#ruler-info {
+						position: fixed; top: 40px; left: 12px;
+						font-family: monospace; font-size: 12pt; font-weight: bold;
+						color: #222; background: rgba(255,255,255,0.92);
+						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; display: none;
+					}
 					.tf-btn {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -207,26 +214,31 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="legend"><span style="color:green">■</span> Delta = 0</div>
+				<div id="legend"><span style="color:green">■</span> WΔ=0 &#160; <span style="color:darkorange">■</span> MΔ=0 &#160; <span style="color:blue">■</span> Δ=0</div>
 				<div id="tf-bar">
-					<button class="tf-btn" onclick="setTf('5m')">5m</button>
+					<button class="tf-btn active" onclick="setTf('5m')">5m</button>
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn" onclick="setTf('4h')">4h</button>
 					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
+					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
+				<div id="ruler-info"/>
 				<script>//<![CDATA[
-					const cfg        = document.getElementById('cfg').dataset;
-					const INSTRUMENT = cfg.instrument;
-					const ASSET      = cfg.asset;
-					const REFRESH    = parseInt(cfg.refresh, 10) * 1000;
-					const SYMBOL     = ASSET + 'USDT';
-					const DZ_URL     = '/api/delta-zero/' + INSTRUMENT;
-					let   INTERVAL   = '4h';
-					const klineUrl   = (iv, limit) => 'https://api.binance.com/api/v3/klines?symbol=' + SYMBOL + '&interval=' + iv + '&limit=' + limit;
+					const cfg              = document.getElementById('cfg').dataset;
+					const INSTRUMENT       = cfg.instrument;
+					const ASSET            = cfg.asset;
+					const MONTHLY_INST     = cfg.monthly || '';
+					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
+					const SYMBOL           = ASSET.toLowerCase() + '_usdt';
+					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
+					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
+					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
+					let   INTERVAL         = '5m';
+					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					const berlinOffset = (() => {
 						const d = new Date();
@@ -259,22 +271,26 @@
 					});
 
 					let priceLines = [];
+					let monthlyLines = [];
+					let allLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
 					function toCandle(k) {
-						return { time: Math.floor(k[0] / 1000) + berlinOffset, open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]) };
+						return { time: Math.floor(k.t / 1000) + berlinOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
 					async function loadCandles() {
-						const klines = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						const klines = (resp.result || []).slice().reverse();
 						series.setData(klines.map(toCandle));
 					}
 
 					async function updateLatestCandle() {
-						const klines = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const klines = resp.result || [];
 						if (!klines.length) return;
-						series.update(toCandle(klines[klines.length - 1]));
+						series.update(toCandle(klines[0]));
 					}
 
 					async function setTf(iv) {
@@ -292,15 +308,106 @@
 							priceLines.push(series.createPriceLine({
 								price, color: 'green', lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: 'Δ=0',
+								axisLabelVisible: true, title: 'Weekly Δ=0',
 							}));
 						});
+						if ((data.delta_zero || []).length === 2) {
+							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+							priceLines.push(series.createPriceLine({
+								price: mid, color: 'green', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, title: 'Middle Weekly',
+							}));
+						}
 						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
-						setStatus(INSTRUMENT + '  ·  ' + (data.delta_zero || []).length + ' Δ=0 levels  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
+						setStatus(INSTRUMENT + '  ·  ' + (data.delta_zero || []).length + ' WΔ=0 levels  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
 					}
 
+					async function refreshMonthlyDeltaZero() {
+						if (!MDZ_URL) return;
+						const data = await (await fetch(MDZ_URL)).json();
+						monthlyLines.forEach(l => series.removePriceLine(l));
+						monthlyLines = [];
+						(data.delta_zero || []).forEach(price => {
+							monthlyLines.push(series.createPriceLine({
+								price, color: 'darkorange', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: 'Monthly Δ=0',
+							}));
+						});
+						if ((data.delta_zero || []).length === 2) {
+							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+							monthlyLines.push(series.createPriceLine({
+								price: mid, color: 'darkorange', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, title: 'Middle Monthly',
+							}));
+						}
+					}
+
+					async function refreshAllDeltaZero() {
+						const data = await (await fetch(ADZ_URL)).json();
+						allLines.forEach(l => series.removePriceLine(l));
+						allLines = [];
+						(data.delta_zero || []).forEach(price => {
+							allLines.push(series.createPriceLine({
+								price, color: 'blue', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: 'All Δ=0',
+							}));
+						});
+						if ((data.delta_zero || []).length === 2) {
+							const mid = (data.delta_zero[0] + data.delta_zero[1]) / 2;
+							allLines.push(series.createPriceLine({
+								price: mid, color: 'blue', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, title: 'Middle All',
+							}));
+						}
+					}
+
+					let rulerActive = false;
+					let rulerPrice1 = null;
+					let rulerLines  = [];
+
+					function toggleRuler() {
+						rulerActive = !rulerActive;
+						document.getElementById('ruler-btn').classList.toggle('active', rulerActive);
+						rulerLines.forEach(l => series.removePriceLine(l));
+						rulerLines = [];
+						rulerPrice1 = null;
+						const info = document.getElementById('ruler-info');
+						info.style.display = 'none';
+						info.textContent = '';
+					}
+
+					chart.subscribeClick(param => {
+						if (!rulerActive || !param.point) return;
+						const price = series.coordinateToPrice(param.point.y);
+						if (rulerPrice1 === null) {
+							rulerPrice1 = price;
+							rulerLines.push(series.createPriceLine({
+								price, color: '#555', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, title: '①',
+							}));
+						} else {
+							rulerLines.push(series.createPriceLine({
+								price, color: '#555', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, title: '②',
+							}));
+							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
+							const sign = pct >= 0 ? '+' : '';
+							const info = document.getElementById('ruler-info');
+							info.style.display = 'block';
+							info.textContent = rulerPrice1.toFixed(0) + ' → ' + price.toFixed(0) + '   ' + sign + pct.toFixed(2) + '%';
+							rulerPrice1 = null;
+						}
+					});
+
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); chart.timeScale().fitContent(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); chart.timeScale().fitContent(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -322,6 +429,8 @@
 					init();
 					setInterval(updateLatestCandle, 5000);
 					setInterval(refreshDeltaZero, REFRESH);
+					setInterval(refreshMonthlyDeltaZero, REFRESH);
+					setInterval(refreshAllDeltaZero, REFRESH);
 				//]]></script>
 			</body>
 		</html>

@@ -50,4 +50,24 @@ class ResConfigSettings(models.TransientModel):
         help="Time-to-live in seconds for cached Deribit responses (index/instruments)."
     )
 
+    weekly_expiry = fields.Char(
+        string="Weekly Expiry",
+        config_parameter="dankbit.weekly_expiry",
+    )
+
+    monthly_expiry = fields.Char(
+        string="Monthly Expiry",
+        config_parameter="dankbit.monthly_expiry",
+    )
+
+    eth_weekly_expiry = fields.Char(
+        string="ETH Weekly Expiry",
+        config_parameter="dankbit.eth_weekly_expiry",
+    )
+
+    eth_monthly_expiry = fields.Char(
+        string="ETH Monthly Expiry",
+        config_parameter="dankbit.eth_monthly_expiry",
+    )
+
 
