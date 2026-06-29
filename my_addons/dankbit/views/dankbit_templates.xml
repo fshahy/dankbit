@@ -179,7 +179,7 @@
 					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
 					#chart-container { width: 100%; height: 100%; }
 					#status {
-						position: fixed; bottom: 8px; left: 12px;
+						position: fixed; bottom: 32px; left: 12px;
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 2px 10px; border-radius: 4px;
@@ -217,7 +217,7 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="legend"><span style="color:green">■</span> low &#160; <span style="color:red">■</span> high &#160; <span style="color:#888">W/M/All</span> &#160; <span style="color:violet">■</span> γ peak/bottom</div>
+				<div id="legend"><span style="color:green">■</span> demand &#160; <span style="color:red">■</span> supply &#160; <span style="color:#888">W/M/All</span> &#160; <span style="color:violet">■</span> γ peak/bottom</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('5m')">5m</button>
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
@@ -237,6 +237,7 @@
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
+					const NDZ_URL          = '/api/delta-zero-next/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					let   INTERVAL         = '4h';
@@ -275,6 +276,8 @@
 					let priceLines = [];
 					let monthlyLines = [];
 					let allLines = [];
+					let dailyLines = [];
+					let dailyExpiry = '';
 					let weeklyGammaLines = [];
 					let monthlyGammaLines = [];
 
@@ -328,7 +331,7 @@
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
 						zeros.forEach((price, idx) => {
 							priceLines.push(series.createPriceLine({
-								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 3,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, title: 'Weekly',
 							}));
@@ -341,7 +344,8 @@
 							}));
 						}
 						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
-						setStatus(INSTRUMENT + '  ·  ' +  (data.trade_count || 0) + ' trades  ·  ' + ts);
+						const expiries = [dailyExpiry, INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
+						setStatus(expiries + '  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
 					}
 
 					async function refreshMonthlyDeltaZero() {
@@ -352,7 +356,7 @@
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
 						zeros.forEach((price, idx) => {
 							monthlyLines.push(series.createPriceLine({
-								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 4,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, title: 'Monthly',
 							}));
@@ -373,7 +377,7 @@
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
 						zeros.forEach((price, idx) => {
 							allLines.push(series.createPriceLine({
-								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, title: 'All',
 							}));
@@ -383,6 +387,28 @@
 								price: (zeros[0] + zeros[1]) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
 								axisLabelVisible: true, title: 'Middle All',
+							}));
+						}
+					}
+
+					async function refreshDailyDeltaZero() {
+						const data = await (await fetch(NDZ_URL)).json();
+						if (data.expiry) dailyExpiry = ASSET + '-' + data.expiry;
+						dailyLines.forEach(l => series.removePriceLine(l));
+						dailyLines = [];
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach((price, idx) => {
+							dailyLines.push(series.createPriceLine({
+								price, color: dzLineColor(idx, zeros.length), lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, title: 'Daily',
+							}));
+						});
+						if (zeros.length === 2) {
+							dailyLines.push(series.createPriceLine({
+								price: (zeros[0] + zeros[1]) / 2, color: 'black', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, title: 'Middle Daily',
 							}));
 						}
 					}
@@ -458,7 +484,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); }
+						try { await loadCandles(); await refreshDailyDeltaZero(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -479,6 +505,7 @@
 
 					init();
 					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshDailyDeltaZero, REFRESH);
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
