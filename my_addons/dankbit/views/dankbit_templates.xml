@@ -185,13 +185,6 @@
 						padding: 2px 10px; border-radius: 4px;
 						z-index: 10; pointer-events: none;
 					}
-					#legend {
-						position: fixed; bottom: 8px; right: 12px;
-						font-family: monospace; font-size: 11pt;
-						color: #555; background: rgba(255,255,255,0.88);
-						padding: 4px 10px; border-radius: 4px;
-						z-index: 10; pointer-events: none;
-					}
 					#tf-bar {
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; z-index: 10;
@@ -217,11 +210,10 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="legend"><span style="color:green">■</span> demand &#160; <span style="color:red">■</span> supply &#160; <span style="color:#888">W/M/All</span> &#160; <span style="color:violet">■</span> γ peak/bottom</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('5m')">5m</button>
-				<button class="tf-btn active" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn" onclick="setTf('4h')">4h</button>
+				<button class="tf-btn" onclick="setTf('1h')">1h</button>
+					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
@@ -238,7 +230,7 @@
 					const DDZ_URL          = '/api/delta-zero-daily/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
-					let   INTERVAL         = '1h';
+					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					const berlinOffset = (() => {
