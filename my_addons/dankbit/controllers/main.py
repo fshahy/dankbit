@@ -705,7 +705,10 @@ class ChartController(http.Controller):
                 continue
             if d_arr[i] * d_arr[i + 1] < 0:
                 px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
-                crossings.append(px)
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
 
         index_price = request.env["dankbit.trade"].get_index_price(asset)
         payload = {
@@ -769,7 +772,10 @@ class ChartController(http.Controller):
                 continue
             if d_arr[i] * d_arr[i + 1] < 0:
                 px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
-                crossings.append(px)
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
 
         index_price = request.env["dankbit.trade"].get_index_price(asset)
         payload = {
@@ -847,6 +853,89 @@ class ChartController(http.Controller):
             if d_arr[i] * d_arr[i + 1] < 0:
                 px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
                 crossings.append(px)
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        payload = {
+            "asset": asset,
+            "expiry": nearest_expiry.strftime("%d%b%y").upper(),
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/delta-zero-daily/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_daily_json(self, asset):
+        """Delta=0 for the nearest expiry, using only trades from the last 8 hours."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT MIN(expiration) FROM dankbit_trade
+            WHERE name ILIKE %s AND active = TRUE AND expiration >= NOW()
+        """, (f'%{asset}%',))
+        row = cr.fetchone()
+        if not row or not row[0]:
+            payload = {"asset": asset, "delta_zero": [], "trade_count": 0,
+                       "generated_at": datetime.now(timezone.utc).isoformat()}
+            return request.make_response(
+                json.dumps(payload),
+                headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+            )
+
+        nearest_expiry = row[0]
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND active = TRUE
+              AND expiration = %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', nearest_expiry))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
 
         index_price = request.env["dankbit.trade"].get_index_price(asset)
         payload = {
