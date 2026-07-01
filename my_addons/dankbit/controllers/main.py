@@ -951,6 +951,90 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route("/api/delta-zero-daily2/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_daily2_json(self, asset):
+        """Delta=0 for the second nearest expiry, using only trades from the last 24 hours."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT DISTINCT expiration FROM dankbit_trade
+            WHERE name ILIKE %s AND active = TRUE AND expiration >= NOW()
+            ORDER BY expiration LIMIT 2
+        """, (f'%{asset}%',))
+        rows = cr.fetchall()
+        if len(rows) < 2:
+            payload = {"asset": asset, "delta_zero": [], "trade_count": 0,
+                       "generated_at": datetime.now(timezone.utc).isoformat()}
+            return request.make_response(
+                json.dumps(payload),
+                headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+            )
+
+        second_expiry = rows[1][0]
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND active = TRUE
+              AND expiration = %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', second_expiry))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        payload = {
+            "asset": asset,
+            "expiry": second_expiry.strftime("%d%b%y").upper(),
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
     def gamma_levels_json(self, instrument):
         parts = instrument.upper().split("-", 1)
@@ -1026,12 +1110,26 @@ class ChartController(http.Controller):
         )
 
     @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def klines_proxy(self, asset, interval="4h", limit="500"):
-        symbol = asset.lower() + "_usdt"
-        url = f"https://fapi.xt.com/future/market/v1/public/q/kline?symbol={symbol}&interval={interval}&limit={limit}"
-        resp = _requests.get(url, timeout=10)
+    def klines_proxy(self, asset, interval="1d", limit="500"):
+        symbol = asset.upper() + "-USDT"
+        type_map = {"1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
+                    "1h": "1hour", "4h": "4hour", "1d": "1day"}
+        kc_type = type_map.get(interval, "1day")
+        granularity_s = {"1min": 60, "5min": 300, "15min": 900, "30min": 1800,
+                         "1hour": 3600, "4hour": 14400, "1day": 86400}[kc_type]
+        limit_int = int(limit)
+        now_s = int(datetime.now(timezone.utc).timestamp())
+        start_s = now_s - limit_int * granularity_s
+        url = (f"https://api.kucoin.com/api/v1/market/candles"
+               f"?symbol={symbol}&type={kc_type}&startAt={start_s}&endAt={now_s}")
+        resp = _requests.get(url, timeout=10).json()
+        # KuCoin spot format: [time_s, open, close, high, low, volume, turnover] newest-first
+        candles = [
+            {"t": int(row[0]) * 1000, "o": row[1], "h": row[3], "l": row[4], "c": row[2]}
+            for row in (resp.get("data") or [])
+        ]
         return request.make_response(
-            resp.content,
+            json.dumps({"result": candles}),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 

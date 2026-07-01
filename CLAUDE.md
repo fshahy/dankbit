@@ -57,15 +57,16 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
 
 **PNG chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate all trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG via matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). Overlaid lines: gamma peaks (dashed black), gamma=0 crossings (solid black). The `/i/<instrument>` route additionally overlays a delta=0 line (green).
 
-**TradingView chart:** `/chart/BTC` and `/chart/ETH` serve a Lightweight Charts v4 page with live XT.com perpetual futures candles (proxied server-side) and price lines refreshed on `dankbit.refresh_interval`:
-- Delta=0 lines (4 sets) — each a single `createPriceLine`, `lineWidth: 1`, `lineStyle: Solid`:
+**TradingView chart:** `/chart/BTC` and `/chart/ETH` serve a Lightweight Charts v4 page with live KuCoin spot candles (proxied server-side) and price lines refreshed on `dankbit.refresh_interval`:
+- Delta=0 lines (5 sets) — each a single `createPriceLine`, `lineWidth: 1`, `lineStyle: Solid`:
   - **Daily 24H** (orange) — nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily/<asset>`
+  - **Daily+1 24H** (yellow) — second nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily2/<asset>`
   - **Weekly** (green) — sourced from `/api/delta-zero/<instrument>`
   - **Monthly** (blue) — sourced from `/api/delta-zero/<monthly-instrument>`
   - **All** (black) — all active expiries; sourced from `/api/delta-zero-all/<asset>`
   - Midpoint line when exactly 2 crossings: black `LargeDashed`, `lineWidth: 1`, title `Middle <Set>`
 - Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`
-- Footer shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`
+- Footer shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`; trade count = all active trades up to and including monthly expiry (from monthly endpoint)
 
 ## Odoo Addon (`my_addons/dankbit/`)
 
@@ -77,7 +78,7 @@ The addon depends only on `website`. Key components:
 
 **Controllers (`main.py`):**
 - PNG routes: `/<instrument>`, `/<instrument>/<hours>`, `/<instrument>/D<days>`, `/i/<instrument>`
-- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`
+- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/delta-zero-daily2/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`
 - TradingView page: `/chart/<asset>` (reads weekly expiry from settings, returns 404 for unconfigured assets)
 - Key helpers:
   - `find_gamma_peaks(STs, gamma_curve, min_fraction)` — local maxima of the gamma curve
@@ -121,10 +122,10 @@ Query params for PNG routes: `from_price`, `to_price` (price range), `width`, `h
 
 ## TradingView Chart Notes
 
-- Candles sourced from XT.com perpetual futures via `/api/klines/<asset>` proxy (avoids CORS)
+- Candles sourced from KuCoin spot (`api.kucoin.com`) via `/api/klines/<asset>` proxy (avoids CORS). Symbol format: `BTC-USDT`. KuCoin spot field order: `[time_s, open, close, high, low, volume, turnover]` — note close/high are swapped vs other exchanges. Response transformed to `{t,o,h,l,c}` (t in ms) and returned newest-first.
 - Candles refresh every 5 seconds; delta=0 lines refresh on `dankbit.refresh_interval`
 - Berlin timezone applied via `berlinOffset` computed from `Intl` API
-- Timeframe buttons: 5m / 1h / 4h — each sets a per-timeframe visible window via `applyVisibleRange()` (windows: 5m=7d, 1h=30d, 4h=21d)
+- Timeframe buttons: 4h / 1d (default) — visible windows: 4h=21d, 1d=180d
 - Ruler tool: click twice on chart to measure price-to-price percentage
 - Do **not** change `title:` values in `createPriceLine()` calls — the user maintains these manually
 
