@@ -122,10 +122,10 @@ Query params for PNG routes: `from_price`, `to_price` (price range), `width`, `h
 
 ## TradingView Chart Notes
 
-- Candles sourced from KuCoin spot (`api.kucoin.com`) via `/api/klines/<asset>` proxy (avoids CORS). Symbol format: `BTC-USDT`. KuCoin spot field order: `[time_s, open, close, high, low, volume, turnover]` — note close/high are swapped vs other exchanges. Response transformed to `{t,o,h,l,c}` (t in ms) and returned newest-first.
+- Candles sourced from Deribit perpetual futures (`BTC-PERPETUAL`, `ETH-PERPETUAL`) via `/api/klines/<asset>` proxy (avoids CORS). Uses `get_tradingview_chart_data` endpoint. Deribit returns oldest-first parallel arrays (`ticks`, `open`, `high`, `low`, `close`); proxy zips and reverses to newest-first `{t,o,h,l,c}` format (t in ms).
 - Candles refresh every 5 seconds; delta=0 lines refresh on `dankbit.refresh_interval`
 - Berlin timezone applied via `berlinOffset` computed from `Intl` API
-- Timeframe buttons: 4h / 1d (default) — visible windows: 4h=21d, 1d=180d
+- Timeframe buttons: 1m / 1h (default) — visible windows: 1m=1d, 1h=30d; Deribit resolution: 1m→1, 1h→60
 - Ruler tool: click twice on chart to measure price-to-price percentage
 - Do **not** change `title:` values in `createPriceLine()` calls — the user maintains these manually
 

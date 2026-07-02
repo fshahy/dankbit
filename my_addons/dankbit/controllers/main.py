@@ -1110,24 +1110,32 @@ class ChartController(http.Controller):
         )
 
     @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def klines_proxy(self, asset, interval="1d", limit="500"):
-        symbol = asset.upper() + "-USDT"
-        type_map = {"1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
-                    "1h": "1hour", "4h": "4hour", "1d": "1day"}
-        kc_type = type_map.get(interval, "1day")
-        granularity_s = {"1min": 60, "5min": 300, "15min": 900, "30min": 1800,
-                         "1hour": 3600, "4hour": 14400, "1day": 86400}[kc_type]
+    def klines_proxy(self, asset, interval="4h", limit="500"):
+        instrument_map = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
+        instrument = instrument_map.get(asset.upper(), asset.upper() + "-PERPETUAL")
+        resolution_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+                          "1h": 60, "4h": 360, "1d": "1D"}
+        resolution = resolution_map.get(interval, 360)
+        granularity_ms = (86400000 if resolution == "1D"
+                          else int(resolution) * 60 * 1000)
         limit_int = int(limit)
-        now_s = int(datetime.now(timezone.utc).timestamp())
-        start_s = now_s - limit_int * granularity_s
-        url = (f"https://api.kucoin.com/api/v1/market/candles"
-               f"?symbol={symbol}&type={kc_type}&startAt={start_s}&endAt={now_s}")
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        start_ms = now_ms - limit_int * granularity_ms
+        url = (f"https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
+               f"?instrument_name={instrument}&resolution={resolution}"
+               f"&start_timestamp={start_ms}&end_timestamp={now_ms}")
         resp = _requests.get(url, timeout=10).json()
-        # KuCoin spot format: [time_s, open, close, high, low, volume, turnover] newest-first
+        result = resp.get("result", {})
+        ticks  = result.get("ticks",  [])
+        opens  = result.get("open",   [])
+        highs  = result.get("high",   [])
+        lows   = result.get("low",    [])
+        closes = result.get("close",  [])
+        # Deribit returns oldest-first; reverse to newest-first for frontend
         candles = [
-            {"t": int(row[0]) * 1000, "o": row[1], "h": row[3], "l": row[4], "c": row[2]}
-            for row in (resp.get("data") or [])
-        ]
+            {"t": ticks[i], "o": opens[i], "h": highs[i], "l": lows[i], "c": closes[i]}
+            for i in range(len(ticks))
+        ][::-1]
         return request.make_response(
             json.dumps({"result": candles}),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],

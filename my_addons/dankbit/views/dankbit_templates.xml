@@ -211,8 +211,8 @@
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
-					<button class="tf-btn" onclick="setTf('4h')">4h</button>
-					<button class="tf-btn active" onclick="setTf('1d')">1d</button>
+					<button class="tf-btn" onclick="setTf('1m')">1m</button>
+					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
@@ -230,7 +230,7 @@
 					const DDZ2_URL         = '/api/delta-zero-daily2/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
-					let   INTERVAL         = '1d';
+					let   INTERVAL         = '1h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					const berlinOffset = (() => {
@@ -283,7 +283,7 @@
 						return { time: Math.floor(k.t / 1000) + berlinOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
-					const TF_WINDOW = { '4h': 21, '1d': 180 };
+					const TF_WINDOW = { '1m': 1, '1h': 30 };
 
 					function applyVisibleRange() {
 						const days = TF_WINDOW[INTERVAL] || 21;
