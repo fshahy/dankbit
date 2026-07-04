@@ -30,9 +30,10 @@ DANKBIT_POSTGRES_DB=<db_name>   # any name; db1 is the development default
 DERIBIT_KEY=<key>
 DERIBIT_SECRET=<secret>
 ```
-The `UID` and `GID` env vars are also needed so the `web` container writes files as the host user.
+The `UID` and `GID` env vars are also needed so the `web` container writes files as the host user (dev default: `1000`/`1000`). `docker-compose.yml` sets `user: "${UID}:${GID}"` on the `web` service and `chown`s the Odoo data dir to that UID/GID before starting — the values must match whichever host user owns the bind-mounted directories, so Odoo's writes (filestore, logs) land with an owner the host can actually manage. Check with `ls -ln <bind-mounted dir>` if unsure. Setting it to `0`/`0` (root) is correct only when the production host directory itself is root-owned — it also means Odoo runs as root inside the container, a broader security surface than an unprivileged UID.
 
 > **Production note:** `config/odoo.conf` contains `dbfilter = ^db1$` — update this to match the actual database name.
+> **Production note:** production's `.env` uses `UID=0`/`GID=0` (root), unlike the dev default of `1000`/`1000` — see above for when that's the correct choice.
 
 ## Architecture
 
