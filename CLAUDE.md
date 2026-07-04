@@ -54,7 +54,7 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
 
 **Trade data enters two ways:**
 1. **WebSocket (primary):** `dankbit_ws_service/dankbit_ws_batch.py` — connects to Deribit, authenticates, fetches all BTC+ETH option instruments, subscribes to `trades.<instrument>.raw` channels in chunks of 400, inserts rows directly into PostgreSQL with `ON CONFLICT IGNORE` on `deribit_trade_identifier`.
-2. **REST backfill:** `Trade.get_last_trades()` — runs daily via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
+2. **REST backfill:** `Trade.get_last_trades()` — runs every minute via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
 
 **PNG chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate all trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG via matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). Overlaid lines: gamma peaks and bottoms (dashed black), delta=0 crossings (solid — green for "supply" [delta negative below, positive above], red for "demand" [delta positive below, negative above]).
 
@@ -67,7 +67,8 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
   - **All** — all active expiries; sourced from `/api/delta-zero-all/<asset>`
   - Midpoint line when exactly 2 crossings: black `LargeDashed`, `lineWidth: 1`, title `Middle <Set>`
 - Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`; title suffix is `∧` for peaks and `∨` for bottoms (e.g. `Weekly ∧`, `Monthly ∨`)
-- Footer legend (`#dz-legend`, fixed below the status line): black "S/D", red "Tie-out", violet "Gamma Extrema"
+- Quadrant Gamma lines (2) — `Net Call Gamma` (`#1565c0`) and `Net Put Gamma` (`#e65100`), `addLineSeries` on their own `priceScaleId: 'qg'`, confined to a bottom panel via `scaleMargins: { top: 0.8, bottom: 0 }` — a separate scale from candles, so the axis label shows the real (unrescaled) gamma value, and dragging/zooming the main candle price axis doesn't affect this panel (or vice versa); the time axis is always shared regardless, so horizontal scroll/pan stays in sync. Real values are also in `/api/quadrant-gamma/<asset>`. The endpoint truncates each `computed_at` to the hour (minutes/seconds zeroed) before building `"t"`, and collapses any same-hour duplicates to the latest row — the stored `computed_at` values themselves are left untouched, only the API response is rounded. Only shown on the **1h** timeframe — `refreshQuadrantGamma()` clears both series (`setData([])`) when `INTERVAL !== '1h'`, and `setTf()` calls it on every timeframe switch. Net = buyer + seller per quadrant (seller is already negative, per `portfolio_gamma`'s direction sign) — no backfill, starts empty and grows one point per hour as `dankbit.quadrant.gamma`'s cron runs
+- Footer legend (`#dz-legend`, fixed below the status line): black "S/D", red "Tie-out", violet "Gamma Extrema", blue "Net Call Gamma", orange "Net Put Gamma"
 - Footer status shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`; trade count = all active trades up to and including monthly expiry (from monthly endpoint)
 
 ## Odoo Addon (`my_addons/dankbit/`)
@@ -76,11 +77,12 @@ The addon depends only on `website`. Key components:
 
 **Models:**
 - `dankbit.trade` — Core model. Fields map directly to Deribit trade fields. `strike` and `option_type` are computed from `name` (instrument name like `BTC-29NOV24-98000-P`). `days_to_expiry` is UTC-safe. `get_hours_to_expiry()` returns continuous time used in Black-Scholes.
+- `dankbit.quadrant.gamma` — Hourly snapshot of dollar gamma (Γ × S²) split into 4 quadrants (buyer/seller × call/put) per asset, computed from the trailing 24h of active-expiry trades at the current index price. `compute_snapshot()` is the cron entry point (BTC then ETH, one row per asset per run); skips creating a row for an asset if the index price fetch fails, rather than persisting a misleading zero.
 - `res.config.settings` extension — Chart price ranges, refresh interval, Deribit cache TTL, weekly/monthly expiries for BTC and ETH.
 
 **Controllers (`main.py`):**
-- PNG routes: `/<instrument>`, `/<instrument>/<hours>`, `/<instrument>/D<days>`, `/i/<instrument>`
-- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/delta-zero-daily2/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`
+- PNG routes: `/<instrument>`, `/<instrument>/<hours>`, `/<instrument>/D<days>`, `/i/<instrument>`, `/<instrument>/s` (slideshow of hours_list `[0, 4, 8, 12, 24]`)
+- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/delta-zero-daily2/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`, `/api/quadrant-gamma/<asset>`
 - TradingView page: `/chart/<asset>` (reads weekly expiry from settings, returns 404 for unconfigured assets)
 - Key helpers:
   - `find_gamma_peaks(STs, gamma_curve, min_fraction)` — local maxima of the gamma curve
@@ -96,11 +98,14 @@ The addon depends only on `website`. Key components:
 - `weekly_expiry`, `monthly_expiry` — BTC expiry strings (e.g. `BTC-4JUL26`)
 - `eth_weekly_expiry`, `eth_monthly_expiry` — ETH expiry strings (e.g. `ETH-4JUL26`)
 
-**Scheduled crons (data/ir_cron.xml):**
-- Daily: `get_last_trades()` — ensures no trades were missed (e.g. during brief downtime)
+**Scheduled crons (data/ir_cron.xml, all `active=False` by default — activate manually post-install):**
+- Every minute: `get_last_trades()` — ensures no trades were missed (e.g. during brief downtime)
 - Daily: `_delete_expired_trades()` — archives expired trades
+- Hourly: `compute_snapshot()` (on `dankbit.quadrant.gamma`) — snapshots the 4 quadrant-gamma metrics for BTC and ETH from the last 24h of trades
 
 **Caching:** `trade.py` uses a module-level `_DERIBIT_CACHE` dict (key → `{ts, value}`) for Deribit index price and instrument lookups. TTL is configurable via settings (`deribit_cache_ttl`, default 300s).
+
+**Backend menu:** `Dankbit` root menu (`trade_views.xml`) with two items — `Trades` (`dankbit.trade` list/form) and `Quadrant Gamma` (`quadrant_gamma_views.xml`, `dankbit.quadrant.gamma` list/form/search with BTC/ETH filters).
 
 ## WebSocket Service (`dankbit_ws_service/`)
 

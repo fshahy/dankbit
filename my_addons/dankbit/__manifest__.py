@@ -15,6 +15,7 @@
         "security/ir.model.access.csv",
         "views/res_config_settings_views.xml",
         "views/trade_views.xml",
+        "views/quadrant_gamma_views.xml",
         "views/dankbit_templates.xml",
         "wizard/plot_wizard_view.xml",
     ],
