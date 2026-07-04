@@ -55,18 +55,19 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
 1. **WebSocket (primary):** `dankbit_ws_service/dankbit_ws_batch.py` — connects to Deribit, authenticates, fetches all BTC+ETH option instruments, subscribes to `trades.<instrument>.raw` channels in chunks of 400, inserts rows directly into PostgreSQL with `ON CONFLICT IGNORE` on `deribit_trade_identifier`.
 2. **REST backfill:** `Trade.get_last_trades()` — runs daily via cron; ensures no trades were missed by paging through the last few days of Deribit REST API history.
 
-**PNG chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate all trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG via matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). Overlaid lines: gamma peaks (dashed black), gamma=0 crossings (solid black). The `/i/<instrument>` route additionally overlays a delta=0 line (green).
+**PNG chart rendering:** Per-expiry routes like `/BTC-7MAY26` aggregate all trades for that expiry, compute a Black-Scholes portfolio delta and dollar-gamma (GEX = Γ × S²) curve, and return a PNG via matplotlib's Agg backend (`Figure + FigureCanvas`, never `pyplot` — server-safe). Overlaid lines: gamma peaks and bottoms (dashed black), delta=0 crossings (solid — green for "supply" [delta negative below, positive above], red for "demand" [delta positive below, negative above]).
 
-**TradingView chart:** `/chart/BTC` and `/chart/ETH` serve a Lightweight Charts v4 page with live KuCoin spot candles (proxied server-side) and price lines refreshed on `dankbit.refresh_interval`:
-- Delta=0 lines (5 sets) — each a single `createPriceLine`, `lineWidth: 1`, `lineStyle: Solid`:
-  - **Daily 24H** (orange) — nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily/<asset>`
-  - **Daily+1 24H** (yellow) — second nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily2/<asset>`
-  - **Weekly** (green) — sourced from `/api/delta-zero/<instrument>`
-  - **Monthly** (blue) — sourced from `/api/delta-zero/<monthly-instrument>`
-  - **All** (black) — all active expiries; sourced from `/api/delta-zero-all/<asset>`
+**TradingView chart:** `/chart/BTC` and `/chart/ETH` serve a Lightweight Charts v4 page with live Deribit perpetual futures candles (proxied server-side) and price lines refreshed on `dankbit.refresh_interval`:
+- Delta=0 lines (5 sets) — each a single `createPriceLine`, `lineWidth: 1`, `lineStyle: Solid`. Color is by crossing type, not by set: **black** ("S/D" in the legend) for "supply" (delta negative below, positive above), **red** ("Tie-out" in the legend) for "demand" (delta positive below, negative above — the important case). Set identity is shown via the line's `title` only:
+  - **Daily 24H** — nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily/<asset>`
+  - **Daily+1 24H** — second nearest active expiry, last 24 h of trades; sourced from `/api/delta-zero-daily2/<asset>`
+  - **Weekly** — sourced from `/api/delta-zero/<instrument>`
+  - **Monthly** — sourced from `/api/delta-zero/<monthly-instrument>`
+  - **All** — all active expiries; sourced from `/api/delta-zero-all/<asset>`
   - Midpoint line when exactly 2 crossings: black `LargeDashed`, `lineWidth: 1`, title `Middle <Set>`
-- Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`
-- Footer shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`; trade count = all active trades up to and including monthly expiry (from monthly endpoint)
+- Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`; title suffix is `∧` for peaks and `∨` for bottoms (e.g. `Weekly ∧`, `Monthly ∨`)
+- Footer legend (`#dz-legend`, fixed below the status line): black "S/D", red "Tie-out", violet "Gamma Extrema"
+- Footer status shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`; trade count = all active trades up to and including monthly expiry (from monthly endpoint)
 
 ## Odoo Addon (`my_addons/dankbit/`)
 
@@ -83,7 +84,6 @@ The addon depends only on `website`. Key components:
 - Key helpers:
   - `find_gamma_peaks(STs, gamma_curve, min_fraction)` — local maxima of the gamma curve
   - `find_gamma_bottoms(STs, gamma_curve, min_fraction)` — local minima of the gamma curve
-  - `find_gamma_zero_crossings(STs, gamma_curve)` — linear interpolation for gamma=0 crossings
 - `delta.py` / `gamma.py` — Pure Black-Scholes functions. Dollar gamma is `Γ × S²`. No side effects.
 - `options.py` — `OptionStrat` class. Accumulates legs, then `plot()` returns a matplotlib `Figure`. Uses Agg backend; do not import `pyplot` here.
 

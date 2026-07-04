@@ -120,14 +120,36 @@ class ChartController(http.Controller):
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
-        for px in self.find_gamma_zero_crossings(STs, market_gammas):
-            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+        for px, gval in self.find_gamma_bottoms(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
             d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
             d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
-            y = 0.04 if d_norm > 0.5 else 0.96
+
+            # pick the y fraction furthest from both curves
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
+
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                demand = d_arr[i] > 0
+                color = "red" if demand else "green"
+                ax.axvline(x=px, color=color, linewidth=1.2, linestyle="-", alpha=0.8)
+                g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
+                y = 0.04 if g_norm > 0.5 else 0.96
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color=color,
+                        fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                        rotation=90)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -246,14 +268,36 @@ class ChartController(http.Controller):
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
-        for px in self.find_gamma_zero_crossings(STs, market_gammas):
-            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+        for px, gval in self.find_gamma_bottoms(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            # normalised positions of gamma and delta at this x (0=bottom, 1=top of axes)
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
             d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
             d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
-            y = 0.04 if d_norm > 0.5 else 0.96
+
+            # pick the y fraction furthest from both curves
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
+
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                demand = d_arr[i] > 0
+                color = "red" if demand else "green"
+                ax.axvline(x=px, color=color, linewidth=1.2, linestyle="-", alpha=0.8)
+                g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
+                y = 0.04 if g_norm > 0.5 else 0.96
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color=color,
+                        fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                        rotation=90)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -385,24 +429,33 @@ class ChartController(http.Controller):
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
-        for px in self.find_gamma_zero_crossings(STs, market_gammas):
-            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+        for px, gval in self.find_gamma_bottoms(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
             d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
             d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
-            y = 0.04 if d_norm > 0.5 else 0.96
+
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
+
 
         for i in range(len(d_arr) - 1):
             if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
                 continue
             if d_arr[i] * d_arr[i + 1] < 0:
                 px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
-                ax.axvline(x=px, color="green", linewidth=1.2, linestyle="-", alpha=0.8)
+                demand = d_arr[i] > 0
+                color = "red" if demand else "green"
+                ax.axvline(x=px, color=color, linewidth=1.2, linestyle="-", alpha=0.8)
                 g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
                 y = 0.04 if g_norm > 0.5 else 0.96
-                ax.text(px, y, f"${px:,.0f}", transform=trans, color="green",
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color=color,
                         fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                         rotation=90)
 
@@ -523,14 +576,34 @@ class ChartController(http.Controller):
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
 
-        for px in self.find_gamma_zero_crossings(STs, market_gammas):
-            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="-", alpha=0.8)
+        for px, gval in self.find_gamma_bottoms(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
             d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
             d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
-            y = 0.04 if d_norm > 0.5 else 0.96
+
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
             ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
                     fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
                     rotation=90)
+
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                demand = d_arr[i] > 0
+                color = "red" if demand else "green"
+                ax.axvline(x=px, color=color, linewidth=1.2, linestyle="-", alpha=0.8)
+                g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
+                y = 0.04 if g_norm > 0.5 else 0.96
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color=color,
+                        fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                        rotation=90)
 
         _leg = ax.get_legend()
         if _leg:
@@ -621,21 +694,6 @@ class ChartController(http.Controller):
                 extrema.append((float(STs[i]), float(g[i])))
 
         return extrema
-
-    def find_gamma_zero_crossings(self, STs, gamma_curve):
-        STs = np.asarray(STs, dtype=float)
-        g = np.asarray(gamma_curve, dtype=float)
-
-        crossings = []
-        for i in range(len(g) - 1):
-            if not (np.isfinite(g[i]) and np.isfinite(g[i + 1])):
-                continue
-            if g[i] * g[i + 1] < 0:
-                # linear interpolation to the exact zero
-                px = STs[i] - g[i] * (STs[i + 1] - STs[i]) / (g[i + 1] - g[i])
-                crossings.append(float(px))
-
-        return crossings
 
     # ------------------------------------------------------------------
     # JSON API endpoints
