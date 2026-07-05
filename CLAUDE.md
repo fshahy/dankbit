@@ -70,9 +70,9 @@ Deribit WS API ──► dankbit_ws (Python asyncio) ──► PostgreSQL
   - **Monthly** — sourced from `/api/delta-zero/<monthly-instrument>`
   - **All** — all active expiries; sourced from `/api/delta-zero-all/<asset>`
   - Midpoint lines, black `LargeDashed`, `lineWidth: 1`: with exactly 2 crossings, a single unnumbered `Middle <Set>`; with N>2 crossings, N-1 lines between each consecutive sorted pair, titled `Middle <Set> 1`, `Middle <Set> 2`, ... (0 or 1 crossings draw none)
-- Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`; title suffix is `∧` for peaks and `∨` for bottoms (e.g. `Weekly ∧`, `Monthly ∨`)
+- Gamma peak/bottom lines: Weekly (lineWidth 2) and Monthly (lineWidth 1) — violet, sourced from `/api/gamma-levels/<instrument>`; title suffix is `∧` for peaks and `∨` for bottoms (e.g. `Weekly ∧`, `Monthly ∨`). `drawGammaLines(data, lineStore, lineWidth, prefix, color)` takes an explicit `color` (defaults to `'violet'`). **Daily 24H** (title, lineWidth 2, **orange** — the one exception to the violet convention; e.g. `Daily 24H ∧`) is a third set with its own selection logic — tomorrow's exact calendar expiry (like the `Daily` delta=0 set) but filtered to the last 24h of trades (like the `24H` delta=0 sets), sourced from `/api/gamma-levels-daily/<asset>`; no Daily+1 counterpart
 - Quadrant Gamma lines (2) — `Net Call Gamma` (`#1565c0`) and `Net Put Gamma` (`#e65100`), `addLineSeries` on their own `priceScaleId: 'qg'`, confined to a bottom panel via `scaleMargins: { top: 0.8, bottom: 0 }` — a separate scale from candles, so the axis label shows the real (unrescaled) gamma value, and dragging/zooming the main candle price axis doesn't affect this panel (or vice versa); the time axis is always shared regardless, so horizontal scroll/pan stays in sync. Real values are also in `/api/quadrant-gamma/<asset>`. The endpoint truncates each `computed_at` to the hour (minutes/seconds zeroed) before building `"t"`, and collapses any same-hour duplicates to the latest row — the stored `computed_at` values themselves are left untouched, only the API response is rounded. Only shown on the **1h** timeframe — `refreshQuadrantGamma()` clears both series (`setData([])`) when `INTERVAL !== '1h'`, and `setTf()` calls it on every timeframe switch. Net = buyer + seller per quadrant (seller is already negative, per `portfolio_gamma`'s direction sign) — no backfill, starts empty and grows one point per hour as `dankbit.quadrant.gamma`'s cron runs
-- Footer legend (`#dz-legend`, fixed below the status line): black "S/D", red "Tie-out", violet "Gamma Extrema", blue "Net Call Gamma", orange "Net Put Gamma"
+- Footer legend (`#dz-legend`, fixed below the status line): black "S/D", red "Tie-out", violet "Gamma Extrema", orange (CSS `orange`, distinct from Net Put Gamma's `#e65100`) "Daily Extrema", blue "Net Call Gamma", orange (`#e65100`) "Net Put Gamma"
 - Footer status shows: `<daily-expiry>  ·  <weekly-expiry>  ·  <monthly-expiry>  ·  N trades  ·  HH:MM:SS`; trade count = all active trades up to and including monthly expiry (from monthly endpoint)
 
 ## Odoo Addon (`my_addons/dankbit/`)
@@ -86,7 +86,7 @@ The addon depends only on `website`. Key components:
 
 **Controllers (`main.py`):**
 - PNG routes: `/<instrument>`, `/<instrument>/<hours>`, `/<instrument>/D<days>`, `/i/<instrument>`, `/<instrument>/s` (slideshow of hours_list `[0, 4, 8, 12, 24]`)
-- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/delta-zero-daily2/<asset>`, `/api/delta-zero-tomorrow/<asset>`, `/api/delta-zero-day-after-tomorrow/<asset>`, `/api/gamma-levels/<instrument>`, `/api/klines/<asset>`, `/api/quadrant-gamma/<asset>`
+- JSON API: `/api/delta-zero/<instrument>`, `/api/delta-zero-all/<asset>`, `/api/delta-zero-daily/<asset>`, `/api/delta-zero-daily2/<asset>`, `/api/delta-zero-tomorrow/<asset>`, `/api/delta-zero-day-after-tomorrow/<asset>`, `/api/gamma-levels/<instrument>`, `/api/gamma-levels-daily/<asset>`, `/api/klines/<asset>`, `/api/quadrant-gamma/<asset>`
   - `_delta_zero_for_calendar_day(asset, days_ahead)` — shared helper behind the tomorrow/day-after-tomorrow endpoints; targets the expiry at exactly `now + days_ahead` days (08:00 UTC), exact-match on `expiration`, no trade-time filter
 - TradingView page: `/chart/<asset>` (reads weekly expiry from settings, returns 404 for unconfigured assets)
 - Key helpers:
@@ -138,6 +138,7 @@ Query params for PNG routes: `from_price`, `to_price` (price range), `width`, `h
 - Berlin timezone applied via `berlinOffset` computed from `Intl` API
 - Timeframe buttons: 1m / 1h (default) — visible windows: 1m=1d, 1h=30d; Deribit resolution: 1m→1, 1h→60
 - Ruler tool: click twice on chart to measure price-to-price percentage
+- Crosshair price label (`crosshair.horzLine.labelBackgroundColor`) is set to blue — the library default (`#131722`, near-black) was indistinguishable from the black `axisLabelColor` used on every indicator price line
 - Do **not** change `title:` values in `createPriceLine()` calls — the user maintains these manually
 
 ## Odoo Gotchas

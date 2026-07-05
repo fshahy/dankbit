@@ -218,7 +218,7 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma</div>
+				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:orange;">■</span> Daily Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('1m')">1m</button>
 					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
@@ -241,6 +241,7 @@
 					const DATDZ_URL        = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
+					const GL_D_URL         = '/api/gamma-levels-daily/' + ASSET;
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
 					let   INTERVAL         = '1h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
@@ -256,7 +257,7 @@
 						width: window.innerWidth, height: window.innerHeight,
 						layout: { background: { type: 'solid', color: '#ffffff' }, textColor: '#333333' },
 						grid: { vertLines: { color: '#e8e8e8' }, horzLines: { color: '#e8e8e8' } },
-						crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
 						rightPriceScale: { borderColor: '#cccccc' },
 						timeScale: { borderColor: '#cccccc', timeVisible: true, secondsVisible: false },
 						localization: {
@@ -294,6 +295,7 @@
 					}
 					let weeklyGammaLines = [];
 					let monthlyGammaLines = [];
+					let dailyGammaLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -520,19 +522,19 @@
 						}
 					}
 
-					function drawGammaLines(data, lineStore, lineWidth, prefix) {
+					function drawGammaLines(data, lineStore, lineWidth, prefix, color = 'violet') {
 						lineStore.forEach(l => series.removePriceLine(l));
 						lineStore.length = 0;
 						(data.peaks || []).forEach(price => {
 							lineStore.push(series.createPriceLine({
-								price, color: 'violet', lineWidth,
+								price, color, lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∧',
 							}));
 						});
 						(data.bottoms || []).forEach(price => {
 							lineStore.push(series.createPriceLine({
-								price, color: 'violet', lineWidth,
+								price, color, lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∨',
 							}));
@@ -541,13 +543,18 @@
 
 					async function refreshWeeklyGamma() {
 						const data = await (await fetch(GL_W_URL)).json();
-						drawGammaLines(data, weeklyGammaLines, 2, 'Weekly');
+						drawGammaLines(data, weeklyGammaLines, 2, 'Weekly', 'violet');
 					}
 
 					async function refreshMonthlyGamma() {
 						if (!GL_M_URL) return;
 						const data = await (await fetch(GL_M_URL)).json();
-						drawGammaLines(data, monthlyGammaLines, 1, 'Monthly');
+						drawGammaLines(data, monthlyGammaLines, 1, 'Monthly', 'violet');
+					}
+
+					async function refreshDailyGamma() {
+						const data = await (await fetch(GL_D_URL)).json();
+						drawGammaLines(data, dailyGammaLines, 2, 'Daily 24H', 'orange');
 					}
 
 					async function refreshQuadrantGamma() {
@@ -603,7 +610,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshDailyDeltaZero(); await refreshDaily2DeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshDailyDeltaZero(); await refreshDaily2DeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshDailyGamma(); await refreshQuadrantGamma(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -633,6 +640,7 @@
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
+					setInterval(refreshDailyGamma, REFRESH);
 					setInterval(refreshQuadrantGamma, REFRESH);
 				//]]></script>
 			</body>
