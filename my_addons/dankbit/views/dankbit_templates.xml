@@ -237,6 +237,8 @@
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
 					const DDZ_URL          = '/api/delta-zero-daily/' + ASSET;
 					const DDZ2_URL         = '/api/delta-zero-daily2/' + ASSET;
+					const TDZ_URL          = '/api/delta-zero-tomorrow/' + ASSET;
+					const DATDZ_URL        = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
@@ -282,6 +284,8 @@
 					let allLines     = [];
 					let dailyLines   = [];
 					let daily2Lines  = [];
+					let tomorrowLines      = [];
+					let dayAfterTomorrowLines = [];
 					let dailyExpiry  = '';
 
 					function clearLines(arr) {
@@ -336,14 +340,22 @@
 						zeros.forEach(item => priceLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, title: 'Weekly',
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Weekly',
 						})));
 						if (zeros.length === 2) {
 							priceLines.push(series.createPriceLine({
 								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, title: 'Middle Weekly',
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Weekly',
 							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								priceLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Weekly ' + (i + 1),
+								}));
+							}
 						}
 					}
 
@@ -355,14 +367,22 @@
 						zeros.forEach(item => monthlyLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, title: 'Monthly',
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Monthly',
 						})));
 						if (zeros.length === 2) {
 							monthlyLines.push(series.createPriceLine({
 								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, title: 'Middle Monthly',
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Monthly',
 							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								monthlyLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Monthly ' + (i + 1),
+								}));
+							}
 						}
 						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
 						const expiries = [dailyExpiry, INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
@@ -376,14 +396,22 @@
 						zeros.forEach(item => allLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, title: 'All',
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'All',
 						})));
 						if (zeros.length === 2) {
 							allLines.push(series.createPriceLine({
 								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, title: 'Middle All',
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle All',
 							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								allLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle All ' + (i + 1),
+								}));
+							}
 						}
 					}
 
@@ -395,14 +423,22 @@
 						zeros.forEach(item => dailyLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, title: 'Daily 24H',
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily 24H',
 						})));
 						if (zeros.length === 2) {
 							dailyLines.push(series.createPriceLine({
 								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, title: 'Middle Daily',
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily 24H',
 							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								dailyLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily 24H ' + (i + 1),
+								}));
+							}
 						}
 					}
 
@@ -413,14 +449,74 @@
 						zeros.forEach(item => daily2Lines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, title: 'Daily+1 24H',
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1 24H',
 						})));
 						if (zeros.length === 2) {
 							daily2Lines.push(series.createPriceLine({
 								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, title: 'Middle Daily+1',
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 24H',
 							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								daily2Lines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 24H ' + (i + 1),
+								}));
+							}
+						}
+					}
+
+					async function refreshTomorrowDeltaZero() {
+						const data = await (await fetch(TDZ_URL)).json();
+						clearLines(tomorrowLines);
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily',
+						})));
+						if (zeros.length === 2) {
+							tomorrowLines.push(series.createPriceLine({
+								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily',
+							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								tomorrowLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily ' + (i + 1),
+								}));
+							}
+						}
+					}
+
+					async function refreshDayAfterTomorrowDeltaZero() {
+						const data = await (await fetch(DATDZ_URL)).json();
+						clearLines(dayAfterTomorrowLines);
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1',
+						})));
+						if (zeros.length === 2) {
+							dayAfterTomorrowLines.push(series.createPriceLine({
+								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.LargeDashed,
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1',
+							}));
+						} else if (zeros.length > 2) {
+							for (let i = 0; i < zeros.length - 1; i++) {
+								dayAfterTomorrowLines.push(series.createPriceLine({
+									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
+									lineStyle: LightweightCharts.LineStyle.LargeDashed,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 ' + (i + 1),
+								}));
+							}
 						}
 					}
 
@@ -431,14 +527,14 @@
 							lineStore.push(series.createPriceLine({
 								price, color: 'violet', lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: prefix + ' ∧',
+								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∧',
 							}));
 						});
 						(data.bottoms || []).forEach(price => {
 							lineStore.push(series.createPriceLine({
 								price, color: 'violet', lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, title: prefix + ' ∨',
+								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∨',
 							}));
 						});
 					}
@@ -489,13 +585,13 @@
 							rulerLines.push(series.createPriceLine({
 								price, color: '#555', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Dashed,
-								axisLabelVisible: true, title: '①',
+								axisLabelVisible: true, axisLabelColor: 'black', title: '①',
 							}));
 						} else {
 							rulerLines.push(series.createPriceLine({
 								price, color: '#555', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Dashed,
-								axisLabelVisible: true, title: '②',
+								axisLabelVisible: true, axisLabelColor: 'black', title: '②',
 							}));
 							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
 							const sign = pct >= 0 ? '+' : '';
@@ -507,7 +603,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshDailyDeltaZero(); await refreshDaily2DeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshDailyDeltaZero(); await refreshDaily2DeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -533,6 +629,8 @@
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshDailyDeltaZero, REFRESH);
 					setInterval(refreshDaily2DeltaZero, REFRESH);
+					setInterval(refreshTomorrowDeltaZero, REFRESH);
+					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
 					setInterval(refreshQuadrantGamma, REFRESH);

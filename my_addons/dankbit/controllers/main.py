@@ -1093,6 +1093,88 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    def _delta_zero_for_calendar_day(self, asset, days_ahead):
+        """Delta=0 for the expiry landing exactly `days_ahead` calendar days from now
+        (Deribit daily options settle at 08:00 UTC), using all trades for that expiry."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return {"error": "Unknown asset"}
+
+        expiry_dt = (
+            datetime.now(timezone.utc).replace(hour=8, minute=0, second=0, microsecond=0)
+            + timedelta(days=days_ahead)
+        )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND active = TRUE
+              AND expiration = %s
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', expiry_dt))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        return {
+            "asset": asset,
+            "expiry": expiry_dt.strftime("%d%b%y").upper(),
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_tomorrow_json(self, asset):
+        payload = self._delta_zero_for_calendar_day(asset, 1)
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/delta-zero-day-after-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_day_after_tomorrow_json(self, asset):
+        payload = self._delta_zero_for_calendar_day(asset, 2)
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
     def gamma_levels_json(self, instrument):
         parts = instrument.upper().split("-", 1)
