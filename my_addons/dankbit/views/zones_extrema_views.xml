@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_zones_extrema_view_form" model="ir.ui.view">
+        <field name="name">dankbit_zones_extrema.view.form</field>
+        <field name="model">dankbit.zones.extrema</field>
+        <field name="arch" type="xml">
+            <form string="Zones Extrema">
+                <sheet>
+                    <group>
+                        <field name="asset" />
+                        <field name="computed_at" />
+                        <field name="index_price" />
+                        <field name="short_max_price" />
+                        <field name="long_min_price" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_zones_extrema_view_list" model="ir.ui.view">
+        <field name="name">dankbit_zones_extrema.view.list</field>
+        <field name="model">dankbit.zones.extrema</field>
+        <field name="arch" type="xml">
+            <list string="Zones Extrema">
+                <field name="asset" />
+                <field name="computed_at" />
+                <field name="index_price" />
+                <field name="short_max_price" />
+                <field name="long_min_price" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_zones_extrema_view_search" model="ir.ui.view">
+        <field name="name">dankbit.zones.extrema.view.search</field>
+        <field name="model">dankbit.zones.extrema</field>
+        <field name="arch" type="xml">
+            <search string="Search Zones Extrema">
+                <field name="asset" string="Asset"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('asset', '=', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('asset', '=', 'ETH')]"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_zones_extrema_action" model="ir.actions.act_window">
+        <field name="name">Zones Extrema</field>
+        <field name="res_model">dankbit.zones.extrema</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_zones_extrema_menu" name="Zones Extrema"
+        action="dankbit_zones_extrema_action"
+        parent="dankbit_root_menu"
+        sequence="50"/>
+</odoo>

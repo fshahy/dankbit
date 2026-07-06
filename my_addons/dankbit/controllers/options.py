@@ -153,6 +153,37 @@ class OptionStrat:
         # self.add_dankbit_signature(ax)
         return fig, ax
 
+    # =========================================================
+    # ZONES PLOT — separate Longs (buy-side) vs Shorts (sell-side)
+    # payoff curves, server-safe, no pyplot
+    # =========================================================
+    def plot_zones(self, longs_curve, shorts_curve, index_price, title="Zones", width=18, height=8):
+        fig = Figure(figsize=(width, height), dpi=120)
+        FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+
+        ax.tick_params(axis="x", labelrotation=90)
+
+        if self.name.startswith("BTC"):
+            ax.xaxis.set_major_locator(MultipleLocator(1000))
+        elif self.name.startswith("ETH"):
+            ax.xaxis.set_major_locator(MultipleLocator(100))
+
+        ax.grid(True)
+        ax.set_xlim(float(self.STs.min()), float(self.STs.max()))
+
+        ax.plot(self.STs, longs_curve, color="green", label="Longs")
+        ax.plot(self.STs, shorts_curve, color="red", label="Shorts")
+        ax.axhline(0, color="black", linewidth=1)
+        ax.axvline(x=index_price, color="blue")
+
+        now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
+        ax.set_title(f"{self.name} | {now} UTC | {title}")
+        ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
+        ax.legend(loc="upper right", framealpha=0.85)
+
+        return fig, ax
+
     # =====================================================
     # Signature (server-safe: ensure canvas exists)
     # =====================================================

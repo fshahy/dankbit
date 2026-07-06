@@ -182,6 +182,101 @@ class ChartController(http.Controller):
             }
         )
 
+    @http.route("/<string:instrument>/zones", type="http", auth="public", website=True)
+    def chart_png_zones(self, instrument):
+        icp = request.env["ir.config_parameter"].sudo()
+
+        from_price = 0
+        to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+
+        midnight_utc = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        domain = [
+            ("name", "=ilike", f"{instrument}-%"),
+            ("expiration", ">=", datetime.now()),
+            ("deribit_ts", ">=", midnight_utc),
+        ]
+        trades = request.env["dankbit.trade"].search(domain=domain)
+
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
+
+        def build_curves(fp, tp, st):
+            longs = options.OptionStrat(instrument, index_price, fp, tp, st)
+            shorts = options.OptionStrat(instrument, index_price, fp, tp, st)
+            l_count = s_count = 0
+            for trade in trades:
+                if trade.direction == "buy":
+                    l_count += 1
+                    if trade.option_type == "call":
+                        longs.long_call(trade.strike, trade.price * trade.index_price)
+                    elif trade.option_type == "put":
+                        longs.long_put(trade.strike, trade.price * trade.index_price)
+                elif trade.direction == "sell":
+                    s_count += 1
+                    if trade.option_type == "call":
+                        shorts.short_call(trade.strike, trade.price * trade.index_price)
+                    elif trade.option_type == "put":
+                        shorts.short_put(trade.strike, trade.price * trade.index_price)
+            return longs, shorts, l_count, s_count
+
+        longs_obj, shorts_obj, long_count, short_count = build_curves(from_price, to_price, steps)
+
+        # Zoom to $2000 either side of where the Longs/Shorts curves cross —
+        # the configured from/to price range is far wider than the relevant area.
+        STs = longs_obj.STs
+        diff = longs_obj.payoffs - shorts_obj.payoffs
+        crossings = []
+        for i in range(len(diff) - 1):
+            if not (np.isfinite(diff[i]) and np.isfinite(diff[i + 1])):
+                continue
+            if diff[i] * diff[i + 1] < 0:
+                px = float(STs[i] - diff[i] * (STs[i + 1] - STs[i]) / (diff[i + 1] - diff[i]))
+                crossings.append(px)
+
+        if crossings:
+            zoom_from = min(crossings) - 2000
+            zoom_to = max(crossings) + 2000
+            longs_obj, shorts_obj, long_count, short_count = build_curves(zoom_from, zoom_to, steps)
+
+        fig, ax = longs_obj.plot_zones(
+            longs_obj.payoffs, shorts_obj.payoffs, index_price, title="Zones"
+        )
+
+        ax.text(
+            0.01, 0.02,
+            f"{long_count} longs · {short_count} shorts (since 00:00 UTC)",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        del fig
+
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_name": "Zones",
+                "plot_title": f"{instrument} - Zones",
+                "refresh_interval": refresh_interval,
+                "image_b64": image_b64,
+            }
+        )
+
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
     def chart_png_all(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
@@ -1073,6 +1168,45 @@ class ChartController(http.Controller):
         payload = {
             "asset": asset,
             "quadrant_gamma": series,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def zones_extrema_json(self, asset):
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT computed_at, index_price, short_max_price, long_min_price
+            FROM dankbit_zones_extrema
+            WHERE asset = %s
+              AND computed_at >= NOW() - INTERVAL '30 days'
+            ORDER BY computed_at ASC
+        """, (asset,))
+        rows = cr.fetchall()
+
+        series = []
+        for computed_at, index_price, short_max_price, long_min_price in rows:
+            ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
+            series.append({
+                "t": int(ts.timestamp() * 1000),
+                "index_price": float(index_price or 0.0),
+                "short_max_price": float(short_max_price or 0.0),
+                "long_min_price": float(long_min_price or 0.0),
+            })
+
+        payload = {
+            "asset": asset,
+            "zones_extrema": series,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         return request.make_response(
