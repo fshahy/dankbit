@@ -218,10 +218,11 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:orange;">■</span> Daily Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma</div>
+				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma</div>
 				<div id="tf-bar">
-					<button class="tf-btn" onclick="setTf('1m')">1m</button>
 					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
+					<button class="tf-btn" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
@@ -235,13 +236,8 @@
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
-					const DDZ_URL          = '/api/delta-zero-daily/' + ASSET;
-					const DDZ2_URL         = '/api/delta-zero-daily2/' + ASSET;
-					const TDZ_URL          = '/api/delta-zero-tomorrow/' + ASSET;
-					const DATDZ_URL        = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
-					const GL_D_URL         = '/api/gamma-levels-daily/' + ASSET;
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
 					let   INTERVAL         = '1h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
@@ -283,11 +279,6 @@
 					let priceLines   = [];
 					let monthlyLines = [];
 					let allLines     = [];
-					let dailyLines   = [];
-					let daily2Lines  = [];
-					let tomorrowLines      = [];
-					let dayAfterTomorrowLines = [];
-					let dailyExpiry  = '';
 
 					function clearLines(arr) {
 						arr.forEach(pl => series.removePriceLine(pl));
@@ -295,7 +286,6 @@
 					}
 					let weeklyGammaLines = [];
 					let monthlyGammaLines = [];
-					let dailyGammaLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -303,7 +293,7 @@
 						return { time: Math.floor(k.t / 1000) + berlinOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
-					const TF_WINDOW = { '1m': 1, '1h': 30 };
+					const TF_WINDOW = { '1h': 30, '4h': 90, '1d': 365 };
 
 					function applyVisibleRange() {
 						const days = TF_WINDOW[INTERVAL] || 21;
@@ -344,21 +334,6 @@
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'Weekly',
 						})));
-						if (zeros.length === 2) {
-							priceLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Weekly',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								priceLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Weekly ' + (i + 1),
-								}));
-							}
-						}
 					}
 
 					async function refreshMonthlyDeltaZero() {
@@ -371,23 +346,8 @@
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'Monthly',
 						})));
-						if (zeros.length === 2) {
-							monthlyLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Monthly',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								monthlyLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Monthly ' + (i + 1),
-								}));
-							}
-						}
 						const ts = data.generated_at ? new Date(data.generated_at).toLocaleTimeString() : '—';
-						const expiries = [dailyExpiry, INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
+						const expiries = [INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
 						setStatus(expiries + '  ·  ' + (data.trade_count || 0) + ' trades  ·  ' + ts);
 					}
 
@@ -400,143 +360,26 @@
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'All',
 						})));
-						if (zeros.length === 2) {
-							allLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle All',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								allLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle All ' + (i + 1),
-								}));
-							}
-						}
 					}
 
-					async function refreshDailyDeltaZero() {
-						const data = await (await fetch(DDZ_URL)).json();
-						dailyExpiry = data.expiry ? (ASSET + '-' + data.expiry) : '';
-						clearLines(dailyLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => dailyLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily 24H',
-						})));
-						if (zeros.length === 2) {
-							dailyLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily 24H',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								dailyLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily 24H ' + (i + 1),
-								}));
-							}
-						}
-					}
-
-					async function refreshDaily2DeltaZero() {
-						const data = await (await fetch(DDZ2_URL)).json();
-						clearLines(daily2Lines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => daily2Lines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1 24H',
-						})));
-						if (zeros.length === 2) {
-							daily2Lines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 24H',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								daily2Lines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 24H ' + (i + 1),
-								}));
-							}
-						}
-					}
-
-					async function refreshTomorrowDeltaZero() {
-						const data = await (await fetch(TDZ_URL)).json();
-						clearLines(tomorrowLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily',
-						})));
-						if (zeros.length === 2) {
-							tomorrowLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								tomorrowLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily ' + (i + 1),
-								}));
-							}
-						}
-					}
-
-					async function refreshDayAfterTomorrowDeltaZero() {
-						const data = await (await fetch(DATDZ_URL)).json();
-						clearLines(dayAfterTomorrowLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1',
-						})));
-						if (zeros.length === 2) {
-							dayAfterTomorrowLines.push(series.createPriceLine({
-								price: (zeros[0].price + zeros[1].price) / 2, color: 'black', lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.LargeDashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1',
-							}));
-						} else if (zeros.length > 2) {
-							for (let i = 0; i < zeros.length - 1; i++) {
-								dayAfterTomorrowLines.push(series.createPriceLine({
-									price: (zeros[i].price + zeros[i + 1].price) / 2, color: 'black', lineWidth: 1,
-									lineStyle: LightweightCharts.LineStyle.LargeDashed,
-									axisLabelVisible: true, axisLabelColor: 'black', title: 'Middle Daily+1 ' + (i + 1),
-								}));
-							}
-						}
-					}
 
 					function drawGammaLines(data, lineStore, lineWidth, prefix, color = 'violet') {
 						lineStore.forEach(l => series.removePriceLine(l));
 						lineStore.length = 0;
-						(data.peaks || []).forEach(price => {
+						(data.peaks || []).forEach(item => {
 							lineStore.push(series.createPriceLine({
-								price, color, lineWidth,
+								price: item.price, color, lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∧',
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: prefix + ' ∧ ' + (item.delta_positive ? 'Long Call' : 'Long Put'),
 							}));
 						});
-						(data.bottoms || []).forEach(price => {
+						(data.bottoms || []).forEach(item => {
 							lineStore.push(series.createPriceLine({
-								price, color, lineWidth,
+								price: item.price, color, lineWidth,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black', title: prefix + ' ∨',
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: prefix + ' ∨ ' + (item.delta_positive ? 'Short Put' : 'Short Call'),
 							}));
 						});
 					}
@@ -550,11 +393,6 @@
 						if (!GL_M_URL) return;
 						const data = await (await fetch(GL_M_URL)).json();
 						drawGammaLines(data, monthlyGammaLines, 1, 'Monthly', 'violet');
-					}
-
-					async function refreshDailyGamma() {
-						const data = await (await fetch(GL_D_URL)).json();
-						drawGammaLines(data, dailyGammaLines, 2, 'Daily 24H', 'orange');
 					}
 
 					async function refreshQuadrantGamma() {
@@ -610,7 +448,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshDailyDeltaZero(); await refreshDaily2DeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshDailyGamma(); await refreshQuadrantGamma(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -634,13 +472,8 @@
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
-					setInterval(refreshDailyDeltaZero, REFRESH);
-					setInterval(refreshDaily2DeltaZero, REFRESH);
-					setInterval(refreshTomorrowDeltaZero, REFRESH);
-					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
-					setInterval(refreshDailyGamma, REFRESH);
 					setInterval(refreshQuadrantGamma, REFRESH);
 				//]]></script>
 			</body>
