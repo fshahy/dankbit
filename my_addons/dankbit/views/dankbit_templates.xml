@@ -218,7 +218,7 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma &#160;&#160; <span class="swatch" style="color:#2e7d32;">■</span> Short Max Price &#160;&#160; <span class="swatch" style="color:#c62828;">■</span> Long Min Price</div>
+				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma &#160;&#160; <span class="swatch" style="color:#2e7d32;">■</span> Short Max Price &#160;&#160; <span class="swatch" style="color:#c62828;">■</span> Long Min Price &#160;&#160; <span class="swatch" style="color:black;">■</span> Daily 24H</div>
 				<div id="tf-bar">
 					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
 					<button class="tf-btn" onclick="setTf('4h')">4h</button>
@@ -236,6 +236,7 @@
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
+					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
@@ -280,12 +281,13 @@
 					// Plain price levels (not dollar amounts), so these live on the
 					// default/main price scale directly with the candles, not on the
 					// 'qg' dollar-gamma scale.
-					const shortMaxPriceSeries = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, title: 'Short Max Price' });
-					const longMinPriceSeries  = chart.addLineSeries({ color: '#c62828', lineWidth: 2, title: 'Long Min Price' });
+					const shortMaxPriceSeries = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const longMinPriceSeries  = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 
-					let priceLines   = [];
-					let monthlyLines = [];
-					let allLines     = [];
+					let priceLines    = [];
+					let monthlyLines  = [];
+					let allLines      = [];
+					let tomorrowLines = [];
 
 					function clearLines(arr) {
 						arr.forEach(pl => series.removePriceLine(pl));
@@ -367,6 +369,17 @@
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'All',
+						})));
+					}
+
+					async function refreshTomorrowDeltaZero() {
+						const data = await (await fetch(DZT_URL)).json();
+						clearLines(tomorrowLines);
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach(price => tomorrowLines.push(series.createPriceLine({
+							price, color: 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily 24H',
 						})));
 					}
 
@@ -468,7 +481,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -492,6 +505,7 @@
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
+					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
 					setInterval(refreshQuadrantGamma, REFRESH);

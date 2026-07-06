@@ -941,8 +941,12 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/delta-zero-next/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def delta_zero_next_json(self, asset):
+    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_tomorrow_json(self, asset):
+        """Delta=0 crossings for the specific expiry landing on calendar
+        tomorrow (UTC), restricted to trades from the trailing 24h — distinct
+        from /api/delta-zero-next, which used "nearest active expiry" (which
+        can still be *today's* not-yet-happened expiry) and all-time trades."""
         asset = asset.upper()
         icp = request.env["ir.config_parameter"].sudo()
         if asset.startswith("BTC"):
@@ -959,30 +963,19 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
-        cr = request.env.cr
-        cr.execute("""
-            SELECT MIN(expiration) FROM dankbit_trade
-            WHERE name ILIKE %s AND active = TRUE AND expiration >= NOW()
-        """, (f'%{asset}%',))
-        row = cr.fetchone()
-        if not row or not row[0]:
-            payload = {"asset": asset, "delta_zero": [], "trade_count": 0,
-                       "generated_at": datetime.now(timezone.utc).isoformat()}
-            return request.make_response(
-                json.dumps(payload),
-                headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-            )
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+        expiry_str = f"{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
 
-        nearest_expiry = row[0]
+        cr = request.env.cr
         cr.execute("""
             SELECT strike, option_type, direction, expiration,
                    SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
             FROM dankbit_trade
             WHERE name ILIKE %s
               AND active = TRUE
-              AND expiration = %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
             GROUP BY strike, option_type, direction, expiration
-        """, (f'%{asset}%', nearest_expiry))
+        """, (f'{asset}-{expiry_str}-%',))
         rows = cr.fetchall()
 
         agg_trades = [
@@ -1008,7 +1001,7 @@ class ChartController(http.Controller):
         index_price = request.env["dankbit.trade"].get_index_price(asset)
         payload = {
             "asset": asset,
-            "expiry": nearest_expiry.strftime("%d%b%y").upper(),
+            "expiry": expiry_str,
             "delta_zero": crossings,
             "index_price": index_price,
             "trade_count": trade_count,
