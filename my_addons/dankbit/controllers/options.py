@@ -240,3 +240,50 @@ class OptionStrat:
             family="monospace",
         )
         t.set_path_effects([path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")])
+
+
+def build_zone_curves(instrument_name, index_price, trades, from_price, to_price, steps):
+    """Build the Longs/Shorts OptionStrat curves from `trades` (any iterable of
+    objects with .direction/.option_type/.strike/.price/.index_price — an Odoo
+    recordset works directly), then re-center on the crossing-based ±$2000
+    zoom exactly as the live /<instrument>/zones PNG chart does. Falls back to
+    the wide [from_price, to_price] range if the curves never cross.
+
+    Shared by the /<instrument>/zones route (controllers/main.py) and
+    dankbit.zones.extrema's cron (models/zones_extrema.py) so the two can
+    never compute different extrema for the same trades — one implementation,
+    not two copies that could quietly drift apart."""
+    def build(fp, tp, st):
+        longs = OptionStrat(instrument_name, index_price, fp, tp, st)
+        shorts = OptionStrat(instrument_name, index_price, fp, tp, st)
+        for trade in trades:
+            if trade.direction == "buy":
+                if trade.option_type == "call":
+                    longs.long_call(trade.strike, trade.price * trade.index_price)
+                elif trade.option_type == "put":
+                    longs.long_put(trade.strike, trade.price * trade.index_price)
+            elif trade.direction == "sell":
+                if trade.option_type == "call":
+                    shorts.short_call(trade.strike, trade.price * trade.index_price)
+                elif trade.option_type == "put":
+                    shorts.short_put(trade.strike, trade.price * trade.index_price)
+        return longs, shorts
+
+    longs_obj, shorts_obj = build(from_price, to_price, steps)
+
+    STs = longs_obj.STs
+    diff = longs_obj.payoffs - shorts_obj.payoffs
+    crossings = []
+    for i in range(len(diff) - 1):
+        if not (np.isfinite(diff[i]) and np.isfinite(diff[i + 1])):
+            continue
+        if diff[i] * diff[i + 1] < 0:
+            px = float(STs[i] - diff[i] * (STs[i + 1] - STs[i]) / (diff[i + 1] - diff[i]))
+            crossings.append(px)
+
+    if crossings:
+        zoom_from = min(crossings) - 2000
+        zoom_to = max(crossings) + 2000
+        longs_obj, shorts_obj = build(zoom_from, zoom_to, steps)
+
+    return longs_obj, shorts_obj

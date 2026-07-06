@@ -212,46 +212,14 @@ class ChartController(http.Controller):
 
         index_price = request.env["dankbit.trade"].get_index_price(instrument)
 
-        def build_curves(fp, tp, st):
-            longs = options.OptionStrat(instrument, index_price, fp, tp, st)
-            shorts = options.OptionStrat(instrument, index_price, fp, tp, st)
-            l_count = s_count = 0
-            for trade in trades:
-                if trade.direction == "buy":
-                    l_count += 1
-                    if trade.option_type == "call":
-                        longs.long_call(trade.strike, trade.price * trade.index_price)
-                    elif trade.option_type == "put":
-                        longs.long_put(trade.strike, trade.price * trade.index_price)
-                elif trade.direction == "sell":
-                    s_count += 1
-                    if trade.option_type == "call":
-                        shorts.short_call(trade.strike, trade.price * trade.index_price)
-                    elif trade.option_type == "put":
-                        shorts.short_put(trade.strike, trade.price * trade.index_price)
-            return longs, shorts, l_count, s_count
-
-        longs_obj, shorts_obj, long_count, short_count = build_curves(from_price, to_price, steps)
-
-        # Zoom to $2000 either side of where the Longs/Shorts curves cross —
-        # the configured from/to price range is far wider than the relevant area.
-        STs = longs_obj.STs
-        diff = longs_obj.payoffs - shorts_obj.payoffs
-        crossings = []
-        for i in range(len(diff) - 1):
-            if not (np.isfinite(diff[i]) and np.isfinite(diff[i + 1])):
-                continue
-            if diff[i] * diff[i + 1] < 0:
-                px = float(STs[i] - diff[i] * (STs[i + 1] - STs[i]) / (diff[i + 1] - diff[i]))
-                crossings.append(px)
-
-        if crossings:
-            zoom_from = min(crossings) - 2000
-            zoom_to = max(crossings) + 2000
-            longs_obj, shorts_obj, long_count, short_count = build_curves(zoom_from, zoom_to, steps)
+        long_count = len(trades.filtered(lambda t: t.direction == "buy"))
+        short_count = len(trades.filtered(lambda t: t.direction == "sell"))
+        longs_obj, shorts_obj = options.build_zone_curves(
+            instrument, index_price, trades, from_price, to_price, steps
+        )
 
         fig, ax = longs_obj.plot_zones(
-            longs_obj.payoffs, shorts_obj.payoffs, index_price, title="Zones"
+            longs_obj.payoffs, shorts_obj.payoffs, index_price, title="Zones", width=4.5
         )
 
         ax.text(
