@@ -11,8 +11,8 @@
                         <field name="asset" />
                         <field name="computed_at" />
                         <field name="index_price" />
-                        <field name="short_max_price" />
-                        <field name="long_min_price" />
+                        <field name="top_intersection" />
+                        <field name="bottom_intersection" />
                     </group>
                 </sheet>
             </form>
@@ -27,8 +27,8 @@
                 <field name="asset" />
                 <field name="computed_at" />
                 <field name="index_price" />
-                <field name="short_max_price" />
-                <field name="long_min_price" />
+                <field name="top_intersection" />
+                <field name="bottom_intersection" />
             </list>
         </field>
     </record>

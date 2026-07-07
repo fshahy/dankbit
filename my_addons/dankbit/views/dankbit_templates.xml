@@ -64,10 +64,30 @@
 						max-width: 100vw;
 						height: auto;
 					}
+
+					.zone-info {
+						position: fixed;
+						top: 8px;
+						left: 12px;
+						font-family: sans-serif;
+						font-size: 14pt;
+						font-weight: bold;
+						color: #000;
+						background: rgba(255,255,255,0.88);
+						padding: 4px 10px;
+						border-radius: 4px;
+						z-index: 10;
+						user-select: text;
+					}
 				</style>
 			</head>
 
 			<body>
+				<div t-if="zone_info_lines" class="zone-info">
+					<t t-foreach="zone_info_lines" t-as="line">
+						<div><t t-esc="line"/></div>
+					</t>
+				</div>
 				<div class="wrap">
 					<img
 						t-att-src="'data:image/png;base64,%s' % image_b64"
@@ -209,7 +229,7 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
-				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma &#160;&#160; <span class="swatch" style="color:#2e7d32;">■</span> Short Max Price &#160;&#160; <span class="swatch" style="color:#c62828;">■</span> Long Min Price &#160;&#160; <span class="swatch" style="color:black;">■</span> Daily 24H</div>
+				<div id="dz-legend"><span class="swatch" style="color:black;">■</span> S/D &#160;&#160; <span class="swatch" style="color:red;">■</span> Tie-out &#160;&#160; <span class="swatch" style="color:violet;">■</span> Gamma Extrema &#160;&#160; <span class="swatch" style="color:#1565c0;">■</span> Net Call Gamma &#160;&#160; <span class="swatch" style="color:#e65100;">■</span> Net Put Gamma &#160;&#160; <span class="swatch" style="color:#fbc02d;">■</span> Zones Box</div>
 				<div id="tf-bar">
 					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
 					<button class="tf-btn" onclick="setTf('4h')">4h</button>
@@ -228,10 +248,12 @@
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
 					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
+					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
+					const ZB_URL           = '/api/zones-box/' + ASSET;
 					let   INTERVAL         = '1h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -272,13 +294,36 @@
 					// Plain price levels (not dollar amounts), so these live on the
 					// default/main price scale directly with the candles, not on the
 					// 'qg' dollar-gamma scale.
-					const shortMaxPriceSeries = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const longMinPriceSeries  = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+
+					// Zones boxes: filled rectangles marking the above-price and below-price
+					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
+					// fill (the "line" is a constant top price, filled down to a constant
+					// baseValue bottom price) to fake a bounded rectangle Lightweight Charts
+					// has no native primitive for.
+					const aboveBoxSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.5)', topFillColor2: 'rgba(251, 192, 45, 0.5)',
+						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.5)', bottomFillColor2: 'rgba(251, 192, 45, 0.5)',
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					const belowBoxSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.5)', topFillColor2: 'rgba(251, 192, 45, 0.5)',
+						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.5)', bottomFillColor2: 'rgba(251, 192, 45, 0.5)',
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					// addBaselineSeries only strokes its top edge; add a plain line series
+					// for the bottom edge so both edges get the same visible border.
+					const aboveBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const belowBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
 					let priceLines    = [];
 					let monthlyLines  = [];
 					let allLines      = [];
 					let tomorrowLines = [];
+					let dayAfterTomorrowLines = [];
 
 					function clearLines(arr) {
 						arr.forEach(pl => series.removePriceLine(pl));
@@ -324,6 +369,7 @@
 						await loadCandles();
 						await refreshQuadrantGamma();
 						await refreshZonesExtrema();
+						await refreshZonesBoxes();
 					}
 
 					async function refreshDeltaZero() {
@@ -374,6 +420,17 @@
 						})));
 					}
 
+					async function refreshDayAfterTomorrowDeltaZero() {
+						const data = await (await fetch(DZT2_URL)).json();
+						clearLines(dayAfterTomorrowLines);
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
+						zeros.forEach(price => dayAfterTomorrowLines.push(series.createPriceLine({
+							price, color: 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1 24H',
+						})));
+					}
+
 
 					function drawGammaLines(data, lineStore, lineWidth, prefix, color = 'violet') {
 						lineStore.forEach(l => series.removePriceLine(l));
@@ -421,14 +478,61 @@
 
 					async function refreshZonesExtrema() {
 						if (INTERVAL !== '4h') {
-							shortMaxPriceSeries.setData([]);
-							longMinPriceSeries.setData([]);
+							topIntersectionSeries.setData([]);
+							bottomIntersectionSeries.setData([]);
 							return;
 						}
 						const data = await (await fetch(ZE_URL)).json();
 						const rows = data.zones_extrema || [];
-						shortMaxPriceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.short_max_price })));
-						longMinPriceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.long_min_price })));
+						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
+						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
+					}
+
+					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
+						// 0.0 is the "no crossing on this side" sentinel (see
+						// dankbit.zones.extrema) — nothing real to draw.
+						if (!top || !bottom) { boxSeries.setData([]); bottomLineSeries.setData([]); return; }
+						boxSeries.applyOptions({ baseValue: { type: 'price', price: bottom } });
+						boxSeries.setData([
+							{ time: fromTime, value: top },
+							{ time: toTime, value: top },
+						]);
+						bottomLineSeries.setData([
+							{ time: fromTime, value: bottom },
+							{ time: toTime, value: bottom },
+						]);
+					}
+
+					async function refreshZonesBoxes() {
+						if (INTERVAL !== '4h') {
+							aboveBoxSeries.setData([]);
+							belowBoxSeries.setData([]);
+							aboveBoxBottomLine.setData([]);
+							belowBoxBottomLine.setData([]);
+							return;
+						}
+						// Live, non-persisted lookup — computed fresh by the server on
+						// every call (see dankbit.zones.extrema.get_box), not read from
+						// stored history, since this now refreshes as often as every minute.
+						const data = await (await fetch(ZB_URL)).json();
+						if (!data || data.t === undefined) {
+							aboveBoxSeries.setData([]);
+							belowBoxSeries.setData([]);
+							aboveBoxBottomLine.setData([]);
+							belowBoxBottomLine.setData([]);
+							return;
+						}
+						const anchor = Math.floor(data.t / 1000) + berlinOffset;
+						const fromTime = anchor - 2 * 86400;
+						const toTime   = anchor;
+
+						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
+						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
+						setBoxData(aboveBoxSeries, aboveBoxBottomLine, aboveTop, aboveBottom, fromTime, toTime);
+
+						const belowTop    = Math.max(data.short_zero_below_price, data.long_zero_below_price);
+						const belowBottom = Math.min(data.short_zero_below_price, data.long_zero_below_price);
+						setBoxData(belowBoxSeries, belowBoxBottomLine, belowTop, belowBottom, fromTime, toTime);
 					}
 
 					let rulerActive = false;
@@ -472,7 +576,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -497,10 +601,12 @@
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
+					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
 					setInterval(refreshQuadrantGamma, REFRESH);
 					setInterval(refreshZonesExtrema, REFRESH);
+					setInterval(refreshZonesBoxes, REFRESH);
 				//]]></script>
 			</body>
 		</html>

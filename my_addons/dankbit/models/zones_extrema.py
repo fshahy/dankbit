@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-import numpy as np
 from odoo import fields, models
 
 from ..controllers import options as options_lib
@@ -18,68 +17,25 @@ class ZonesExtrema(models.Model):
     asset = fields.Char(required=True, index=True)
     computed_at = fields.Datetime(required=True, default=fields.Datetime.now, index=True)
     index_price = fields.Float(digits=(16, 4))
-    short_max_price = fields.Float(digits=(16, 4))
-    long_min_price = fields.Float(digits=(16, 4))
+    top_intersection = fields.Float(digits=(16, 4))
+    bottom_intersection = fields.Float(digits=(16, 4))
 
     def compute_snapshot(self):
         for asset in ("BTC", "ETH"):
             self._snapshot_asset(asset)
 
-    def backfill(self, start=None, days=10, interval_hours=4):
-        """Wipe all existing snapshots and recompute a full history at a
-        fixed cadence (every `interval_hours`) — 2 rows (BTC + ETH) per tick.
-        There is no historical index-price API, so each tick's index_price is
-        approximated from that asset's own trade data: the `index_price`
-        field recorded on the closest trade at-or-before the tick.
-
-        If `start` (a naive UTC datetime) is given, ticks run forward from
-        `start` every `interval_hours` up to now — `days`/backwards-anchoring
-        is only used when `start` is omitted. Note a tick landing exactly on
-        00:00 UTC makes the "since midnight" trade window collapse to zero
-        width (`deribit_ts >= midnight` and `<= as_of` both equal midnight),
-        producing a structurally empty, meaningless snapshot regardless of
-        actual trading activity — pick a `start` hour that avoids that if it
-        matters for your grid."""
-        self.search([]).unlink()
-
-        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0, tzinfo=None)
-        if start is not None:
-            start_tick = start
-            end_tick = now
-        else:
-            end_tick = now
-            start_tick = end_tick - timedelta(days=days)
-
-        Trade = self.env["dankbit.trade"].with_context(active_test=False)
-
-        tick = start_tick
-        while tick <= end_tick:
-            for asset in ("BTC", "ETH"):
-                price_row = Trade.search_read(
-                    domain=[("name", "=ilike", f"{asset}-%"), ("deribit_ts", "<=", tick)],
-                    fields=["index_price"],
-                    order="deribit_ts desc",
-                    limit=1,
-                )
-                if not price_row or not price_row[0]["index_price"]:
-                    _logger.warning(
-                        "backfill: no historical index price for %s at %s, skipping", asset, tick
-                    )
-                    continue
-                self._snapshot_asset(asset, as_of=tick, index_price=price_row[0]["index_price"])
-            tick += timedelta(hours=interval_hours)
-
-    def _snapshot_asset(self, asset, as_of=None, index_price=None):
-        """Create one zones-extrema row for `asset` as of `as_of` (defaults to
-        now), using trades since that day's UTC midnight for that asset's
-        single nearest (soonest-to-expire, relative to `as_of`) expiry only —
-        mirrors the /<instrument>/zones PNG route called with that specific
-        instrument, aggregated per-asset (dankbit.quadrant.gamma loops
-        BTC/ETH the same way). Shared by the live 4-hourly cron
-        (`index_price=None` → live Deribit lookup) and `backfill()` (explicit
-        historical `index_price` passed in)."""
+    def _compute_asset(self, asset):
+        """Compute index_price, the Longs-vs-Shorts intersection above/below
+        price (top_intersection/bottom_intersection), plus the 4 zero-crossing
+        box boundaries for `asset` as of now, using trades since today's UTC
+        midnight for that asset's single nearest (soonest-to-expire) expiry
+        only — mirrors the /<instrument>/zones PNG route called with that
+        specific instrument, aggregated per-asset (dankbit.quadrant.gamma
+        loops BTC/ETH the same way). Returns None if there's nothing
+        computable (missing index price/expiry/trades); callers decide what,
+        if anything, to persist from the result."""
         icp = self.env["ir.config_parameter"].sudo()
-        as_of = as_of or datetime.now(timezone.utc).replace(tzinfo=None)
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if asset == "BTC":
             from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -90,14 +46,11 @@ class ZonesExtrema(models.Model):
             to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
 
-        if index_price is None:
-            index_price = self.env["dankbit.trade"].get_index_price(asset)
+        index_price = self.env["dankbit.trade"].get_index_price(asset)
         if not index_price:
-            _logger.warning("_snapshot_asset: no index price for %s, skipping snapshot", asset)
-            return
+            _logger.warning("_compute_asset: no index price for %s, skipping", asset)
+            return None
 
-        # active_test=False: a historical `as_of` may name an expiry that has
-        # since passed and been archived (active=False) by _delete_expired_trades.
         Trade = self.env["dankbit.trade"].with_context(active_test=False)
 
         nearest = Trade.search_read(
@@ -107,8 +60,8 @@ class ZonesExtrema(models.Model):
             limit=1,
         )
         if not nearest:
-            _logger.warning("_snapshot_asset: no active expiry for %s, skipping snapshot", asset)
-            return
+            _logger.warning("_compute_asset: no active expiry for %s, skipping", asset)
+            return None
         nearest_expiration = nearest[0]["expiration"]
 
         midnight_utc = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -124,25 +77,71 @@ class ZonesExtrema(models.Model):
             # activity right before it rolls off) — an all-zero payoffs curve
             # has no real extrema, and argmax/argmin would trivially return
             # index 0 (the configured price-range floor), a meaningless value
-            # that looks like real data. Skip the snapshot instead.
+            # that looks like real data. Skip instead.
             _logger.warning(
-                "_snapshot_asset: no trades for %s nearest expiry as of %s, skipping snapshot",
+                "_compute_asset: no trades for %s nearest expiry as of %s, skipping",
                 asset, as_of,
             )
-            return
+            return None
 
         longs_obj, shorts_obj = options_lib.build_zone_curves(
             asset, index_price, trades, from_price, to_price, steps
         )
 
         STs = longs_obj.STs
-        short_max_price = float(STs[int(np.argmax(shorts_obj.payoffs))])
-        long_min_price = float(STs[int(np.argmin(longs_obj.payoffs))])
 
-        self.create({
+        # Zero-crossings of each curve, split into the nearest one above and
+        # the nearest one below the current index price (a curve may cross
+        # zero more than once, or not at all on a given side — 0.0 means "no
+        # crossing on that side", not a real price).
+        short_crossings = options_lib.find_zero_crossings(STs, shorts_obj.payoffs)
+        long_crossings = options_lib.find_zero_crossings(STs, longs_obj.payoffs)
+        short_above = [c for c in short_crossings if c > index_price]
+        short_below = [c for c in short_crossings if c < index_price]
+        long_above = [c for c in long_crossings if c > index_price]
+        long_below = [c for c in long_crossings if c < index_price]
+
+        # Longs-vs-Shorts intersection (where the two payoff curves cross
+        # each other, not where either crosses zero), nearest above/below the
+        # current index price — same computation as options.zone_summary()'s
+        # top_intersection/bottom_intersection, and the same sign-change
+        # build_zone_curves() finds internally for its own ±$2000 auto-zoom.
+        diff = longs_obj.payoffs - shorts_obj.payoffs
+        lvs_crossings = options_lib.find_zero_crossings(STs, diff)
+        lvs_above = [c for c in lvs_crossings if c > index_price]
+        lvs_below = [c for c in lvs_crossings if c < index_price]
+
+        return {
             "asset": asset,
             "computed_at": as_of,
             "index_price": index_price,
-            "short_max_price": short_max_price,
-            "long_min_price": long_min_price,
+            "top_intersection": min(lvs_above) if lvs_above else 0.0,
+            "bottom_intersection": max(lvs_below) if lvs_below else 0.0,
+            "short_zero_above_price": min(short_above) if short_above else 0.0,
+            "long_zero_above_price": min(long_above) if long_above else 0.0,
+            "short_zero_below_price": max(short_below) if short_below else 0.0,
+            "long_zero_below_price": max(long_below) if long_below else 0.0,
+        }
+
+    def _snapshot_asset(self, asset):
+        """Persist a zones-extrema row on the (fixed, every-4h) cron — only
+        the historical-line fields (top_intersection/bottom_intersection);
+        the box-boundary fields are never persisted, only computed live and
+        on demand (see get_box), since the boxes only ever need the latest
+        value and are polled far more often than this cron runs."""
+        data = self._compute_asset(asset)
+        if data is None:
+            return
+        self.create({
+            "asset": data["asset"],
+            "computed_at": data["computed_at"],
+            "index_price": data["index_price"],
+            "top_intersection": data["top_intersection"],
+            "bottom_intersection": data["bottom_intersection"],
         })
+
+    def get_box(self, asset):
+        """Live zones-box boundaries for `asset`, computed fresh on every
+        call — nothing persisted. Called directly by the
+        /api/zones-box/<asset> controller."""
+        return self._compute_asset(asset)

@@ -219,7 +219,7 @@ class ChartController(http.Controller):
         )
 
         fig, ax = longs_obj.plot_zones(
-            longs_obj.payoffs, shorts_obj.payoffs, index_price, title="Zones", width=4.5
+            longs_obj.payoffs, shorts_obj.payoffs, index_price, title="Zones", width=3.5
         )
 
         ax.text(
@@ -236,6 +236,66 @@ class ChartController(http.Controller):
 
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
+
+        # Short Max/Long Min/box info used to be drawn inside the PNG itself
+        # (matplotlib ax.text) — now rendered as page HTML (top-left overlay,
+        # see dankbit_page template) instead, off the same summary dankbit.
+        # zones.extrema uses, so the two can never disagree.
+        summary = options.zone_summary(longs_obj.STs, longs_obj.payoffs, shorts_obj.payoffs, index_price)
+        top_box = "n/a" if summary["top_box"] is None else "${:,.0f} - ${:,.0f}".format(*summary["top_box"])
+        bottom_box = "n/a" if summary["bottom_box"] is None else "${:,.0f} - ${:,.0f}".format(*summary["bottom_box"])
+        top_intersection = "n/a" if summary["top_intersection"] is None else "${:,.0f}".format(summary["top_intersection"])
+        bottom_intersection = "n/a" if summary["bottom_intersection"] is None else "${:,.0f}".format(summary["bottom_intersection"])
+
+        # Long call trades since 00:00 UTC, restricted to the single nearest
+        # (soonest-to-expire) expiry among `trades` — same "next expiry only"
+        # restriction dankbit.zones.extrema uses, in case `instrument` isn't
+        # already a single fully-qualified expiry. Price where dollar gamma
+        # peaks over the same zoomed price grid the zones curves use.
+        next_expiration = min(trades.mapped("expiration")) if trades else None
+        long_calls = trades.filtered(
+            lambda t: t.direction == "buy" and t.option_type == "call" and t.expiration == next_expiration
+        )
+        long_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_calls)
+        long_call_gamma_peak_price = float(longs_obj.STs[int(np.argmax(long_call_gamma_curve))])
+
+        long_puts = trades.filtered(
+            lambda t: t.direction == "buy" and t.option_type == "put" and t.expiration == next_expiration
+        )
+        long_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_puts)
+        long_put_gamma_peak_price = float(longs_obj.STs[int(np.argmax(long_put_gamma_curve))])
+
+        # Short positions carry negative gamma (portfolio_gamma's sign for
+        # "sell" is -1), so the relevant extremum is where the curve bottoms
+        # out (argmin), not peaks.
+        short_calls = trades.filtered(
+            lambda t: t.direction == "sell" and t.option_type == "call" and t.expiration == next_expiration
+        )
+        short_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_calls)
+        short_call_gamma_bottom_price = float(longs_obj.STs[int(np.argmin(short_call_gamma_curve))])
+
+        short_puts = trades.filtered(
+            lambda t: t.direction == "sell" and t.option_type == "put" and t.expiration == next_expiration
+        )
+        short_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_puts)
+        short_put_gamma_bottom_price = float(longs_obj.STs[int(np.argmin(short_put_gamma_curve))])
+
+        zone_info_lines = [
+            "Short Max: ${:,.0f}".format(summary["short_max_price"]),
+            "Long Min: ${:,.0f}".format(summary["long_min_price"]),
+            " ",  # blank spacer line — a truly empty div collapses to zero height
+            f"Top Box: {top_box}",
+            f"Bottom Box: {bottom_box}",
+            " ",
+            "Long Call Gamma Peak: ${:,.0f}".format(long_call_gamma_peak_price),
+            "Long Put Gamma Peak: ${:,.0f}".format(long_put_gamma_peak_price),
+            "Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price),
+            "Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price),
+            " ",
+            f"Top Intersection: {top_intersection}",
+            f"Bottom Intersection: {bottom_intersection}",
+        ]
+
         return request.render(
             "dankbit.dankbit_page",
             {
@@ -243,6 +303,7 @@ class ChartController(http.Controller):
                 "plot_title": f"{instrument} - Zones",
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
+                "zone_info_lines": zone_info_lines,
             }
         )
 
@@ -789,12 +850,15 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def delta_zero_tomorrow_json(self, asset):
-        """Delta=0 crossings for the specific expiry landing on calendar
-        tomorrow (UTC), restricted to trades from the trailing 24h — distinct
-        from /api/delta-zero-next, which used "nearest active expiry" (which
-        can still be *today's* not-yet-happened expiry) and all-time trades."""
+    def _delta_zero_for_calendar_day(self, asset, days_ahead):
+        """Delta=0 crossings for the specific expiry landing `days_ahead`
+        calendar days from now (UTC), restricted to trades from the trailing
+        24h. Shared by /api/delta-zero-tomorrow (days_ahead=1) and
+        /api/delta-zero-day-after-tomorrow (days_ahead=2) so the two can
+        never disagree on how a calendar-day expiry/trade-window is computed
+        — distinct from /api/delta-zero-next (removed), which used "nearest
+        active expiry" (can still be *today's* not-yet-happened expiry) and
+        all-time trades rather than a trailing-24h window."""
         asset = asset.upper()
         icp = request.env["ir.config_parameter"].sudo()
         if asset.startswith("BTC"):
@@ -806,13 +870,10 @@ class ChartController(http.Controller):
             to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
         else:
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
+            return {"error": "Unknown asset"}
 
-        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
-        expiry_str = f"{tomorrow.day}{tomorrow.strftime('%b').upper()}{tomorrow.strftime('%y')}"
+        target_day = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).date()
+        expiry_str = f"{target_day.day}{target_day.strftime('%b').upper()}{target_day.strftime('%y')}"
 
         cr = request.env.cr
         cr.execute("""
@@ -847,7 +908,7 @@ class ChartController(http.Controller):
                 crossings.append(px)
 
         index_price = request.env["dankbit.trade"].get_index_price(asset)
-        payload = {
+        return {
             "asset": asset,
             "expiry": expiry_str,
             "delta_zero": crossings,
@@ -855,6 +916,18 @@ class ChartController(http.Controller):
             "trade_count": trade_count,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+
+    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_tomorrow_json(self, asset):
+        payload = self._delta_zero_for_calendar_day(asset, 1)
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/delta-zero-day-after-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_day_after_tomorrow_json(self, asset):
+        payload = self._delta_zero_for_calendar_day(asset, 2)
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
@@ -995,7 +1068,7 @@ class ChartController(http.Controller):
 
         cr = request.env.cr
         cr.execute("""
-            SELECT computed_at, index_price, short_max_price, long_min_price
+            SELECT computed_at, index_price, top_intersection, bottom_intersection
             FROM dankbit_zones_extrema
             WHERE asset = %s
               AND computed_at >= NOW() - INTERVAL '30 days'
@@ -1004,15 +1077,15 @@ class ChartController(http.Controller):
         rows = cr.fetchall()
 
         by_hour = {}
-        for computed_at, index_price, short_max_price, long_min_price in rows:
+        for computed_at, index_price, top_intersection, bottom_intersection in rows:
             ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
             ts = ts.replace(minute=0, second=0, microsecond=0)
             # if the cron fired more than once within the same hour, keep the latest
             by_hour[int(ts.timestamp() * 1000)] = {
                 "t": int(ts.timestamp() * 1000),
                 "index_price": float(index_price or 0.0),
-                "short_max_price": float(short_max_price or 0.0),
-                "long_min_price": float(long_min_price or 0.0),
+                "top_intersection": float(top_intersection or 0.0),
+                "bottom_intersection": float(bottom_intersection or 0.0),
             }
         series = [by_hour[t] for t in sorted(by_hour)]
 
@@ -1021,6 +1094,41 @@ class ChartController(http.Controller):
             "zones_extrema": series,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/zones-box/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def zones_box_json(self, asset):
+        """Live (non-persisted) zones-box boundaries — computed fresh on
+        every request via dankbit.zones.extrema.get_box(), not read from
+        stored history. The cron used to snapshot these every 4h, but now
+        that it (and this endpoint's polling) run as often as every minute,
+        storing a DB row per tick would be pure churn with no reader that
+        wants history — only the latest value is ever drawn."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        data = request.env["dankbit.zones.extrema"].get_box(asset)
+        if not data:
+            payload = {"asset": asset, "box": None}
+        else:
+            computed_at = data["computed_at"].replace(tzinfo=timezone.utc)
+            payload = {
+                "asset": asset,
+                "t": int(computed_at.timestamp() * 1000),
+                "index_price": float(data["index_price"]),
+                "short_zero_above_price": float(data["short_zero_above_price"]),
+                "long_zero_above_price": float(data["long_zero_above_price"]),
+                "short_zero_below_price": float(data["short_zero_below_price"]),
+                "long_zero_below_price": float(data["long_zero_below_price"]),
+            }
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat()
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],

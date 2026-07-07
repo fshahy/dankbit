@@ -177,19 +177,6 @@ class OptionStrat:
         ax.axhline(0, color="black", linewidth=1)
         ax.axvline(x=index_price, color="blue")
 
-        # Same extrema definition as dankbit.zones.extrema: Shorts curve peak
-        # ("short_max_price") and Longs curve bottom ("long_min_price").
-        short_max_price = float(self.STs[int(np.argmax(shorts_curve))])
-        long_min_price = float(self.STs[int(np.argmin(longs_curve))])
-        ax.text(
-            0.01, 0.98,
-            f"Short Max: ${short_max_price:,.0f}\nLong Min: ${long_min_price:,.0f}",
-            transform=ax.transAxes,
-            fontsize=14,
-            va="top",
-            ha="left",
-        )
-
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
         ax.set_title(f"{self.name} | {now} UTC | {title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
@@ -255,12 +242,69 @@ class OptionStrat:
         t.set_path_effects([path_effects.withStroke(linewidth=3, alpha=0.3, foreground="white")])
 
 
+def find_zero_crossings(STs, curve):
+    """Return the list of prices where `curve` crosses zero, via linear
+    interpolation on each sign change (STs must be ascending). Same technique
+    used by the delta=0 finders elsewhere in this codebase, and by
+    build_zone_curves()'s own Longs-vs-Shorts crossing below."""
+    crossings = []
+    for i in range(len(curve) - 1):
+        a, b = curve[i], curve[i + 1]
+        if not (np.isfinite(a) and np.isfinite(b)):
+            continue
+        if a * b < 0:
+            px = float(STs[i] - a * (STs[i + 1] - STs[i]) / (b - a))
+            crossings.append(px)
+    return crossings
+
+
+def zone_summary(STs, longs_curve, shorts_curve, index_price):
+    """Same extrema/box-boundary definitions used by dankbit.zones.extrema
+    and the TradingView zones boxes: Shorts curve peak ("short_max_price"),
+    Longs curve bottom ("long_min_price"), and the nearest zero-crossing of
+    each curve above/below index_price, giving a "top box" (above price) and
+    a "bottom box" (below price). Also the nearest Longs-vs-Shorts crossing
+    above/below index_price ("top_intersection"/"bottom_intersection") — the
+    same `longs_curve - shorts_curve` sign-change build_zone_curves() finds
+    internally for its ±$2000 auto-zoom, but filtered by side and exposed
+    here since nothing outside that function previously returned it. Returns
+    a dict; any of these is None if there's no crossing on that side."""
+    short_max_price = float(STs[int(np.argmax(shorts_curve))])
+    long_min_price = float(STs[int(np.argmin(longs_curve))])
+
+    short_crossings = find_zero_crossings(STs, shorts_curve)
+    long_crossings = find_zero_crossings(STs, longs_curve)
+    short_above = [c for c in short_crossings if c > index_price]
+    short_below = [c for c in short_crossings if c < index_price]
+    long_above = [c for c in long_crossings if c > index_price]
+    long_below = [c for c in long_crossings if c < index_price]
+
+    top_prices = ([min(short_above)] if short_above else []) + ([min(long_above)] if long_above else [])
+    bottom_prices = ([max(short_below)] if short_below else []) + ([max(long_below)] if long_below else [])
+
+    diff = np.asarray(longs_curve, dtype=float) - np.asarray(shorts_curve, dtype=float)
+    lvs_crossings = find_zero_crossings(STs, diff)
+    lvs_above = [c for c in lvs_crossings if c > index_price]
+    lvs_below = [c for c in lvs_crossings if c < index_price]
+
+    return {
+        "short_max_price": short_max_price,
+        "long_min_price": long_min_price,
+        "top_box": (min(top_prices), max(top_prices)) if len(top_prices) == 2 else None,
+        "bottom_box": (min(bottom_prices), max(bottom_prices)) if len(bottom_prices) == 2 else None,
+        "top_intersection": min(lvs_above) if lvs_above else None,
+        "bottom_intersection": max(lvs_below) if lvs_below else None,
+    }
+
+
 def build_zone_curves(instrument_name, index_price, trades, from_price, to_price, steps):
     """Build the Longs/Shorts OptionStrat curves from `trades` (any iterable of
     objects with .direction/.option_type/.strike/.price/.index_price — an Odoo
-    recordset works directly), then re-center on the crossing-based ±$2000
-    zoom exactly as the live /<instrument>/zones PNG chart does. Falls back to
-    the wide [from_price, to_price] range if the curves never cross.
+    recordset works directly), then re-center on the crossing-based zoom
+    exactly as the live /<instrument>/zones PNG chart does: ±$2000 for BTC,
+    ±$100 for ETH (ETH's much smaller price scale made the ±$2000 margin blow
+    out the auto-zoom). Falls back to the wide [from_price, to_price] range
+    if the curves never cross.
 
     Shared by the /<instrument>/zones route (controllers/main.py) and
     dankbit.zones.extrema's cron (models/zones_extrema.py) so the two can
@@ -286,17 +330,15 @@ def build_zone_curves(instrument_name, index_price, trades, from_price, to_price
 
     STs = longs_obj.STs
     diff = longs_obj.payoffs - shorts_obj.payoffs
-    crossings = []
-    for i in range(len(diff) - 1):
-        if not (np.isfinite(diff[i]) and np.isfinite(diff[i + 1])):
-            continue
-        if diff[i] * diff[i + 1] < 0:
-            px = float(STs[i] - diff[i] * (STs[i + 1] - STs[i]) / (diff[i + 1] - diff[i]))
-            crossings.append(px)
+    crossings = find_zero_crossings(STs, diff)
 
     if crossings:
-        zoom_from = min(crossings) - 2000
-        zoom_to = max(crossings) + 2000
+        if instrument_name.startswith("ETH"):
+            margin_below, margin_above = 100, 100
+        else:
+            margin_below, margin_above = 2000, 2000
+        zoom_from = min(crossings) - margin_below
+        zoom_to = max(crossings) + margin_above
         longs_obj, shorts_obj = build(zoom_from, zoom_to, steps)
 
     return longs_obj, shorts_obj
