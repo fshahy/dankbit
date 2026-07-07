@@ -177,6 +177,19 @@ class OptionStrat:
         ax.axhline(0, color="black", linewidth=1)
         ax.axvline(x=index_price, color="blue")
 
+        # Same extrema definition as dankbit.zones.extrema: Shorts curve peak
+        # ("short_max_price") and Longs curve bottom ("long_min_price").
+        short_max_price = float(self.STs[int(np.argmax(shorts_curve))])
+        long_min_price = float(self.STs[int(np.argmin(longs_curve))])
+        ax.text(
+            0.01, 0.98,
+            f"Short Max: ${short_max_price:,.0f}\nLong Min: ${long_min_price:,.0f}",
+            transform=ax.transAxes,
+            fontsize=14,
+            va="top",
+            ha="left",
+        )
+
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
         ax.set_title(f"{self.name} | {now} UTC | {title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")

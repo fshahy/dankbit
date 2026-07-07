@@ -1003,15 +1003,18 @@ class ChartController(http.Controller):
         """, (asset,))
         rows = cr.fetchall()
 
-        series = []
+        by_hour = {}
         for computed_at, index_price, short_max_price, long_min_price in rows:
             ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
-            series.append({
+            ts = ts.replace(minute=0, second=0, microsecond=0)
+            # if the cron fired more than once within the same hour, keep the latest
+            by_hour[int(ts.timestamp() * 1000)] = {
                 "t": int(ts.timestamp() * 1000),
                 "index_price": float(index_price or 0.0),
                 "short_max_price": float(short_max_price or 0.0),
                 "long_min_price": float(long_min_price or 0.0),
-            })
+            }
+        series = [by_hour[t] for t in sorted(by_hour)]
 
         payload = {
             "asset": asset,
