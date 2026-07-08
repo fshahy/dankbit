@@ -24,16 +24,52 @@ class ZonesExtrema(models.Model):
         for asset in ("BTC", "ETH"):
             self._snapshot_asset(asset)
 
-    def _compute_asset(self, asset):
+    def _distinct_expirations(self, asset, as_of, limit):
+        """The `limit` soonest distinct active expirations for `asset`,
+        soonest-first. Raw SQL DISTINCT (not search_read+limit, and not
+        read_group, which buckets Datetime fields by month by default) — a
+        plain limit=N on trade rows could return N rows that all share the
+        same nearest expiration (100k+ trades on the nearest expiry alone
+        isn't unusual), silently breaking "Nth expiry" semantics;
+        DISTINCT+ORDER BY+LIMIT is also far cheaper than fetching enough rows
+        to dedupe in Python on a live, frequently-polled route."""
+        self.env.cr.execute(
+            """
+            SELECT DISTINCT expiration FROM dankbit_trade
+            WHERE name ILIKE %s AND expiration >= %s
+            ORDER BY expiration ASC
+            LIMIT %s
+            """,
+            (f"{asset}-%", as_of, limit),
+        )
+        return [row[0] for row in self.env.cr.fetchall()]
+
+    def nearest_expiry(self, asset):
+        """The single nearest active expiry for `asset`, as a Deribit-style
+        day-string (e.g. '9JUL26') — same lookup _compute_asset() uses
+        internally for expiry_index=0, exposed standalone (and cheaply, with
+        no curve-building) for the TradingView footer, which shows this
+        regardless of timeframe unlike the boxes themselves. Returns None if
+        there's no active expiry at all."""
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        expirations = self._distinct_expirations(asset, as_of, 1)
+        if not expirations:
+            return None
+        exp = expirations[0]
+        return f"{exp.day}{exp.strftime('%b').upper()}{exp.strftime('%y')}"
+
+    def _compute_asset(self, asset, expiry_index=0):
         """Compute index_price, the Longs-vs-Shorts intersection above/below
         price (top_intersection/bottom_intersection), plus the 4 zero-crossing
         box boundaries for `asset` as of now, using trades since today's UTC
-        midnight for that asset's single nearest (soonest-to-expire) expiry
-        only — mirrors the /<instrument>/zones PNG route called with that
-        specific instrument, aggregated per-asset (dankbit.quadrant.gamma
-        loops BTC/ETH the same way). Returns None if there's nothing
-        computable (missing index price/expiry/trades); callers decide what,
-        if anything, to persist from the result."""
+        midnight for one specific active expiry only — mirrors the
+        /<instrument>/zones PNG route called with that specific instrument,
+        aggregated per-asset (dankbit.quadrant.gamma loops BTC/ETH the same
+        way). `expiry_index` selects which active expiry, in soonest-first
+        order: 0 (default) is the nearest one, 1 is the next one after that,
+        etc. Returns None if there's nothing computable (missing index
+        price/expiry at that index/trades); callers decide what, if
+        anything, to persist from the result."""
         icp = self.env["ir.config_parameter"].sudo()
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -53,34 +89,32 @@ class ZonesExtrema(models.Model):
 
         Trade = self.env["dankbit.trade"].with_context(active_test=False)
 
-        nearest = Trade.search_read(
-            domain=[("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of)],
-            fields=["expiration"],
-            order="expiration asc",
-            limit=1,
-        )
-        if not nearest:
-            _logger.warning("_compute_asset: no active expiry for %s, skipping", asset)
+        expirations = self._distinct_expirations(asset, as_of, expiry_index + 1)
+        if len(expirations) <= expiry_index:
+            _logger.warning(
+                "_compute_asset: no active expiry at index %s for %s, skipping",
+                expiry_index, asset,
+            )
             return None
-        nearest_expiration = nearest[0]["expiration"]
+        target_expiration = expirations[expiry_index]
 
         midnight_utc = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
         domain = [
             ("name", "=ilike", f"{asset}-%"),
-            ("expiration", "=", nearest_expiration),
+            ("expiration", "=", target_expiration),
             ("deribit_ts", ">=", midnight_utc),
             ("deribit_ts", "<=", as_of),
         ]
         trades = Trade.search(domain=domain)
         if not trades:
-            # No trades since midnight for the nearest expiry (e.g. thin/no
-            # activity right before it rolls off) — an all-zero payoffs curve
-            # has no real extrema, and argmax/argmin would trivially return
-            # index 0 (the configured price-range floor), a meaningless value
-            # that looks like real data. Skip instead.
+            # No trades since midnight for this expiry (e.g. thin/no activity
+            # right before it rolls off) — an all-zero payoffs curve has no
+            # real extrema, and argmax/argmin would trivially return index 0
+            # (the configured price-range floor), a meaningless value that
+            # looks like real data. Skip instead.
             _logger.warning(
-                "_compute_asset: no trades for %s nearest expiry as of %s, skipping",
-                asset, as_of,
+                "_compute_asset: no trades for %s expiry index %s as of %s, skipping",
+                asset, expiry_index, as_of,
             )
             return None
 
@@ -141,7 +175,13 @@ class ZonesExtrema(models.Model):
         })
 
     def get_box(self, asset):
-        """Live zones-box boundaries for `asset`, computed fresh on every
-        call — nothing persisted. Called directly by the
-        /api/zones-box/<asset> controller."""
+        """Live zones-box boundaries for `asset`'s nearest active expiry,
+        computed fresh on every call — nothing persisted. Called directly by
+        the /api/zones-box/<asset> controller."""
         return self._compute_asset(asset)
+
+    def get_box_next(self, asset):
+        """Same as get_box(), but for the active expiry immediately after the
+        nearest one (expiry_index=1) — a second, independent zones box.
+        Called directly by the /api/zones-box-next/<asset> controller."""
+        return self._compute_asset(asset, expiry_index=1)

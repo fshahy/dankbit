@@ -1101,12 +1101,11 @@ class ChartController(http.Controller):
 
     @http.route("/api/zones-box/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_box_json(self, asset):
-        """Live (non-persisted) zones-box boundaries — computed fresh on
-        every request via dankbit.zones.extrema.get_box(), not read from
-        stored history. The cron used to snapshot these every 4h, but now
-        that it (and this endpoint's polling) run as often as every minute,
-        storing a DB row per tick would be pure churn with no reader that
-        wants history — only the latest value is ever drawn."""
+        """Live (non-persisted) zones-box boundaries for the nearest active
+        expiry — computed fresh on every request via
+        dankbit.zones.extrema.get_box(), not read from stored history:
+        nothing reads box-boundary history, only the latest value is ever
+        drawn, so persisting a DB row per request would be pure churn."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1129,6 +1128,61 @@ class ChartController(http.Controller):
                 "long_zero_below_price": float(data["long_zero_below_price"]),
             }
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/zones-box-next/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def zones_box_next_json(self, asset):
+        """Same as /api/zones-box/<asset>, but for the active expiry
+        immediately after the nearest one — see
+        dankbit.zones.extrema.get_box_next()."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        data = request.env["dankbit.zones.extrema"].get_box_next(asset)
+        if not data:
+            payload = {"asset": asset, "box": None}
+        else:
+            computed_at = data["computed_at"].replace(tzinfo=timezone.utc)
+            payload = {
+                "asset": asset,
+                "t": int(computed_at.timestamp() * 1000),
+                "index_price": float(data["index_price"]),
+                "short_zero_above_price": float(data["short_zero_above_price"]),
+                "long_zero_above_price": float(data["long_zero_above_price"]),
+                "short_zero_below_price": float(data["short_zero_below_price"]),
+                "long_zero_below_price": float(data["long_zero_below_price"]),
+            }
+        payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/nearest-expiry/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def nearest_expiry_json(self, asset):
+        """The single nearest active expiry for `asset` (e.g. "9JUL26") —
+        the same expiry the yellow zones boxes use, but a cheap standalone
+        lookup (no curve-building) so the TradingView footer can show it
+        regardless of timeframe, unlike the boxes themselves (4h-only)."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        expiry = request.env["dankbit.zones.extrema"].nearest_expiry(asset)
+        payload = {
+            "asset": asset,
+            "expiry": expiry,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
