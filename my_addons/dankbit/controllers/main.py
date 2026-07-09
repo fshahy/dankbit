@@ -905,7 +905,10 @@ class ChartController(http.Controller):
                 continue
             if d_arr[i] * d_arr[i + 1] < 0:
                 px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
-                crossings.append(px)
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
 
         index_price = request.env["dankbit.trade"].get_index_price(asset)
         return {

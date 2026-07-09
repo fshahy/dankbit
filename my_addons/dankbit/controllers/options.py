@@ -133,7 +133,17 @@ class OptionStrat:
                 pmax = float(np.max(np.abs(pnl_curve)))
                 if pmax > 0:
                     axp.set_ylim(-pmax, pmax)
-        
+
+        # axg (and axp, if present) are twin axes created after ax, so by
+        # default they stack visually on top of ax — washing out anything
+        # drawn on ax afterward (e.g. the caller's axvline/text overlays)
+        # wherever their alpha-blended fills overlap. Bring ax back to the
+        # top of the stack and hide its opaque background so axg/axp still
+        # show through everywhere else.
+        top_zorder = max(a.get_zorder() for a in (axg, axp) if a is not None)
+        ax.set_zorder(top_zorder + 1)
+        ax.patch.set_visible(False)
+
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
         ax.set_title(f"{self.name} | {now} UTC | {title}")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
@@ -178,7 +188,7 @@ class OptionStrat:
         ax.axvline(x=index_price, color="blue")
 
         now = datetime.now(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M")
-        ax.set_title(f"{self.name} | {now} UTC | {title}")
+        ax.set_title(f"{self.name} | {now} UTC")
         ax.set_xlabel(f"${self.S0:,.0f}", fontsize=10, color="blue")
         ax.legend(loc="upper right", framealpha=0.85)
 

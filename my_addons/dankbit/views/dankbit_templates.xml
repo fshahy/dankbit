@@ -222,8 +222,8 @@
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
-					<button class="tf-btn active" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn" onclick="setTf('1h')">1h</button>
+					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
 					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
@@ -247,7 +247,7 @@
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const ZB_NEXT_URL      = '/api/zones-box-next/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
-					let   INTERVAL         = '1h';
+					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					const berlinOffset = (() => {
@@ -442,9 +442,9 @@
 					async function refreshTomorrowDeltaZero() {
 						const data = await (await fetch(DZT_URL)).json();
 						clearLines(tomorrowLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
-						zeros.forEach(price => tomorrowLines.push(series.createPriceLine({
-							price, color: 'black', lineWidth: 1,
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily 24H',
 						})));
@@ -453,9 +453,9 @@
 					async function refreshDayAfterTomorrowDeltaZero() {
 						const data = await (await fetch(DZT2_URL)).json();
 						clearLines(dayAfterTomorrowLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a - b);
-						zeros.forEach(price => dayAfterTomorrowLines.push(series.createPriceLine({
-							price, color: 'black', lineWidth: 1,
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1 24H',
 						})));
@@ -485,7 +485,7 @@
 
 					async function refreshWeeklyGamma() {
 						const data = await (await fetch(GL_W_URL)).json();
-						drawGammaLines(data, weeklyGammaLines, 2, 'Weekly', 'violet');
+						drawGammaLines(data, weeklyGammaLines, 1, 'Weekly', 'violet');
 					}
 
 					async function refreshMonthlyGamma() {
@@ -533,6 +533,18 @@
 						]);
 					}
 
+					function snapTo4h(sec) {
+						// Align to the same UTC 4h bucket boundaries the /api/klines
+						// proxy aggregates 1h candles into (t // (4*3600*1000), see
+						// CLAUDE.md) — `sec` is Berlin-shifted, so undo the shift,
+						// floor in real UTC, then reapply it, matching toCandle()'s
+						// own floor(k.t/1000)+berlinOffset exactly (a naive floor on
+						// the already-shifted value would land on the wrong bucket
+						// whenever berlinOffset isn't itself a multiple of 4h).
+						const utcSec = sec - berlinOffset;
+						return Math.floor(utcSec / (4 * 3600)) * (4 * 3600) + berlinOffset;
+					}
+
 					function snapTo18(sec) {
 						// Snap to 18:00 on the calendar day `sec` falls on — `sec` is
 						// already Berlin-shifted (see berlinOffset), so treat it as UTC
@@ -563,7 +575,7 @@
 						}
 						const anchor = Math.floor(data.t / 1000) + berlinOffset;
 						const fromTime = snapTo18(anchor - 2 * 86400);
-						const toTime   = anchor;
+						const toTime   = snapTo4h(anchor);
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
@@ -594,7 +606,7 @@
 						}
 						const anchor = Math.floor(data.t / 1000) + berlinOffset;
 						const fromTime = snapTo18(anchor - 1 * 86400);
-						const toTime   = anchor;
+						const toTime   = snapTo4h(anchor);
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
