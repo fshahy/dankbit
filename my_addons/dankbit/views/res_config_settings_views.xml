@@ -37,6 +37,18 @@
                         </setting>
                     </block>
 
+                    <block title="TradingView Chart Settings" id="dankbit_tv_chart_settings" groups="base.group_no_one">
+                        <setting>
+                            <field name="show_daily_lines"/>
+                        </setting>
+                        <setting>
+                            <field name="show_weekly_lines"/>
+                        </setting>
+                        <setting>
+                            <field name="show_monthly_lines"/>
+                        </setting>
+                    </block>
+
                     <block title="ETH Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">
                         <setting>
                             <field name="eth_from_price" placeholder="ETH From Price"/>

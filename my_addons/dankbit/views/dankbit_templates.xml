@@ -218,7 +218,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
@@ -235,9 +235,14 @@
 					const ASSET            = cfg.asset;
 					const MONTHLY_INST     = cfg.monthly || '';
 					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
+					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
+					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
+					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
+					const DZN_URL          = '/api/delta-zero-next/' + ASSET;
+					const DZN1_URL         = '/api/delta-zero-next-plus-one/' + ASSET;
 					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
 					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
@@ -280,6 +285,20 @@
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
 					});
 
+					// Invisible helper series solely to extend the shared time axis
+					// FUTURE_MARGIN_DAYS past the last real candle, with labeled tick
+					// marks. Candlestick setData() silently drops OHLC-less
+					// "whitespace" points (confirmed empirically — a 30-point future
+					// whitespace array passed alongside real candles left
+					// series.data().length unchanged), so a real, fully-valued (if
+					// invisible) line series is used instead; all series on a chart
+					// share one time scale, so its future points extend the same axis
+					// the candlesticks are drawn on.
+					const futureAxisSeries = chart.addLineSeries({
+						color: 'rgba(0,0,0,0)', lineWidth: 1,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+
 					const netCallSeries = chart.addLineSeries({ priceScaleId: 'qg', color: '#1565c0', lineWidth: 2, title: 'Net Call Gamma' });
 					const netPutSeries  = chart.addLineSeries({ priceScaleId: 'qg', color: '#e65100', lineWidth: 2, title: 'Net Put Gamma' });
 					chart.priceScale('qg').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
@@ -289,6 +308,7 @@
 					// 'qg' dollar-gamma scale.
 					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const middleBandSeries         = chart.addLineSeries({ color: '#757575', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -333,6 +353,8 @@
 					let priceLines    = [];
 					let monthlyLines  = [];
 					let allLines      = [];
+					let nextLines     = [];
+					let nextPlusOneLines = [];
 					let tomorrowLines = [];
 					let dayAfterTomorrowLines = [];
 
@@ -350,20 +372,51 @@
 					}
 
 					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 365 };
+					const BARS_PER_DAY = { '1h': 24, '4h': 6, '1d': 1 };
+					const INTERVAL_SECONDS = { '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
+
+					const FUTURE_MARGIN_DAYS = 5;
+
+					// realCandles.length + futureTickCount is the current total
+					// logical bar count across both series sharing the time axis —
+					// tracked directly rather than re-derived from series.data(),
+					// since the candlestick series' own data() only ever reflects
+					// realCandles (see futureAxisSeries above).
+					let realCandles = [];
+					let futureTickCount = 0;
 
 					function applyVisibleRange() {
 						const days = TF_WINDOW[INTERVAL] || 21;
-						const now  = Math.floor(Date.now() / 1000) + berlinOffset;
-						chart.timeScale().setVisibleRange({
-							from: now - days * 86400,
-							to:   now + days * 86400 * 0.03,
+						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
+						const lastIndex = realCandles.length + futureTickCount - 1;
+						chart.timeScale().setVisibleLogicalRange({
+							from: lastIndex - days * barsPerDay,
+							to:   lastIndex,
 						});
+					}
+
+					function rebuildSeriesData() {
+						series.setData(realCandles);
+
+						const intervalSec = INTERVAL_SECONDS[INTERVAL] || 3600;
+						const lastClose = realCandles.length ? realCandles[realCandles.length - 1].close : 0;
+						const lastTime = realCandles.length
+							? realCandles[realCandles.length - 1].time
+							: (Math.floor(Date.now() / 1000) + berlinOffset);
+						const count = Math.round(FUTURE_MARGIN_DAYS * 86400 / intervalSec);
+						const futureTicks = [];
+						for (let i = 1; i <= count; i++) {
+							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
+						}
+						futureTickCount = futureTicks.length;
+						futureAxisSeries.setData(futureTicks);
 					}
 
 					async function loadCandles() {
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
-						series.setData(klines.map(toCandle));
+						realCandles = klines.map(toCandle);
+						rebuildSeriesData();
 						applyVisibleRange();
 					}
 
@@ -371,7 +424,13 @@
 						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
 						const klines = resp.result || [];
 						if (!klines.length) return;
-						series.update(toCandle(klines[0]));
+						const updated = toCandle(klines[0]);
+						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
+							realCandles[realCandles.length - 1] = updated;
+						} else {
+							realCandles.push(updated);
+						}
+						rebuildSeriesData();
 					}
 
 					async function setTf(iv) {
@@ -387,6 +446,7 @@
 					async function refreshDeltaZero() {
 						const data = await (await fetch(DZ_URL)).json();
 						clearLines(priceLines);
+						if (!SHOW_WEEKLY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => priceLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
@@ -409,12 +469,14 @@
 						if (!MDZ_URL) return;
 						const data = await (await fetch(MDZ_URL)).json();
 						clearLines(monthlyLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => monthlyLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Monthly',
-						})));
+						if (SHOW_MONTHLY_LINES) {
+							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
+								price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Monthly',
+							})));
+						}
 						lastTradeCount = data.trade_count || 0;
 						updateStatusLine();
 					}
@@ -439,9 +501,34 @@
 						})));
 					}
 
+					async function refreshNextDeltaZero() {
+						const data = await (await fetch(DZN_URL)).json();
+						clearLines(nextLines);
+						if (!SHOW_DAILY_LINES) return;
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => nextLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily',
+						})));
+					}
+
+					async function refreshNextPlusOneDeltaZero() {
+						const data = await (await fetch(DZN1_URL)).json();
+						clearLines(nextPlusOneLines);
+						if (!SHOW_DAILY_LINES) return;
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => nextPlusOneLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1',
+						})));
+					}
+
 					async function refreshTomorrowDeltaZero() {
 						const data = await (await fetch(DZT_URL)).json();
 						clearLines(tomorrowLines);
+						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
@@ -453,6 +540,7 @@
 					async function refreshDayAfterTomorrowDeltaZero() {
 						const data = await (await fetch(DZT2_URL)).json();
 						clearLines(dayAfterTomorrowLines);
+						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
@@ -485,13 +573,13 @@
 
 					async function refreshWeeklyGamma() {
 						const data = await (await fetch(GL_W_URL)).json();
-						drawGammaLines(data, weeklyGammaLines, 1, 'Weekly', 'violet');
+						drawGammaLines(SHOW_WEEKLY_LINES ? data : { peaks: [], bottoms: [] }, weeklyGammaLines, 1, 'Weekly', 'violet');
 					}
 
 					async function refreshMonthlyGamma() {
 						if (!GL_M_URL) return;
 						const data = await (await fetch(GL_M_URL)).json();
-						drawGammaLines(data, monthlyGammaLines, 1, 'Monthly', 'violet');
+						drawGammaLines(SHOW_MONTHLY_LINES ? data : { peaks: [], bottoms: [] }, monthlyGammaLines, 1, 'Monthly', 'violet');
 					}
 
 					async function refreshQuadrantGamma() {
@@ -510,12 +598,14 @@
 						if (INTERVAL !== '4h') {
 							topIntersectionSeries.setData([]);
 							bottomIntersectionSeries.setData([]);
+							middleBandSeries.setData([]);
 							return;
 						}
 						const data = await (await fetch(ZE_URL)).json();
 						const rows = data.zones_extrema || [];
 						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
 						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
+						middleBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.middle_band })));
 					}
 
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
@@ -531,18 +621,6 @@
 							{ time: fromTime, value: bottom },
 							{ time: toTime, value: bottom },
 						]);
-					}
-
-					function snapTo4h(sec) {
-						// Align to the same UTC 4h bucket boundaries the /api/klines
-						// proxy aggregates 1h candles into (t // (4*3600*1000), see
-						// CLAUDE.md) — `sec` is Berlin-shifted, so undo the shift,
-						// floor in real UTC, then reapply it, matching toCandle()'s
-						// own floor(k.t/1000)+berlinOffset exactly (a naive floor on
-						// the already-shifted value would land on the wrong bucket
-						// whenever berlinOffset isn't itself a multiple of 4h).
-						const utcSec = sec - berlinOffset;
-						return Math.floor(utcSec / (4 * 3600)) * (4 * 3600) + berlinOffset;
 					}
 
 					function snapTo18(sec) {
@@ -575,7 +653,7 @@
 						}
 						const anchor = Math.floor(data.t / 1000) + berlinOffset;
 						const fromTime = snapTo18(anchor - 2 * 86400);
-						const toTime   = snapTo4h(anchor);
+						const toTime   = Math.floor(data.expiration / 1000) + berlinOffset;
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
@@ -606,7 +684,7 @@
 						}
 						const anchor = Math.floor(data.t / 1000) + berlinOffset;
 						const fromTime = snapTo18(anchor - 1 * 86400);
-						const toTime   = snapTo4h(anchor);
+						const toTime   = Math.floor(data.expiration / 1000) + berlinOffset;
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
@@ -658,7 +736,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesBoxesNext(); await refreshNearestExpiry(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesBoxesNext(); await refreshNearestExpiry(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -683,6 +761,8 @@
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshNearestExpiry, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
+					setInterval(refreshNextDeltaZero, REFRESH);
+					setInterval(refreshNextPlusOneDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);

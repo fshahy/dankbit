@@ -936,6 +936,106 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    def _delta_zero_for_nearest_expiry(self, asset, expiry_index):
+        """Delta=0 crossings for the `expiry_index`-th soonest active expiry
+        (0 = nearest, 1 = the one after that), using *all* trades for that
+        expiry — no trailing-24h/since-midnight window, unlike
+        /api/delta-zero-tomorrow and /api/delta-zero-day-after-tomorrow
+        (calendar-day expiry, trailing-24h only). Shared by
+        /api/delta-zero-next (expiry_index=0) and
+        /api/delta-zero-next-plus-one (expiry_index=1) so the two can never
+        disagree on how a nearest-expiry/trade-window is computed. Restores
+        a feature this repo had and removed (see git history); the expiry
+        lookup reuses dankbit.zones.extrema's shared _distinct_expirations()
+        helper so this can never disagree with the yellow/blue zones boxes'
+        idea of "nearest"/"next" expiry."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return {"error": "Unknown asset"}
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        expirations = request.env["dankbit.zones.extrema"]._distinct_expirations(
+            asset, as_of, expiry_index + 1
+        )
+        if len(expirations) <= expiry_index:
+            return {
+                "asset": asset,
+                "delta_zero": [],
+                "trade_count": 0,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        target_expiry = expirations[expiry_index]
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND active = TRUE
+              AND expiration = %s
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'{asset}-%', target_expiry))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        d_arr = np.asarray(delta.portfolio_delta(STs, agg_trades, 0.05), dtype=float)
+
+        crossings = []
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                crossings.append({
+                    "price": px,
+                    "type": "demand" if d_arr[i] > 0 else "supply",
+                })
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+        return {
+            "asset": asset,
+            "expiry": f"{target_expiry.day}{target_expiry.strftime('%b').upper()}{target_expiry.strftime('%y')}",
+            "delta_zero": crossings,
+            "index_price": index_price,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @http.route("/api/delta-zero-next/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_next_json(self, asset):
+        payload = self._delta_zero_for_nearest_expiry(asset, 0)
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/delta-zero-next-plus-one/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def delta_zero_next_plus_one_json(self, asset):
+        payload = self._delta_zero_for_nearest_expiry(asset, 1)
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
     def gamma_levels_json(self, instrument):
         parts = instrument.upper().split("-", 1)
@@ -1062,6 +1162,18 @@ class ChartController(http.Controller):
 
     @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_extrema_json(self, asset):
+        """One point per instrument stored in dankbit.zones.extrema (each
+        instrument has exactly one, continuously-refined-then-frozen row —
+        see that model's _persist_extrema()), positioned on the chart at that
+        instrument's own expiration time rather than a stored poll
+        timestamp (there isn't one anymore). The expiration lookup is a
+        single grouped query against dankbit_trade rather than parsing each
+        instrument's day-string suffix and assuming a settlement hour —
+        consistent with how the zones-box endpoints derive their own
+        right-edge time. Raw SQL bypasses the ORM's implicit active=True
+        filter, so past-expiry (and thus archived) instruments' trades are
+        still found — their rows must keep contributing a fixed historical
+        point on the chart even after they're no longer "active"."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1071,26 +1183,39 @@ class ChartController(http.Controller):
 
         cr = request.env.cr
         cr.execute("""
-            SELECT computed_at, index_price, top_intersection, bottom_intersection
+            SELECT instrument, index_price, top_intersection, bottom_intersection, middle_band
             FROM dankbit_zones_extrema
             WHERE asset = %s
-              AND computed_at >= NOW() - INTERVAL '30 days'
-            ORDER BY computed_at ASC
         """, (asset,))
         rows = cr.fetchall()
 
-        by_hour = {}
-        for computed_at, index_price, top_intersection, bottom_intersection in rows:
-            ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
-            ts = ts.replace(minute=0, second=0, microsecond=0)
-            # if the cron fired more than once within the same hour, keep the latest
-            by_hour[int(ts.timestamp() * 1000)] = {
+        expiry_by_instrument = {}
+        if rows:
+            instruments = [row[0] for row in rows]
+            cr.execute("""
+                SELECT SUBSTRING(name FROM '^[^-]+-[^-]+') AS instrument, MIN(expiration) AS expiration
+                FROM dankbit_trade
+                WHERE SUBSTRING(name FROM '^[^-]+-[^-]+') = ANY(%s)
+                GROUP BY instrument
+            """, (instruments,))
+            expiry_by_instrument = dict(cr.fetchall())
+
+        series = []
+        for instrument, index_price, top_intersection, bottom_intersection, middle_band in rows:
+            expiration = expiry_by_instrument.get(instrument)
+            if not expiration:
+                # No trades found at all for this instrument any more —
+                # nothing to anchor the point's time to.
+                continue
+            ts = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
+            series.append({
                 "t": int(ts.timestamp() * 1000),
                 "index_price": float(index_price or 0.0),
                 "top_intersection": float(top_intersection or 0.0),
                 "bottom_intersection": float(bottom_intersection or 0.0),
-            }
-        series = [by_hour[t] for t in sorted(by_hour)]
+                "middle_band": float(middle_band or 0.0),
+            })
+        series.sort(key=lambda r: r["t"])
 
         payload = {
             "asset": asset,
@@ -1104,11 +1229,15 @@ class ChartController(http.Controller):
 
     @http.route("/api/zones-box/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_box_json(self, asset):
-        """Live (non-persisted) zones-box boundaries for the nearest active
-        expiry — computed fresh on every request via
-        dankbit.zones.extrema.get_box(), not read from stored history:
-        nothing reads box-boundary history, only the latest value is ever
-        drawn, so persisting a DB row per request would be pure churn."""
+        """Live zones-box boundaries for the nearest active expiry —
+        computed fresh on every request via dankbit.zones.extrema.get_box(),
+        not read from stored history: nothing reads box-boundary history,
+        only the latest value is ever drawn, so those 4 fields are never
+        persisted. As a side effect, get_box() does upsert that instrument's
+        zones-extrema record (index_price/top_intersection/
+        bottom_intersection) on every call — piggybacking the per-expiry
+        history this endpoint's own polling interval instead of a separate
+        cron (see dankbit.zones.extrema._persist_extrema)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1121,9 +1250,11 @@ class ChartController(http.Controller):
             payload = {"asset": asset, "box": None}
         else:
             computed_at = data["computed_at"].replace(tzinfo=timezone.utc)
+            expiration = data["expiration"].replace(tzinfo=timezone.utc)
             payload = {
                 "asset": asset,
                 "t": int(computed_at.timestamp() * 1000),
+                "expiration": int(expiration.timestamp() * 1000),
                 "index_price": float(data["index_price"]),
                 "short_zero_above_price": float(data["short_zero_above_price"]),
                 "long_zero_above_price": float(data["long_zero_above_price"]),
@@ -1153,9 +1284,11 @@ class ChartController(http.Controller):
             payload = {"asset": asset, "box": None}
         else:
             computed_at = data["computed_at"].replace(tzinfo=timezone.utc)
+            expiration = data["expiration"].replace(tzinfo=timezone.utc)
             payload = {
                 "asset": asset,
                 "t": int(computed_at.timestamp() * 1000),
+                "expiration": int(expiration.timestamp() * 1000),
                 "index_price": float(data["index_price"]),
                 "short_zero_above_price": float(data["short_zero_above_price"]),
                 "long_zero_above_price": float(data["long_zero_above_price"]),
@@ -1258,6 +1391,13 @@ class ChartController(http.Controller):
 
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        # QWeb's t-att-* omits the attribute entirely when the value is a
+        # falsy Python bool/None, so pass "true"/"false" strings (always
+        # truthy) rather than real booleans — otherwise data-show-daily=false
+        # would render as no attribute at all, indistinguishable from unset.
+        show_daily_lines = "true" if icp.get_param("dankbit.show_daily_lines", default="True") == "True" else "false"
+        show_weekly_lines = "true" if icp.get_param("dankbit.show_weekly_lines", default="True") == "True" else "false"
+        show_monthly_lines = "true" if icp.get_param("dankbit.show_monthly_lines", default="True") == "True" else "false"
 
         if asset.startswith("ETH"):
             weekly_param = "dankbit.eth_weekly_expiry"
@@ -1291,4 +1431,7 @@ class ChartController(http.Controller):
             "expiry": expiry_str,
             "monthly_instrument": monthly_instrument,
             "refresh_interval": refresh_interval,
+            "show_daily_lines": show_daily_lines,
+            "show_weekly_lines": show_weekly_lines,
+            "show_monthly_lines": show_monthly_lines,
         })

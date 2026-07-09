@@ -70,4 +70,47 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.eth_monthly_expiry",
     )
 
+    # Not using config_parameter= here: Odoo's generic config_parameter
+    # handling for Boolean fields treats a False value the same as "delete
+    # the parameter" (ir.config_parameter.set_param() special-cases Python
+    # False as "unset"), so unchecking one of these and saving would silently
+    # revert to the field's default=True on next read instead of persisting
+    # False. get_values()/set_values() below store an explicit "True"/"False"
+    # string instead, which set_param() writes normally (only a real Python
+    # False/None triggers the delete-on-unset behavior, not the string).
+    show_daily_lines = fields.Boolean(
+        string="Show Daily Lines",
+        default=True,
+        help="Show the Daily 24H / Daily+1 24H delta=0 lines on the TradingView chart.",
+    )
+
+    show_weekly_lines = fields.Boolean(
+        string="Show Weekly Lines",
+        default=True,
+        help="Show the Weekly delta=0 and Weekly gamma peak/bottom lines on the TradingView chart.",
+    )
+
+    show_monthly_lines = fields.Boolean(
+        string="Show Monthly Lines",
+        default=True,
+        help="Show the Monthly delta=0 and Monthly gamma peak/bottom lines on the TradingView chart.",
+    )
+
+    def get_values(self):
+        res = super().get_values()
+        icp = self.env["ir.config_parameter"].sudo()
+        res.update(
+            show_daily_lines=icp.get_param("dankbit.show_daily_lines", "True") == "True",
+            show_weekly_lines=icp.get_param("dankbit.show_weekly_lines", "True") == "True",
+            show_monthly_lines=icp.get_param("dankbit.show_monthly_lines", "True") == "True",
+        )
+        return res
+
+    def set_values(self):
+        super().set_values()
+        icp = self.env["ir.config_parameter"].sudo()
+        icp.set_param("dankbit.show_daily_lines", str(self.show_daily_lines))
+        icp.set_param("dankbit.show_weekly_lines", str(self.show_weekly_lines))
+        icp.set_param("dankbit.show_monthly_lines", str(self.show_monthly_lines))
+
 

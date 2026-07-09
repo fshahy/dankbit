@@ -9,10 +9,11 @@
                 <sheet>
                     <group>
                         <field name="asset" />
-                        <field name="computed_at" />
+                        <field name="instrument" />
                         <field name="index_price" />
                         <field name="top_intersection" />
                         <field name="bottom_intersection" />
+                        <field name="middle_band" />
                     </group>
                 </sheet>
             </form>
@@ -25,10 +26,11 @@
         <field name="arch" type="xml">
             <list string="Zones Extrema">
                 <field name="asset" />
-                <field name="computed_at" />
+                <field name="instrument" />
                 <field name="index_price" />
                 <field name="top_intersection" />
                 <field name="bottom_intersection" />
+                <field name="middle_band" />
             </list>
         </field>
     </record>
