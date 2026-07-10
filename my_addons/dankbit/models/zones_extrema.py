@@ -36,6 +36,16 @@ class ZonesExtrema(models.Model):
     bottom_intersection_positive = fields.Boolean()
     gamma_band = fields.Float(digits=(16, 4))
     delta_band = fields.Float(digits=(16, 4))
+    # Where the Shorts payoff curve peaks and where the Longs curve bottoms
+    # out — this model's original two fields (see git history: 8c59981),
+    # repurposed into top_intersection/bottom_intersection in 8da5a1a and
+    # since reintroduced as their own fields alongside those, computed by
+    # the same _compute_asset()/_persist_extrema() path as gamma_band/
+    # delta_band (not the old standalone 4h snapshot cron). Same values
+    # options.zone_summary()'s short_max_price/long_min_price show on the
+    # /<instrument>/zones PNG page's info overlay.
+    short_max_price = fields.Float(digits=(16, 4))
+    long_min_price = fields.Float(digits=(16, 4))
 
     _sql_constraints = [
         ("instrument_uniq", "unique (instrument)", "Only one zones-extrema record is kept per instrument."),
@@ -152,6 +162,12 @@ class ZonesExtrema(models.Model):
 
         STs = longs_obj.STs
 
+        # Where the Shorts curve peaks and the Longs curve bottoms out — same
+        # computation as options.zone_summary()'s short_max_price/
+        # long_min_price, against this same longs_obj/shorts_obj.
+        short_max_price = float(STs[int(np.argmax(shorts_obj.payoffs))])
+        long_min_price = float(STs[int(np.argmin(longs_obj.payoffs))])
+
         # Zero-crossings of each curve. Current price is deliberately not a
         # factor here (same principle as top_intersection/bottom_intersection
         # below): a box boundary is a property of where a curve crosses zero,
@@ -263,6 +279,8 @@ class ZonesExtrema(models.Model):
             "bottom_intersection_positive": bottom_intersection_positive,
             "gamma_band": gamma_band,
             "delta_band": delta_band,
+            "short_max_price": short_max_price,
+            "long_min_price": long_min_price,
             "short_zero_above_price": min(short_above) if short_above else 0.0,
             "long_zero_above_price": min(long_above) if long_above else 0.0,
             "short_zero_below_price": max(short_below) if short_below else 0.0,
@@ -272,33 +290,34 @@ class ZonesExtrema(models.Model):
     def _persist_extrema(self, data):
         """Upsert the one record for `data['instrument']` — only the
         historical-line fields (index_price/top_intersection/
-        bottom_intersection/gamma_band); the 4 box-boundary fields in `data` are never
-        persisted, only ever read live off the return value (see get_box/
-        get_box_next), since nothing reads box-boundary history.
+        bottom_intersection/gamma_band/delta_band/short_max_price/
+        long_min_price); the 4 box-boundary fields in `data` are never
+        persisted, only ever read live off the return value (see get_box),
+        since nothing reads box-boundary history.
 
-        Called from both get_box() (nearest expiry) and get_box_next() (the
-        expiry after that) — i.e. piggybacked on the existing zones-box
-        polling that already happens at `dankbit.refresh_interval` on every
-        TradingView chart page. Since an instrument is typically "next" for
-        a while before it becomes "nearest", this means its row starts
-        accumulating (and getting refined) even before get_box() ever
-        touches it. compute_snapshot() (below) additionally calls
-        get_box()/get_box_next() on a 15-minute cron as a fallback for when
-        nobody's actually viewing the chart — without it, an instrument that
-        was never nearest/next while anyone happened to be watching would
-        never get a row at all.
+        Called from get_box() (nearest expiry, expiry_index 0) and, for
+        expiry_index 1 upward, get_box_n() via /api/zones-extrema-refresh —
+        i.e. piggybacked on the existing polling that already happens at
+        `dankbit.refresh_interval` on every TradingView chart page. Since an
+        instrument is typically "tracked" (index 1+) for a while before it
+        becomes nearest, this means its row starts accumulating (and getting
+        refined) even before get_box() ever touches it. compute_snapshot()
+        (below) additionally calls get_box_n() for every tracked expiry_index
+        on a 15-minute cron as a fallback for when nobody's actually viewing
+        the chart — without it, an instrument that was never tracked while
+        anyone happened to be watching would never get a row at all.
 
         Either way, this is still enough to build a connected multi-expiry
-        history: while an instrument (e.g. "BTC-10JUL26") is nearest/next,
-        every poll refines its one row right up until it expires and rolls
-        off the active list; at that point a *different* instrument
-        ("BTC-11JUL26") becomes nearest/next, so this starts a new row for
-        it instead of overwriting the old one. The old row is simply never
-        touched again, freezing at its last computed value — which is
-        exactly the final point the TradingView chart needs for that expiry
-        (see /api/zones-extrema/<asset>).
+        history: while an instrument (e.g. "BTC-10JUL26") is tracked, every
+        poll refines its one row right up until it expires and rolls off the
+        active list; at that point a *different* instrument ("BTC-11JUL26")
+        takes its place, so this starts a new row for it instead of
+        overwriting the old one. The old row is simply never touched again,
+        freezing at its last computed value — which is exactly the final
+        point the TradingView chart needs for that expiry (see
+        /api/zones-extrema/<asset>).
 
-        get_box()/get_box_next() are `auth="public"` routes, so this runs
+        get_box()/get_box_n() are `auth="public"` routes, so this runs
         under the anonymous public user by default — which has no access
         rights at all on dankbit.zones.extrema (only base.group_user does,
         see ir.model.access.csv). sudo() here mirrors how the rest of this
@@ -315,6 +334,8 @@ class ZonesExtrema(models.Model):
             "bottom_intersection_positive": data["bottom_intersection_positive"],
             "gamma_band": data["gamma_band"],
             "delta_band": data["delta_band"],
+            "short_max_price": data["short_max_price"],
+            "long_min_price": data["long_min_price"],
         }
         record = self.search([("instrument", "=", data["instrument"])], limit=1)
         if record:
@@ -322,43 +343,57 @@ class ZonesExtrema(models.Model):
         else:
             self.create(vals)
 
-    def get_box(self, asset):
-        """Live zones-box boundaries for `asset`'s nearest active expiry,
-        computed fresh on every call. Called directly by the
-        /api/zones-box/<asset> controller — as a side effect of every such
-        call, also upserts that instrument's zones-extrema record (see
-        _persist_extrema); the 4 box-boundary fields themselves are still
-        never persisted, only the computed_at moment's index_price/
-        top_intersection/bottom_intersection."""
-        data = self._compute_asset(asset)
+    # How many active expiries (soonest-first, 0 = nearest) get a persisted
+    # zones-extrema row at all — the TradingView chart only draws actual
+    # boxes for expiry_index 0 (yellow) and 1 (blue), but every index up to
+    # this bound still feeds the Top/Bottom Intersection, Gamma Band, and
+    # Delta Band term-structure lines (see get_box_n/refreshZonesExtrema),
+    # which render whatever rows exist for the asset regardless of whether
+    # a box was ever drawn for them.
+    TRACKED_EXPIRY_COUNT = 3
+
+    def get_box_n(self, asset, expiry_index):
+        """Live zones-extrema computation for `asset`'s `expiry_index`-th
+        soonest active expiry, computed fresh on every call and persisted via
+        _persist_extrema — generic version of get_box() (expiry_index 0,
+        which only exists as a named wrapper for backward compatibility with
+        /api/zones-box, the only one that actually renders a box on the
+        chart). Called directly for expiry_index 1 upward by
+        /api/zones-extrema-refresh/<asset>/<expiry_index> — those don't draw
+        a box (only the nearest expiry, index 0, gets the yellow box), only
+        feed the Top/Bottom Intersection, Gamma Band, and Delta Band lines,
+        which read every persisted row for the asset regardless of
+        expiry_index. The 4 box-boundary fields themselves are still never
+        persisted, only the computed_at moment's index_price/
+        top_intersection/bottom_intersection/gamma_band/delta_band (see
+        _persist_extrema)."""
+        data = self._compute_asset(asset, expiry_index=expiry_index)
         if data:
             self._persist_extrema(data)
         return data
 
-    def get_box_next(self, asset):
-        """Same as get_box(), but for the active expiry immediately after the
-        nearest one (expiry_index=1) — a second, independent zones box.
-        Called directly by the /api/zones-box-next/<asset> controller, and
-        upserts that (different) instrument's zones-extrema record the same
-        way get_box() does."""
-        data = self._compute_asset(asset, expiry_index=1)
-        if data:
-            self._persist_extrema(data)
-        return data
+    def get_box(self, asset):
+        """Live zones-box boundaries for `asset`'s nearest active expiry —
+        thin wrapper over get_box_n(asset, 0), kept as its own method since
+        /api/zones-box/<asset> is the one that actually renders the yellow
+        box on the chart."""
+        return self.get_box_n(asset, 0)
 
     def compute_snapshot(self):
         """Cron entry point (every 15 minutes — see data/ir_cron.xml) — a
         fallback so instrument rows keep updating even when nobody's
-        actually viewing /chart/BTC or /chart/ETH. get_box()/get_box_next()
-        normally only ever run as a side effect of that page's live zones-box
-        polling; with no cron at all, an instrument that's never "nearest" or
-        "next" while anyone happens to be watching would never get a row —
-        a real gap in the per-expiry history, not just a staler point. Calls
-        the exact same get_box()/get_box_next() the live endpoints call, for
-        both BTC and ETH, so this cron can never compute or persist anything
-        a live page view wouldn't have. Only touches dankbit.zones.extrema
-        (via _persist_extrema) — the TradingView horizontal price lines
-        (delta=0, gamma peak/bottom) are untouched by this or any cron."""
+        actually viewing /chart/BTC or /chart/ETH. get_box_n() normally only
+        ever runs as a side effect of that page's live polling (zones-box for
+        expiry_index 0, zones-extrema-refresh for 1 upward); with no cron at
+        all, an instrument that's never "tracked" while anyone happens to be
+        watching would never get a row — a real
+        gap in the per-expiry history, not just a staler point. Calls the
+        exact same get_box_n() the live endpoints call, for every tracked
+        expiry_index (see TRACKED_EXPIRY_COUNT) and both BTC and ETH, so this
+        cron can never compute or persist anything a live page view wouldn't
+        have. Only touches dankbit.zones.extrema (via _persist_extrema) — the
+        TradingView horizontal price lines (delta=0, gamma peak/bottom) are
+        untouched by this or any cron."""
         for asset in ("BTC", "ETH"):
-            self.get_box(asset)
-            self.get_box_next(asset)
+            for expiry_index in range(self.TRACKED_EXPIRY_COUNT):
+                self.get_box_n(asset, expiry_index)

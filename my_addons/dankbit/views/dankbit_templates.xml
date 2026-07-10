@@ -250,7 +250,6 @@
 					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
-					const ZB_NEXT_URL      = '/api/zones-box-next/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
@@ -318,14 +317,14 @@
 					// has no native primitive for.
 					const aboveBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.2)', topFillColor2: 'rgba(251, 192, 45, 0.2)',
-						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.2)', bottomFillColor2: 'rgba(251, 192, 45, 0.2)',
+						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.5)', topFillColor2: 'rgba(251, 192, 45, 0.5)',
+						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.5)', bottomFillColor2: 'rgba(251, 192, 45, 0.5)',
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					const belowBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.2)', topFillColor2: 'rgba(251, 192, 45, 0.2)',
-						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.2)', bottomFillColor2: 'rgba(251, 192, 45, 0.2)',
+						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.5)', topFillColor2: 'rgba(251, 192, 45, 0.5)',
+						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.5)', bottomFillColor2: 'rgba(251, 192, 45, 0.5)',
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					// addBaselineSeries only strokes its top edge; add a plain line series
@@ -333,23 +332,18 @@
 					const aboveBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 					const belowBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
-					// Same mechanism as the boxes above, but for the next active expiry
-					// after the nearest one — a distinct blue color so the two expiries'
-					// boxes stay visually distinguishable when their price zones overlap.
-					const aboveBoxSeriesNext = chart.addBaselineSeries({
+					// Short Max / Long Min box — same left/right time edges as the yellow
+					// box above (both come from the same get_box() call for the nearest
+					// expiry), teal so it stays visually distinct from yellow/violet/
+					// green. setBoxData() already draws a single line instead of a box
+					// when top and bottom coincide (or only one is available).
+					const smlmBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#1e88e5', topFillColor1: 'rgba(30, 136, 229, 0.2)', topFillColor2: 'rgba(30, 136, 229, 0.2)',
-						bottomLineColor: '#1e88e5', bottomFillColor1: 'rgba(30, 136, 229, 0.2)', bottomFillColor2: 'rgba(30, 136, 229, 0.2)',
+						topLineColor: 'teal', topFillColor1: 'rgba(0, 128, 128, 0.5)', topFillColor2: 'rgba(0, 128, 128, 0.5)',
+						bottomLineColor: 'teal', bottomFillColor1: 'rgba(0, 128, 128, 0.5)', bottomFillColor2: 'rgba(0, 128, 128, 0.5)',
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
-					const belowBoxSeriesNext = chart.addBaselineSeries({
-						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#1e88e5', topFillColor1: 'rgba(30, 136, 229, 0.2)', topFillColor2: 'rgba(30, 136, 229, 0.2)',
-						bottomLineColor: '#1e88e5', bottomFillColor1: 'rgba(30, 136, 229, 0.2)', bottomFillColor2: 'rgba(30, 136, 229, 0.2)',
-						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-					const aboveBoxBottomLineNext = chart.addLineSeries({ color: '#1e88e5', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
-					const belowBoxBottomLineNext = chart.addLineSeries({ color: '#1e88e5', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const smlmBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
 					let priceLines    = [];
 					let monthlyLines  = [];
@@ -441,7 +435,7 @@
 						await refreshQuadrantGamma();
 						await refreshZonesExtrema();
 						await refreshZonesBoxes();
-						await refreshZonesBoxesNext();
+						await refreshZonesExtremaExtended();
 					}
 
 					async function refreshDeltaZero() {
@@ -676,6 +670,8 @@
 							belowBoxSeries.setData([]);
 							aboveBoxBottomLine.setData([]);
 							belowBoxBottomLine.setData([]);
+							smlmBoxSeries.setData([]);
+							smlmBoxBottomLine.setData([]);
 							return;
 						}
 						// Live, non-persisted lookup — computed fresh by the server on
@@ -687,6 +683,8 @@
 							belowBoxSeries.setData([]);
 							aboveBoxBottomLine.setData([]);
 							belowBoxBottomLine.setData([]);
+							smlmBoxSeries.setData([]);
+							smlmBoxBottomLine.setData([]);
 							return;
 						}
 						const anchor = Math.floor(data.t / 1000) + berlinOffset;
@@ -700,37 +698,27 @@
 						const belowTop    = Math.max(data.short_zero_below_price, data.long_zero_below_price);
 						const belowBottom = Math.min(data.short_zero_below_price, data.long_zero_below_price);
 						setBoxData(belowBoxSeries, belowBoxBottomLine, belowTop, belowBottom, fromTime, toTime);
+
+						// Short Max / Long Min box — same fromTime/toTime as the yellow box
+						// above, since both come from this same nearest-expiry get_box() call.
+						const smlmTop    = Math.max(data.short_max_price, data.long_min_price);
+						const smlmBottom = Math.min(data.short_max_price, data.long_min_price);
+						setBoxData(smlmBoxSeries, smlmBoxBottomLine, smlmTop, smlmBottom, fromTime, toTime);
 					}
 
-					async function refreshZonesBoxesNext() {
-						if (INTERVAL !== '4h') {
-							aboveBoxSeriesNext.setData([]);
-							belowBoxSeriesNext.setData([]);
-							aboveBoxBottomLineNext.setData([]);
-							belowBoxBottomLineNext.setData([]);
-							return;
+					async function refreshZonesExtremaExtended() {
+						if (INTERVAL !== '4h') return;
+						// Only the nearest active expiry (expiry_index 0) draws a box —
+						// expiry_index 1 and 2 just keep their dankbit.zones.extrema rows
+						// fresh while the chart is open (see get_box_n), the same way
+						// refreshZonesBoxes() does for 0, so refreshZonesExtrema()'s next
+						// poll picks up fresher Top/Bottom Intersection, Gamma Band, and
+						// Delta Band points for them — no box is rendered from this call's
+						// response, so there's nothing to do with it beyond triggering the
+						// server-side computation.
+						for (const i of [1, 2]) {
+							try { await fetch('/api/zones-extrema-refresh/' + ASSET + '/' + i); } catch (e) { /* best-effort */ }
 						}
-						// Same mechanism as refreshZonesBoxes(), sourced from the expiry
-						// after the nearest one (see dankbit.zones.extrema.get_box_next).
-						const data = await (await fetch(ZB_NEXT_URL)).json();
-						if (!data || data.t === undefined) {
-							aboveBoxSeriesNext.setData([]);
-							belowBoxSeriesNext.setData([]);
-							aboveBoxBottomLineNext.setData([]);
-							belowBoxBottomLineNext.setData([]);
-							return;
-						}
-						const anchor = Math.floor(data.t / 1000) + berlinOffset;
-						const fromTime = snapTo18(anchor - 1 * 86400);
-						const toTime   = Math.floor(data.expiration / 1000) + berlinOffset;
-
-						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
-						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
-						setBoxData(aboveBoxSeriesNext, aboveBoxBottomLineNext, aboveTop, aboveBottom, fromTime, toTime);
-
-						const belowTop    = Math.max(data.short_zero_below_price, data.long_zero_below_price);
-						const belowBottom = Math.min(data.short_zero_below_price, data.long_zero_below_price);
-						setBoxData(belowBoxSeriesNext, belowBoxBottomLineNext, belowTop, belowBottom, fromTime, toTime);
 					}
 
 					let rulerActive = false;
@@ -774,7 +762,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesBoxesNext(); await refreshNearestExpiry(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -808,7 +796,7 @@
 					setInterval(refreshQuadrantGamma, REFRESH);
 					setInterval(refreshZonesExtrema, REFRESH);
 					setInterval(refreshZonesBoxes, REFRESH);
-					setInterval(refreshZonesBoxesNext, REFRESH);
+					setInterval(refreshZonesExtremaExtended, REFRESH);
 				//]]></script>
 			</body>
 		</html>

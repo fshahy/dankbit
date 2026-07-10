@@ -17,6 +17,8 @@
                         <field name="bottom_intersection_positive" />
                         <field name="gamma_band" />
                         <field name="delta_band" />
+                        <field name="short_max_price" />
+                        <field name="long_min_price" />
                     </group>
                 </sheet>
             </form>
@@ -37,6 +39,8 @@
                 <field name="bottom_intersection_positive" />
                 <field name="gamma_band" />
                 <field name="delta_band" />
+                <field name="short_max_price" />
+                <field name="long_min_price" />
             </list>
         </field>
     </record>

@@ -1043,8 +1043,8 @@ class ChartController(http.Controller):
         24h. Shared by /api/delta-zero-tomorrow (days_ahead=1) and
         /api/delta-zero-day-after-tomorrow (days_ahead=2) so the two can
         never disagree on how a calendar-day expiry/trade-window is computed
-        — distinct from /api/delta-zero-next (removed), which used "nearest
-        active expiry" (can still be *today's* not-yet-happened expiry) and
+        — distinct from /api/delta-zero-next, which uses "nearest active
+        expiry" (can still be *today's* not-yet-happened expiry) and
         all-time trades rather than a trailing-24h window."""
         asset = asset.upper()
         icp = request.env["ir.config_parameter"].sudo()
@@ -1134,8 +1134,8 @@ class ChartController(http.Controller):
         disagree on how a nearest-expiry/trade-window is computed. Restores
         a feature this repo had and removed (see git history); the expiry
         lookup reuses dankbit.zones.extrema's shared _distinct_expirations()
-        helper so this can never disagree with the yellow/blue zones boxes'
-        idea of "nearest"/"next" expiry."""
+        helper so this can never disagree with the yellow zones box's idea
+        of "nearest"/"next" expiry."""
         asset = asset.upper()
         icp = request.env["ir.config_parameter"].sudo()
         if asset.startswith("BTC"):
@@ -1457,6 +1457,8 @@ class ChartController(http.Controller):
                 "long_zero_above_price": float(data["long_zero_above_price"]),
                 "short_zero_below_price": float(data["short_zero_below_price"]),
                 "long_zero_below_price": float(data["long_zero_below_price"]),
+                "short_max_price": float(data["short_max_price"]),
+                "long_min_price": float(data["long_min_price"]),
             }
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
         return request.make_response(
@@ -1464,11 +1466,21 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/zones-box-next/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def zones_box_next_json(self, asset):
-        """Same as /api/zones-box/<asset>, but for the active expiry
-        immediately after the nearest one — see
-        dankbit.zones.extrema.get_box_next()."""
+    @http.route("/api/zones-extrema-refresh/<string:asset>/<int:expiry_index>", type="http", auth="public", website=False, csrf=False)
+    def zones_extrema_refresh_json(self, asset, expiry_index):
+        """Triggers a live dankbit.zones.extrema.get_box_n(asset, expiry_index)
+        computation for expiry_index 1 upward (0, the nearest expiry, already
+        gets this as a side effect of /api/zones-box, the only one that draws
+        a box) — no box is ever drawn for these, only the Top/Bottom
+        Intersection, Gamma Band, and Delta Band term-structure lines, which
+        read every persisted row for the asset via /api/zones-extrema/<asset>
+        regardless of expiry_index. Called by the TradingView chart's
+        periodic refresh purely to keep those rows fresh at
+        dankbit.refresh_interval while the page is open, the same way
+        zones-box polling already does for expiry_index 0 — the 15-minute
+        compute_snapshot() cron is the fallback for when nobody's watching.
+        Returns just enough to confirm what happened, not the 4 box-boundary
+        fields (nothing needs them here since no box is drawn)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1476,23 +1488,20 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
-        data = request.env["dankbit.zones.extrema"].get_box_next(asset)
-        if not data:
-            payload = {"asset": asset, "box": None}
-        else:
-            computed_at = data["computed_at"].replace(tzinfo=timezone.utc)
-            expiration = data["expiration"].replace(tzinfo=timezone.utc)
-            payload = {
-                "asset": asset,
-                "t": int(computed_at.timestamp() * 1000),
-                "expiration": int(expiration.timestamp() * 1000),
-                "index_price": float(data["index_price"]),
-                "short_zero_above_price": float(data["short_zero_above_price"]),
-                "long_zero_above_price": float(data["long_zero_above_price"]),
-                "short_zero_below_price": float(data["short_zero_below_price"]),
-                "long_zero_below_price": float(data["long_zero_below_price"]),
-            }
-        payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        Extrema = request.env["dankbit.zones.extrema"]
+        if not (0 <= expiry_index < Extrema.TRACKED_EXPIRY_COUNT):
+            return request.make_response(
+                json.dumps({"error": "expiry_index out of range"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        data = Extrema.get_box_n(asset, expiry_index)
+        payload = {
+            "asset": asset,
+            "expiry_index": expiry_index,
+            "instrument": data["instrument"] if data else None,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
