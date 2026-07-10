@@ -308,7 +308,8 @@
 					// 'qg' dollar-gamma scale.
 					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const middleBandSeries         = chart.addLineSeries({ color: '#757575', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					const deltaBandSeries          = chart.addLineSeries({ color: '#1b5e20', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -598,7 +599,8 @@
 						if (INTERVAL !== '4h') {
 							topIntersectionSeries.setData([]);
 							bottomIntersectionSeries.setData([]);
-							middleBandSeries.setData([]);
+							gammaBandSeries.setData([]);
+							deltaBandSeries.setData([]);
 							topIntersectionSeries.setMarkers([]);
 							bottomIntersectionSeries.setMarkers([]);
 							return;
@@ -607,7 +609,8 @@
 						const rows = data.zones_extrema || [];
 						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
 						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
-						middleBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.middle_band })));
+						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.gamma_band })));
+						deltaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.delta_band })));
 
 						// +/- marker per point: whether the payoff at that
 						// intersection (not the intersection's own price) sits

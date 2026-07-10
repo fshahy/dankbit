@@ -321,13 +321,22 @@ class ChartController(http.Controller):
 
     # instrument, trades since 00:00 UTC, single-leg delta/gamma routes
     # (/lp, /lc, /sp, /sc) — maps each route's short key to which trades to
-    # keep (direction/option_type) and which OptionStrat leg method
-    # accumulates them.
+    # keep (direction/option_type), which OptionStrat leg method accumulates
+    # them, and the delta-saturation fraction/side (see
+    # options.delta_saturation_price, shared with dankbit.zones.extrema's
+    # own delta_band) that locates the green marker line: calls saturate ITM
+    # at high S, puts at low S, independent of long/short — each leg's own
+    # sign is inherited automatically from its curve's value at that edge.
+    DELTA_SATURATION_FRACTION = 0.9
     _LEG_ROUTES = {
-        "lp": {"direction": "buy", "option_type": "put", "method": "long_put", "label": "Long Puts"},
-        "lc": {"direction": "buy", "option_type": "call", "method": "long_call", "label": "Long Calls"},
-        "sp": {"direction": "sell", "option_type": "put", "method": "short_put", "label": "Short Puts"},
-        "sc": {"direction": "sell", "option_type": "call", "method": "short_call", "label": "Short Calls"},
+        "lp": {"direction": "buy", "option_type": "put", "method": "long_put", "label": "Long Puts",
+               "saturation_fraction": DELTA_SATURATION_FRACTION, "saturation_side": "min"},
+        "lc": {"direction": "buy", "option_type": "call", "method": "long_call", "label": "Long Calls",
+               "saturation_fraction": DELTA_SATURATION_FRACTION, "saturation_side": "max"},
+        "sp": {"direction": "sell", "option_type": "put", "method": "short_put", "label": "Short Puts",
+               "saturation_fraction": DELTA_SATURATION_FRACTION, "saturation_side": "min"},
+        "sc": {"direction": "sell", "option_type": "call", "method": "short_call", "label": "Short Calls",
+               "saturation_fraction": DELTA_SATURATION_FRACTION, "saturation_side": "max"},
     }
 
     def _annotate_gamma_delta_crossings(self, ax, STs, market_deltas, market_gammas):
@@ -421,6 +430,22 @@ class ChartController(http.Controller):
                            height=8)
 
         self._annotate_gamma_delta_crossings(ax, STs, market_deltas, market_gammas)
+
+        # Delta-saturation marker: the price where this leg's delta curve
+        # reaches 90% of its own extreme value in this window and flattens
+        # into a straight line (deep enough ITM to "trade like synthetic
+        # stock") — same options.delta_saturation_price() dankbit.zones.
+        # extrema's own delta_band uses, so the two can never disagree on
+        # this point. Relative to the curve's own extreme, not an absolute
+        # delta value, since portfolio_delta's scale depends on how much
+        # volume traded (can be in the hundreds), not a fixed [-1, 1] range.
+        saturation_price = options.delta_saturation_price(
+            STs, trades, cfg["saturation_fraction"], cfg["saturation_side"]
+        )
+        ax.axvline(x=saturation_price, color="green", linewidth=1.5, linestyle="-", alpha=0.9)
+        trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(saturation_price, 0.96, f"${saturation_price:,.0f}", transform=trans, color="green",
+                fontsize=9, ha="right", va="top", rotation=90)
 
         last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
@@ -1346,7 +1371,7 @@ class ChartController(http.Controller):
         cr = request.env.cr
         cr.execute("""
             SELECT instrument, index_price, top_intersection, bottom_intersection,
-                   top_intersection_positive, bottom_intersection_positive, middle_band
+                   top_intersection_positive, bottom_intersection_positive, gamma_band, delta_band
             FROM dankbit_zones_extrema
             WHERE asset = %s
         """, (asset,))
@@ -1366,7 +1391,7 @@ class ChartController(http.Controller):
         series = []
         for (
             instrument, index_price, top_intersection, bottom_intersection,
-            top_intersection_positive, bottom_intersection_positive, middle_band,
+            top_intersection_positive, bottom_intersection_positive, gamma_band, delta_band,
         ) in rows:
             expiration = expiry_by_instrument.get(instrument)
             if not expiration:
@@ -1384,7 +1409,8 @@ class ChartController(http.Controller):
                 # the point's own price/position.
                 "top_intersection_positive": bool(top_intersection_positive),
                 "bottom_intersection_positive": bool(bottom_intersection_positive),
-                "middle_band": float(middle_band or 0.0),
+                "gamma_band": float(gamma_band or 0.0),
+                "delta_band": float(delta_band or 0.0),
             })
         series.sort(key=lambda r: r["t"])
 

@@ -34,7 +34,8 @@ class ZonesExtrema(models.Model):
     # drawn above each point on the TradingView chart's Zones Extrema lines.
     top_intersection_positive = fields.Boolean()
     bottom_intersection_positive = fields.Boolean()
-    middle_band = fields.Float(digits=(16, 4))
+    gamma_band = fields.Float(digits=(16, 4))
+    delta_band = fields.Float(digits=(16, 4))
 
     _sql_constraints = [
         ("instrument_uniq", "unique (instrument)", "Only one zones-extrema record is kept per instrument."),
@@ -77,7 +78,7 @@ class ZonesExtrema(models.Model):
     def _compute_asset(self, asset, expiry_index=0):
         """Compute index_price, the highest/lowest Longs-vs-Shorts curve
         intersection (top_intersection/bottom_intersection — not relative to
-        index_price, see below), middle_band (average of
+        index_price, see below), gamma_band (average of
         the 4 gamma extrema — see below), plus the 4 zero-crossing box
         boundaries for `asset` as of now, using trades since today's UTC
         midnight for one specific active expiry only — mirrors the
@@ -195,7 +196,7 @@ class ZonesExtrema(models.Model):
         top_intersection_positive = bool(np.interp(top_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
         bottom_intersection_positive = bool(np.interp(bottom_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
 
-        # Middle band: average of the 4 gamma extrema the /<instrument>/zones
+        # Gamma band: average of the 4 gamma extrema the /<instrument>/zones
         # PNG page's info overlay shows (Long Call/Put Gamma Peak, Short
         # Call/Put Gamma Bottom) — same computation as chart_png_zones,
         # against this same `trades`/`STs` (already the single target
@@ -216,9 +217,38 @@ class ZonesExtrema(models.Model):
         short_puts = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put")
         short_put_gamma_bottom_price = float(STs[int(np.argmin(gamma_lib.portfolio_gamma(STs, short_puts)))])
 
-        middle_band = (
+        gamma_band = (
             long_call_gamma_peak_price + long_put_gamma_peak_price
             + short_call_gamma_bottom_price + short_put_gamma_bottom_price
+        ) / 4.0
+
+        # Delta band: average of the price where each leg's delta curve
+        # reaches 90% of its own extreme value in this window — deep enough
+        # ITM that the option has stopped behaving like an option and starts
+        # moving ~1:1 with the underlying, i.e. where the sigmoid-shaped
+        # delta curve stops curving and flattens into a straight line.
+        # Relative to the curve's own extreme, not an absolute delta value:
+        # portfolio_delta sums sign*amount*per-contract delta across every
+        # matching trade, so its scale reflects total traded size (can be in
+        # the hundreds), not a single option's [-1, 1] range — see
+        # options.delta_saturation_price(), shared with the
+        # /<instrument>/lp,lc,sp,sc single-leg routes' own green marker
+        # line, so the two can never disagree on where this point is. Calls
+        # saturate ITM at high S; puts saturate ITM at low S — independent
+        # of long/short, so long_calls/short_calls both use the high-S
+        # ("max") edge and long_puts/short_puts both use the low-S ("min")
+        # edge; each leg's own sign is inherited automatically from its
+        # curve's value at that edge, no separate sign needed.
+        DELTA_SATURATION_FRACTION = 0.9
+
+        long_call_saturation_price = options_lib.delta_saturation_price(STs, long_calls, DELTA_SATURATION_FRACTION, "max")
+        long_put_saturation_price = options_lib.delta_saturation_price(STs, long_puts, DELTA_SATURATION_FRACTION, "min")
+        short_call_saturation_price = options_lib.delta_saturation_price(STs, short_calls, DELTA_SATURATION_FRACTION, "max")
+        short_put_saturation_price = options_lib.delta_saturation_price(STs, short_puts, DELTA_SATURATION_FRACTION, "min")
+
+        delta_band = (
+            long_call_saturation_price + long_put_saturation_price
+            + short_call_saturation_price + short_put_saturation_price
         ) / 4.0
 
         return {
@@ -231,7 +261,8 @@ class ZonesExtrema(models.Model):
             "bottom_intersection": bottom_intersection,
             "top_intersection_positive": top_intersection_positive,
             "bottom_intersection_positive": bottom_intersection_positive,
-            "middle_band": middle_band,
+            "gamma_band": gamma_band,
+            "delta_band": delta_band,
             "short_zero_above_price": min(short_above) if short_above else 0.0,
             "long_zero_above_price": min(long_above) if long_above else 0.0,
             "short_zero_below_price": max(short_below) if short_below else 0.0,
@@ -241,7 +272,7 @@ class ZonesExtrema(models.Model):
     def _persist_extrema(self, data):
         """Upsert the one record for `data['instrument']` — only the
         historical-line fields (index_price/top_intersection/
-        bottom_intersection/middle_band); the 4 box-boundary fields in `data` are never
+        bottom_intersection/gamma_band); the 4 box-boundary fields in `data` are never
         persisted, only ever read live off the return value (see get_box/
         get_box_next), since nothing reads box-boundary history.
 
@@ -282,7 +313,8 @@ class ZonesExtrema(models.Model):
             "bottom_intersection": data["bottom_intersection"],
             "top_intersection_positive": data["top_intersection_positive"],
             "bottom_intersection_positive": data["bottom_intersection_positive"],
-            "middle_band": data["middle_band"],
+            "gamma_band": data["gamma_band"],
+            "delta_band": data["delta_band"],
         }
         record = self.search([("instrument", "=", data["instrument"])], limit=1)
         if record:

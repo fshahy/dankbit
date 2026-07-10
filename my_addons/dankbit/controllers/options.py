@@ -10,6 +10,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.ticker import MultipleLocator
 import matplotlib.patheffects as path_effects
 
+from . import delta as delta_lib
+
 
 class OptionStrat:
     def __init__(self, name, S0, from_price, to_price, step):
@@ -266,6 +268,46 @@ def find_zero_crossings(STs, curve):
             px = float(STs[i] - a * (STs[i + 1] - STs[i]) / (b - a))
             crossings.append(px)
     return crossings
+
+
+def delta_saturation_price(STs, trades, fraction, stop_at):
+    """Interpolated price where portfolio_delta(trades) first reaches
+    `fraction` of its own extreme value at the `stop_at` edge of STs (e.g.
+    fraction=0.9, stop_at='max' -> the price where the curve has climbed to
+    90% of whatever value it reaches at the highest price in this window)
+    — the point where the sigmoid-shaped delta curve stops curving and
+    flattens into a straight line (deep enough ITM that the option starts
+    trading like synthetic stock).
+
+    Relative to the curve's own extreme, not an absolute delta value:
+    portfolio_delta sums sign*amount*per-contract delta across every
+    matching trade, so its magnitude reflects total traded size (seen
+    against real data: values in the hundreds, not a single option's
+    [-1, 1] range) — a fixed absolute threshold like 0.9 would be crossed
+    almost immediately near the start of the curve, not at any deep-ITM
+    point. Using the curve's own endpoint as 100% self-scales regardless of
+    how much volume traded.
+
+    Curves here are monotonic (see delta.py's sign convention: each leg's
+    aggregate delta only ever moves in one direction across price), so the
+    `stop_at` edge value is genuinely the curve's extreme in this window,
+    and its sign is inherited automatically — long_calls/short_puts have a
+    positive extreme, long_puts/short_calls a negative one, with no need to
+    pass sign separately. Falls back to the STs edge on `stop_at` if the
+    extreme itself is 0 (e.g. no trades — nothing to take a fraction of) or
+    the curve never reaches that fraction within this window. Shared by
+    dankbit.zones.extrema (delta_band) and the /<instrument>/lp,lc,sp,sc
+    single-leg routes (green marker line), so the two can never disagree on
+    where this point is."""
+    curve = np.asarray(delta_lib.portfolio_delta(STs, trades), dtype=float)
+    extreme = curve[-1] if stop_at == "max" else curve[0]
+    if extreme == 0:
+        return float(STs[-1]) if stop_at == "max" else float(STs[0])
+    threshold = fraction * extreme
+    crossings = find_zero_crossings(STs, curve - threshold)
+    if crossings:
+        return max(crossings) if stop_at == "max" else min(crossings)
+    return float(STs[-1]) if stop_at == "max" else float(STs[0])
 
 
 def zone_summary(STs, longs_curve, shorts_curve):
