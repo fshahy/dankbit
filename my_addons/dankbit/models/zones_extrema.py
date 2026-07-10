@@ -68,8 +68,9 @@ class ZonesExtrema(models.Model):
         return f"{exp.day}{exp.strftime('%b').upper()}{exp.strftime('%y')}"
 
     def _compute_asset(self, asset, expiry_index=0):
-        """Compute index_price, the Longs-vs-Shorts intersection above/below
-        price (top_intersection/bottom_intersection), middle_band (average of
+        """Compute index_price, the highest/lowest Longs-vs-Shorts curve
+        intersection (top_intersection/bottom_intersection — not relative to
+        index_price, see below), middle_band (average of
         the 4 gamma extrema — see below), plus the 4 zero-crossing box
         boundaries for `asset` as of now, using trades since today's UTC
         midnight for one specific active expiry only — mirrors the
@@ -143,26 +144,36 @@ class ZonesExtrema(models.Model):
 
         STs = longs_obj.STs
 
-        # Zero-crossings of each curve, split into the nearest one above and
-        # the nearest one below the current index price (a curve may cross
-        # zero more than once, or not at all on a given side — 0.0 means "no
-        # crossing on that side", not a real price).
+        # Zero-crossings of each curve. Current price is deliberately not a
+        # factor here (same principle as top_intersection/bottom_intersection
+        # below): a box boundary is a property of where a curve crosses zero,
+        # not of where the index price happens to sit relative to it. Each
+        # curve's own highest crossing feeds the "above" box side, its lowest
+        # feeds the "below" side — labels kept for backward compatibility
+        # (API/JS field names), even though they no longer mean "above/below
+        # current price". A curve with only one crossing contributes that
+        # same value to both sides; 0.0 still means "no crossing at all" on
+        # that curve, not "no crossing on this side".
         short_crossings = options_lib.find_zero_crossings(STs, shorts_obj.payoffs)
         long_crossings = options_lib.find_zero_crossings(STs, longs_obj.payoffs)
-        short_above = [c for c in short_crossings if c > index_price]
-        short_below = [c for c in short_crossings if c < index_price]
-        long_above = [c for c in long_crossings if c > index_price]
-        long_below = [c for c in long_crossings if c < index_price]
+        short_above = [max(short_crossings)] if short_crossings else []
+        short_below = [min(short_crossings)] if short_crossings else []
+        long_above = [max(long_crossings)] if long_crossings else []
+        long_below = [min(long_crossings)] if long_crossings else []
 
         # Longs-vs-Shorts intersection (where the two payoff curves cross
-        # each other, not where either crosses zero), nearest above/below the
-        # current index price — same computation as options.zone_summary()'s
-        # top_intersection/bottom_intersection, and the same sign-change
-        # build_zone_curves() finds internally for its own ±$2000 auto-zoom.
+        # each other, not where either crosses zero) — same computation as
+        # options.zone_summary()'s top_intersection/bottom_intersection, and
+        # the same sign-change build_zone_curves() finds internally for its
+        # own ±$2000 auto-zoom. top/bottom are simply the highest/lowest of
+        # *all* crossings found, not relative to index_price: when the
+        # curves only cross once, that single crossing can land on either
+        # side of the current price by a trivial amount, which used to make
+        # the "other" field silently read 0.0 even though the plot clearly
+        # showed one real intersection — labels kept, but index_price no
+        # longer factors into which crossing is "top" vs "bottom".
         diff = longs_obj.payoffs - shorts_obj.payoffs
         lvs_crossings = options_lib.find_zero_crossings(STs, diff)
-        lvs_above = [c for c in lvs_crossings if c > index_price]
-        lvs_below = [c for c in lvs_crossings if c < index_price]
 
         # Middle band: average of the 4 gamma extrema the /<instrument>/zones
         # PNG page's info overlay shows (Long Call/Put Gamma Peak, Short
@@ -196,8 +207,8 @@ class ZonesExtrema(models.Model):
             "computed_at": as_of,
             "expiration": target_expiration,
             "index_price": index_price,
-            "top_intersection": min(lvs_above) if lvs_above else 0.0,
-            "bottom_intersection": max(lvs_below) if lvs_below else 0.0,
+            "top_intersection": max(lvs_crossings) if lvs_crossings else 0.0,
+            "bottom_intersection": min(lvs_crossings) if lvs_crossings else 0.0,
             "middle_band": middle_band,
             "short_zero_above_price": min(short_above) if short_above else 0.0,
             "long_zero_above_price": min(long_above) if long_above else 0.0,

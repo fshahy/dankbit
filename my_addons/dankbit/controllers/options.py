@@ -268,42 +268,51 @@ def find_zero_crossings(STs, curve):
     return crossings
 
 
-def zone_summary(STs, longs_curve, shorts_curve, index_price):
+def zone_summary(STs, longs_curve, shorts_curve):
     """Same extrema/box-boundary definitions used by dankbit.zones.extrema
     and the TradingView zones boxes: Shorts curve peak ("short_max_price"),
-    Longs curve bottom ("long_min_price"), and the nearest zero-crossing of
-    each curve above/below index_price, giving a "top box" (above price) and
-    a "bottom box" (below price). Also the nearest Longs-vs-Shorts crossing
-    above/below index_price ("top_intersection"/"bottom_intersection") — the
-    same `longs_curve - shorts_curve` sign-change build_zone_curves() finds
-    internally for its ±$2000 auto-zoom, but filtered by side and exposed
-    here since nothing outside that function previously returned it. Returns
-    a dict; any of these is None if there's no crossing on that side."""
+    Longs curve bottom ("long_min_price"), and each curve's own highest/
+    lowest zero-crossing, giving a "top box" (the two curves' highest
+    crossings) and a "bottom box" (their lowest).
+
+    Current price is deliberately not a factor anywhere in this function —
+    same principle as top_intersection/bottom_intersection below: a box or
+    intersection is a property of where the curves themselves cross zero
+    (or each other), not of where the index price happens to sit relative
+    to them. `top_box`/`bottom_box` used to require a crossing on each
+    curve on the correct side of index_price, and silently returned None
+    otherwise — but "no crossing above/below current price" and "no
+    crossing at all" are different situations; the former discarded real
+    data. Now: any curve that has at least one crossing contributes its
+    max (to top_box) and min (to bottom_box), so a box can still form from
+    a single curve's data alone (a degenerate (price, price) pair) if the
+    other curve has none. Only truly empty (neither curve ever crosses
+    zero) yields None.
+
+    "top_intersection"/"bottom_intersection" are the highest/lowest price
+    where the Longs and Shorts curves cross each other (`longs_curve -
+    shorts_curve` sign changes — the same crossings build_zone_curves()
+    finds internally for its ±$2000 auto-zoom). Returns a dict; any of
+    these is None if there's no crossing at all."""
     short_max_price = float(STs[int(np.argmax(shorts_curve))])
     long_min_price = float(STs[int(np.argmin(longs_curve))])
 
     short_crossings = find_zero_crossings(STs, shorts_curve)
     long_crossings = find_zero_crossings(STs, longs_curve)
-    short_above = [c for c in short_crossings if c > index_price]
-    short_below = [c for c in short_crossings if c < index_price]
-    long_above = [c for c in long_crossings if c > index_price]
-    long_below = [c for c in long_crossings if c < index_price]
 
-    top_prices = ([min(short_above)] if short_above else []) + ([min(long_above)] if long_above else [])
-    bottom_prices = ([max(short_below)] if short_below else []) + ([max(long_below)] if long_below else [])
+    top_prices = ([max(short_crossings)] if short_crossings else []) + ([max(long_crossings)] if long_crossings else [])
+    bottom_prices = ([min(short_crossings)] if short_crossings else []) + ([min(long_crossings)] if long_crossings else [])
 
     diff = np.asarray(longs_curve, dtype=float) - np.asarray(shorts_curve, dtype=float)
     lvs_crossings = find_zero_crossings(STs, diff)
-    lvs_above = [c for c in lvs_crossings if c > index_price]
-    lvs_below = [c for c in lvs_crossings if c < index_price]
 
     return {
         "short_max_price": short_max_price,
         "long_min_price": long_min_price,
-        "top_box": (min(top_prices), max(top_prices)) if len(top_prices) == 2 else None,
-        "bottom_box": (min(bottom_prices), max(bottom_prices)) if len(bottom_prices) == 2 else None,
-        "top_intersection": min(lvs_above) if lvs_above else None,
-        "bottom_intersection": max(lvs_below) if lvs_below else None,
+        "top_box": (min(top_prices), max(top_prices)) if top_prices else None,
+        "bottom_box": (min(bottom_prices), max(bottom_prices)) if bottom_prices else None,
+        "top_intersection": max(lvs_crossings) if lvs_crossings else None,
+        "bottom_intersection": min(lvs_crossings) if lvs_crossings else None,
     }
 
 

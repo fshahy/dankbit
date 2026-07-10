@@ -241,9 +241,21 @@ class ChartController(http.Controller):
         # (matplotlib ax.text) — now rendered as page HTML (top-left overlay,
         # see dankbit_page template) instead, off the same summary dankbit.
         # zones.extrema uses, so the two can never disagree.
-        summary = options.zone_summary(longs_obj.STs, longs_obj.payoffs, shorts_obj.payoffs, index_price)
-        top_box = "n/a" if summary["top_box"] is None else "${:,.0f} - ${:,.0f}".format(*summary["top_box"])
-        bottom_box = "n/a" if summary["bottom_box"] is None else "${:,.0f} - ${:,.0f}".format(*summary["bottom_box"])
+        summary = options.zone_summary(longs_obj.STs, longs_obj.payoffs, shorts_obj.payoffs)
+
+        def _format_box(box):
+            # box is None (no crossing at all), or a (low, high) pair that
+            # collapses to a single price when only one curve contributed a
+            # crossing — shown as one number rather than a zero-width range.
+            if box is None:
+                return "n/a"
+            low, high = box
+            if low == high:
+                return "${:,.0f}".format(low)
+            return "${:,.0f} - ${:,.0f}".format(low, high)
+
+        top_box = _format_box(summary["top_box"])
+        bottom_box = _format_box(summary["bottom_box"])
         top_intersection = "n/a" if summary["top_intersection"] is None else "${:,.0f}".format(summary["top_intersection"])
         bottom_intersection = "n/a" if summary["bottom_intersection"] is None else "${:,.0f}".format(summary["bottom_intersection"])
 

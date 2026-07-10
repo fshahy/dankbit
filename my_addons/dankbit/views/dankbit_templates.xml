@@ -609,17 +609,29 @@
 					}
 
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
-						// 0.0 is the "no crossing on this side" sentinel (see
-						// dankbit.zones.extrema) — nothing real to draw.
-						if (!top || !bottom) { boxSeries.setData([]); bottomLineSeries.setData([]); return; }
-						boxSeries.applyOptions({ baseValue: { type: 'price', price: bottom } });
-						boxSeries.setData([
-							{ time: fromTime, value: top },
-							{ time: toTime, value: top },
-						]);
+						// 0.0 is the "no crossing at all" sentinel (see
+						// dankbit.zones.extrema) — nothing real to draw on that edge.
+						if (!top && !bottom) { boxSeries.setData([]); bottomLineSeries.setData([]); return; }
+						if (top && bottom && top !== bottom) {
+							boxSeries.applyOptions({ baseValue: { type: 'price', price: bottom } });
+							boxSeries.setData([
+								{ time: fromTime, value: top },
+								{ time: toTime, value: top },
+							]);
+							bottomLineSeries.setData([
+								{ time: fromTime, value: bottom },
+								{ time: toTime, value: bottom },
+							]);
+							return;
+						}
+						// Only one edge has a crossing, or both coincide (zero-height
+						// box) — can't draw a rectangle, so draw a single line at
+						// whichever price we do have instead of dropping it silently.
+						const price = top || bottom;
+						boxSeries.setData([]);
 						bottomLineSeries.setData([
-							{ time: fromTime, value: bottom },
-							{ time: toTime, value: bottom },
+							{ time: fromTime, value: price },
+							{ time: toTime, value: price },
 						]);
 					}
 
