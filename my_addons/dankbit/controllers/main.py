@@ -319,6 +319,156 @@ class ChartController(http.Controller):
             }
         )
 
+    # instrument, trades since 00:00 UTC, single-leg delta/gamma routes
+    # (/lp, /lc, /sp, /sc) — maps each route's short key to which trades to
+    # keep (direction/option_type) and which OptionStrat leg method
+    # accumulates them.
+    _LEG_ROUTES = {
+        "lp": {"direction": "buy", "option_type": "put", "method": "long_put", "label": "Long Puts"},
+        "lc": {"direction": "buy", "option_type": "call", "method": "long_call", "label": "Long Calls"},
+        "sp": {"direction": "sell", "option_type": "put", "method": "short_put", "label": "Short Puts"},
+        "sc": {"direction": "sell", "option_type": "call", "method": "short_call", "label": "Short Calls"},
+    }
+
+    def _annotate_gamma_delta_crossings(self, ax, STs, market_deltas, market_gammas):
+        """Gamma peak/bottom markers (dashed black) and delta=0 crossings
+        (solid — green for "supply", red for "demand") — same overlay drawn
+        inline by chart_png_hours/chart_png_all, factored out here so the 4
+        single-leg routes below don't each carry their own copy."""
+        trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        d_arr = np.asarray(market_deltas, dtype=float)
+        g_arr = np.asarray(market_gammas, dtype=float)
+        d_lim = float(np.max(np.abs(d_arr[np.isfinite(d_arr)]))) if np.any(np.isfinite(d_arr)) else 1.0
+        g_lim = float(np.max(np.abs(g_arr[np.isfinite(g_arr)]))) if np.any(np.isfinite(g_arr)) else 1.0
+
+        for px, gval in self.find_gamma_peaks(STs, market_gammas) + self.find_gamma_bottoms(STs, market_gammas):
+            ax.axvline(x=px, color="black", linewidth=1.2, linestyle="--", alpha=0.8)
+
+            g_norm = 0.5 + 0.5 * (gval / g_lim) if g_lim else 0.5
+            d_val = float(np.interp(px, STs, d_arr)) if STs.size else 0.0
+            d_norm = 0.5 + 0.5 * (d_val / d_lim) if d_lim else 0.5
+
+            occupied_top = max(g_norm, d_norm)
+            occupied_bot = min(g_norm, d_norm)
+            y = 0.04 if (1.0 - occupied_top) < (occupied_bot - 0.0) else 0.96
+
+            ax.text(px, y, f"${px:,.0f}", transform=trans, color="black",
+                    fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                    rotation=90)
+
+        for i in range(len(d_arr) - 1):
+            if not (np.isfinite(d_arr[i]) and np.isfinite(d_arr[i + 1])):
+                continue
+            if d_arr[i] * d_arr[i + 1] < 0:
+                px = float(STs[i] - d_arr[i] * (STs[i + 1] - STs[i]) / (d_arr[i + 1] - d_arr[i]))
+                demand = d_arr[i] > 0
+                color = "red" if demand else "green"
+                ax.axvline(x=px, color=color, linewidth=1.2, linestyle="-", alpha=0.8)
+                g_norm = 0.5 + 0.5 * (float(np.interp(px, STs, g_arr)) / g_lim) if g_lim else 0.5
+                y = 0.04 if g_norm > 0.5 else 0.96
+                ax.text(px, y, f"${px:,.0f}", transform=trans, color=color,
+                        fontsize=9, ha="right", va="top" if y > 0.5 else "bottom",
+                        rotation=90)
+
+    def _chart_png_single_leg(self, instrument, leg_key):
+        cfg = self._LEG_ROUTES[leg_key]
+        icp = request.env["ir.config_parameter"].sudo()
+
+        from_price = 0
+        to_price = 1000
+        steps = 1
+        if instrument.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        if instrument.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+
+        # Anchored/left-prefix match (not a bare ilike substring) and trades
+        # since 00:00 UTC — same domain convention as chart_png_zones, so a
+        # query for one expiry can't pull in another instrument's trades.
+        midnight_utc = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        domain = [
+            ("name", "=ilike", f"{instrument}-%"),
+            ("expiration", ">=", datetime.now()),
+            ("deribit_ts", ">=", midnight_utc),
+            ("direction", "=", cfg["direction"]),
+            ("option_type", "=", cfg["option_type"]),
+        ]
+        trades = request.env["dankbit.trade"].search(domain=domain)
+
+        index_price = request.env["dankbit.trade"].get_index_price(instrument)
+        obj = options.OptionStrat(instrument, index_price, from_price, to_price, steps)
+        leg_method = getattr(obj, cfg["method"])
+        for trade in trades:
+            leg_method(trade.strike, trade.price * trade.index_price)
+
+        STs = np.arange(from_price, to_price, steps)
+        market_deltas = delta.portfolio_delta(STs, trades, 0.05)
+        market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
+        fig, ax = obj.plot(index_price,
+                           market_deltas,
+                           market_gammas,
+                           False,
+                           title=cfg["label"],
+                           width=18,
+                           height=8)
+
+        self._annotate_gamma_delta_crossings(ax, STs, market_deltas, market_gammas)
+
+        last_trade = request.env["dankbit.trade"].get_last_trade(instrument)
+        last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
+        ax.text(
+            0.01, 0.04,
+            f"{len(trades)} Trades (since 00:00 UTC)",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+        ax.text(
+            0.01, 0.01,
+            f"Last trade: {last_ts}",
+            transform=ax.transAxes,
+            fontsize=14,
+        )
+
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        del fig
+
+        buf.seek(0)
+        image_b64 = base64.b64encode(buf.read()).decode("ascii")
+        return request.render(
+            "dankbit.dankbit_page",
+            {
+                "plot_name": leg_key.upper(),
+                "plot_title": f"{instrument} - {cfg['label']}",
+                "refresh_interval": refresh_interval,
+                "image_b64": image_b64,
+            }
+        )
+
+    @http.route("/<string:instrument>/lp", type="http", auth="public", website=True)
+    def chart_png_long_puts(self, instrument):
+        return self._chart_png_single_leg(instrument, "lp")
+
+    @http.route("/<string:instrument>/lc", type="http", auth="public", website=True)
+    def chart_png_long_calls(self, instrument):
+        return self._chart_png_single_leg(instrument, "lc")
+
+    @http.route("/<string:instrument>/sp", type="http", auth="public", website=True)
+    def chart_png_short_puts(self, instrument):
+        return self._chart_png_single_leg(instrument, "sp")
+
+    @http.route("/<string:instrument>/sc", type="http", auth="public", website=True)
+    def chart_png_short_calls(self, instrument):
+        return self._chart_png_single_leg(instrument, "sc")
+
     @http.route("/<string:instrument>", type="http", auth="public", website=True)
     def chart_png_all(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
@@ -1195,7 +1345,8 @@ class ChartController(http.Controller):
 
         cr = request.env.cr
         cr.execute("""
-            SELECT instrument, index_price, top_intersection, bottom_intersection, middle_band
+            SELECT instrument, index_price, top_intersection, bottom_intersection,
+                   top_intersection_positive, bottom_intersection_positive, middle_band
             FROM dankbit_zones_extrema
             WHERE asset = %s
         """, (asset,))
@@ -1213,7 +1364,10 @@ class ChartController(http.Controller):
             expiry_by_instrument = dict(cr.fetchall())
 
         series = []
-        for instrument, index_price, top_intersection, bottom_intersection, middle_band in rows:
+        for (
+            instrument, index_price, top_intersection, bottom_intersection,
+            top_intersection_positive, bottom_intersection_positive, middle_band,
+        ) in rows:
             expiration = expiry_by_instrument.get(instrument)
             if not expiration:
                 # No trades found at all for this instrument any more —
@@ -1225,6 +1379,11 @@ class ChartController(http.Controller):
                 "index_price": float(index_price or 0.0),
                 "top_intersection": float(top_intersection or 0.0),
                 "bottom_intersection": float(bottom_intersection or 0.0),
+                # Whether the payoff at that intersection sits above/below
+                # the zero line — drives the +/- marker on the chart, not
+                # the point's own price/position.
+                "top_intersection_positive": bool(top_intersection_positive),
+                "bottom_intersection_positive": bool(bottom_intersection_positive),
                 "middle_band": float(middle_band or 0.0),
             })
         series.sort(key=lambda r: r["t"])

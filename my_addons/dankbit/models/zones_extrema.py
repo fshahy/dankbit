@@ -27,6 +27,13 @@ class ZonesExtrema(models.Model):
     index_price = fields.Float(digits=(16, 4))
     top_intersection = fields.Float(digits=(16, 4))
     bottom_intersection = fields.Float(digits=(16, 4))
+    # Whether the payoff value at top_intersection/bottom_intersection (where
+    # the Longs and Shorts curves cross each other) is above (True) or below
+    # (False) the zero-payoff line — the crossing's x-position doesn't say
+    # anything about its y-value, see _compute_asset(). Drives the +/- marker
+    # drawn above each point on the TradingView chart's Zones Extrema lines.
+    top_intersection_positive = fields.Boolean()
+    bottom_intersection_positive = fields.Boolean()
     middle_band = fields.Float(digits=(16, 4))
 
     _sql_constraints = [
@@ -175,6 +182,19 @@ class ZonesExtrema(models.Model):
         diff = longs_obj.payoffs - shorts_obj.payoffs
         lvs_crossings = options_lib.find_zero_crossings(STs, diff)
 
+        # Sign of the payoff *at* each intersection — the crossing's x-price
+        # says nothing about whether the curves meet above or below the
+        # zero-payoff line (both curves can be simultaneously positive,
+        # negative, or straddling zero at that point). longs_obj.payoffs is
+        # interchangeable with shorts_obj.payoffs here since the two are
+        # equal (by definition) at a crossing; interpolated, not read off
+        # the nearest grid point, for a value consistent with the
+        # interpolated crossing price itself.
+        top_intersection = max(lvs_crossings) if lvs_crossings else 0.0
+        bottom_intersection = min(lvs_crossings) if lvs_crossings else 0.0
+        top_intersection_positive = bool(np.interp(top_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
+        bottom_intersection_positive = bool(np.interp(bottom_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
+
         # Middle band: average of the 4 gamma extrema the /<instrument>/zones
         # PNG page's info overlay shows (Long Call/Put Gamma Peak, Short
         # Call/Put Gamma Bottom) — same computation as chart_png_zones,
@@ -207,8 +227,10 @@ class ZonesExtrema(models.Model):
             "computed_at": as_of,
             "expiration": target_expiration,
             "index_price": index_price,
-            "top_intersection": max(lvs_crossings) if lvs_crossings else 0.0,
-            "bottom_intersection": min(lvs_crossings) if lvs_crossings else 0.0,
+            "top_intersection": top_intersection,
+            "bottom_intersection": bottom_intersection,
+            "top_intersection_positive": top_intersection_positive,
+            "bottom_intersection_positive": bottom_intersection_positive,
             "middle_band": middle_band,
             "short_zero_above_price": min(short_above) if short_above else 0.0,
             "long_zero_above_price": min(long_above) if long_above else 0.0,
@@ -258,6 +280,8 @@ class ZonesExtrema(models.Model):
             "index_price": data["index_price"],
             "top_intersection": data["top_intersection"],
             "bottom_intersection": data["bottom_intersection"],
+            "top_intersection_positive": data["top_intersection_positive"],
+            "bottom_intersection_positive": data["bottom_intersection_positive"],
             "middle_band": data["middle_band"],
         }
         record = self.search([("instrument", "=", data["instrument"])], limit=1)

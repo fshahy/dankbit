@@ -599,6 +599,8 @@
 							topIntersectionSeries.setData([]);
 							bottomIntersectionSeries.setData([]);
 							middleBandSeries.setData([]);
+							topIntersectionSeries.setMarkers([]);
+							bottomIntersectionSeries.setMarkers([]);
 							return;
 						}
 						const data = await (await fetch(ZE_URL)).json();
@@ -606,6 +608,27 @@
 						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
 						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
 						middleBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.middle_band })));
+
+						// +/- marker per point: whether the payoff at that
+						// intersection (not the intersection's own price) sits
+						// above or below the zero-payoff line — size:0 hides the
+						// marker's shape glyph so only the text renders.
+						topIntersectionSeries.setMarkers(rows.map(r => ({
+							time: Math.floor(r.t / 1000) + berlinOffset,
+							position: 'aboveBar',
+							color: '#2e7d32',
+							shape: 'circle',
+							size: 0,
+							text: r.top_intersection_positive ? '+' : '-',
+						})));
+						bottomIntersectionSeries.setMarkers(rows.map(r => ({
+							time: Math.floor(r.t / 1000) + berlinOffset,
+							position: 'aboveBar',
+							color: '#c62828',
+							shape: 'circle',
+							size: 0,
+							text: r.bottom_intersection_positive ? '+' : '-',
+						})));
 					}
 
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
