@@ -1300,53 +1300,6 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/quadrant-gamma/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def quadrant_gamma_json(self, asset):
-        asset = asset.upper()
-        if not (asset.startswith("BTC") or asset.startswith("ETH")):
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        cr = request.env.cr
-        cr.execute("""
-            SELECT computed_at, index_price, buyer_call_gamma, buyer_put_gamma,
-                   seller_call_gamma, seller_put_gamma
-            FROM dankbit_quadrant_gamma
-            WHERE asset = %s
-              AND computed_at >= NOW() - INTERVAL '30 days'
-            ORDER BY computed_at ASC
-        """, (asset,))
-        rows = cr.fetchall()
-
-        by_hour = {}
-        for computed_at, index_price, bcg, bpg, scg, spg in rows:
-            ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
-            ts = ts.replace(minute=0, second=0, microsecond=0)
-            # if the cron fired more than once within the same hour, keep the latest
-            by_hour[int(ts.timestamp() * 1000)] = {
-                "t": int(ts.timestamp() * 1000),
-                "index_price": float(index_price or 0.0),
-                "buyer_call_gamma": float(bcg or 0.0),
-                "buyer_put_gamma": float(bpg or 0.0),
-                "seller_call_gamma": float(scg or 0.0),
-                "seller_put_gamma": float(spg or 0.0),
-                "net_call_gamma": float((bcg or 0.0) + (scg or 0.0)),
-                "net_put_gamma": float((bpg or 0.0) + (spg or 0.0)),
-            }
-        series = [by_hour[t] for t in sorted(by_hour)]
-
-        payload = {
-            "asset": asset,
-            "quadrant_gamma": series,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
     @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_extrema_json(self, asset):
         """One point per instrument stored in dankbit.zones.extrema (each

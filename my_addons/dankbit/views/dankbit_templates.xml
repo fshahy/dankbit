@@ -247,7 +247,6 @@
 					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
-					const QG_URL           = '/api/quadrant-gamma/' + ASSET;
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
@@ -298,13 +297,6 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					const netCallSeries = chart.addLineSeries({ priceScaleId: 'qg', color: '#1565c0', lineWidth: 2, title: 'Net Call Gamma' });
-					const netPutSeries  = chart.addLineSeries({ priceScaleId: 'qg', color: '#e65100', lineWidth: 2, title: 'Net Put Gamma' });
-					chart.priceScale('qg').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-
-					// Plain price levels (not dollar amounts), so these live on the
-					// default/main price scale directly with the candles, not on the
-					// 'qg' dollar-gamma scale.
 					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
@@ -432,7 +424,6 @@
 						INTERVAL = iv;
 						document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.textContent === iv));
 						await loadCandles();
-						await refreshQuadrantGamma();
 						await refreshZonesExtrema();
 						await refreshZonesBoxes();
 						await refreshZonesExtremaExtended();
@@ -575,18 +566,6 @@
 						if (!GL_M_URL) return;
 						const data = await (await fetch(GL_M_URL)).json();
 						drawGammaLines(SHOW_MONTHLY_LINES ? data : { peaks: [], bottoms: [] }, monthlyGammaLines, 1, 'Monthly', 'violet');
-					}
-
-					async function refreshQuadrantGamma() {
-						if (INTERVAL !== '1h') {
-							netCallSeries.setData([]);
-							netPutSeries.setData([]);
-							return;
-						}
-						const data = await (await fetch(QG_URL)).json();
-						const rows = data.quadrant_gamma || [];
-						netCallSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.net_call_gamma })));
-						netPutSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.net_put_gamma })));
 					}
 
 					async function refreshZonesExtrema() {
@@ -762,7 +741,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshQuadrantGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -793,7 +772,6 @@
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
-					setInterval(refreshQuadrantGamma, REFRESH);
 					setInterval(refreshZonesExtrema, REFRESH);
 					setInterval(refreshZonesBoxes, REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);

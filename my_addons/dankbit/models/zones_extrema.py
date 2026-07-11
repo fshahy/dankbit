@@ -93,8 +93,7 @@ class ZonesExtrema(models.Model):
         boundaries for `asset` as of now, using trades since today's UTC
         midnight for one specific active expiry only — mirrors the
         /<instrument>/zones PNG route called with that specific instrument,
-        aggregated per-asset (dankbit.quadrant.gamma loops BTC/ETH the same
-        way). `expiry_index` selects which active expiry, in soonest-first
+        aggregated per-asset. `expiry_index` selects which active expiry, in soonest-first
         order: 0 (default) is the nearest one, 1 is the next one after that,
         etc. The result includes that expiry's own `expiration` datetime
         (Deribit's real settlement time, e.g. 08:00 UTC — read directly off
