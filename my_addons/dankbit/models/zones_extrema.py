@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -90,10 +90,8 @@ class ZonesExtrema(models.Model):
         intersection (top_intersection/bottom_intersection — not relative to
         index_price, see below), gamma_band (average of
         the 4 gamma extrema — see below), plus the 4 zero-crossing box
-        boundaries for `asset` as of now, using trades since today's UTC
-        midnight for one specific active expiry only — mirrors the
-        /<instrument>/zones PNG route called with that specific instrument,
-        aggregated per-asset. `expiry_index` selects which active expiry, in soonest-first
+        boundaries for `asset` as of now, using trades from the trailing 24h
+        for one specific active expiry only. `expiry_index` selects which active expiry, in soonest-first
         order: 0 (default) is the nearest one, 1 is the next one after that,
         etc. The result includes that expiry's own `expiration` datetime
         (Deribit's real settlement time, e.g. 08:00 UTC — read directly off
@@ -135,20 +133,20 @@ class ZonesExtrema(models.Model):
             f"{target_expiration.strftime('%b').upper()}{target_expiration.strftime('%y')}"
         )
 
-        midnight_utc = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+        trailing_24h = as_of - timedelta(hours=24)
         domain = [
             ("name", "=ilike", f"{asset}-%"),
             ("expiration", "=", target_expiration),
-            ("deribit_ts", ">=", midnight_utc),
+            ("deribit_ts", ">=", trailing_24h),
             ("deribit_ts", "<=", as_of),
         ]
         trades = Trade.search(domain=domain)
         if not trades:
-            # No trades since midnight for this expiry (e.g. thin/no activity
-            # right before it rolls off) — an all-zero payoffs curve has no
-            # real extrema, and argmax/argmin would trivially return index 0
-            # (the configured price-range floor), a meaningless value that
-            # looks like real data. Skip instead.
+            # No trades in the trailing 24h for this expiry (e.g. thin/no
+            # activity right before it rolls off) — an all-zero payoffs curve
+            # has no real extrema, and argmax/argmin would trivially return
+            # index 0 (the configured price-range floor), a meaningless value
+            # that looks like real data. Skip instead.
             _logger.warning(
                 "_compute_asset: no trades for %s expiry index %s as of %s, skipping",
                 asset, expiry_index, as_of,
@@ -215,7 +213,7 @@ class ZonesExtrema(models.Model):
         # PNG page's info overlay shows (Long Call/Put Gamma Peak, Short
         # Call/Put Gamma Bottom) — same computation as chart_png_zones,
         # against this same `trades`/`STs` (already the single target
-        # expiry's since-midnight trades, so no separate "nearest expiry
+        # expiry's trailing-24h trades, so no separate "nearest expiry
         # among trades" re-filtering is needed here unlike chart_png_zones,
         # which accepts a possibly-multi-expiry `trades` set). Short
         # positions carry negative gamma (portfolio_gamma's sign for "sell"
