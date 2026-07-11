@@ -292,6 +292,21 @@ class ChartController(http.Controller):
         short_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_puts)
         short_put_gamma_bottom_price = float(longs_obj.STs[int(np.argmin(short_put_gamma_curve))])
 
+        # Delta-saturation asset prices - same options.delta_saturation_price()
+        # dankbit.zones.extrema's own delta_band uses, against this same
+        # next-expiry-only long_calls/long_puts/short_calls/short_puts, so
+        # this page can never disagree with delta_band on these 4 points.
+        # Calls saturate ITM at high S ('max' edge), puts at low S ('min'
+        # edge), independent of long/short.
+        long_call_delta_price = options.delta_saturation_price(
+            longs_obj.STs, long_calls, self.DELTA_SATURATION_FRACTION, "max")
+        long_put_delta_price = options.delta_saturation_price(
+            longs_obj.STs, long_puts, self.DELTA_SATURATION_FRACTION, "min")
+        short_call_delta_price = options.delta_saturation_price(
+            longs_obj.STs, short_calls, self.DELTA_SATURATION_FRACTION, "max")
+        short_put_delta_price = options.delta_saturation_price(
+            longs_obj.STs, short_puts, self.DELTA_SATURATION_FRACTION, "min")
+
         zone_info_lines = [
             "Short Max: ${:,.0f}".format(summary["short_max_price"]),
             "Long Min: ${:,.0f}".format(summary["long_min_price"]),
@@ -303,6 +318,11 @@ class ChartController(http.Controller):
             "Long Put Gamma Peak: ${:,.0f}".format(long_put_gamma_peak_price),
             "Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price),
             "Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price),
+            " ",
+            "Long Call Delta: ${:,.0f}".format(long_call_delta_price),
+            "Long Put Delta: ${:,.0f}".format(long_put_delta_price),
+            "Short Call Delta: ${:,.0f}".format(short_call_delta_price),
+            "Short Put Delta: ${:,.0f}".format(short_put_delta_price),
             " ",
             f"Top Intersection: {top_intersection}",
             f"Bottom Intersection: {bottom_intersection}",

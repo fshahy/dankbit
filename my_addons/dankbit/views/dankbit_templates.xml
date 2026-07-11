@@ -660,14 +660,14 @@
 					async function refreshZonesExtremaExtended() {
 						if (INTERVAL !== '4h') return;
 						// Only the nearest active expiry (expiry_index 0) draws a box —
-						// expiry_index 1 and 2 just keep their dankbit.zones.extrema rows
-						// fresh while the chart is open (see get_box_n), the same way
+						// expiry_index 1 through 4 just keep their dankbit.zones.extrema
+						// rows fresh while the chart is open (see get_box_n), the same way
 						// refreshZonesBoxes() does for 0, so refreshZonesExtrema()'s next
 						// poll picks up fresher Top/Bottom Intersection, Gamma Band, and
 						// Delta Band points for them — no box is rendered from this call's
 						// response, so there's nothing to do with it beyond triggering the
 						// server-side computation.
-						for (const i of [1, 2]) {
+						for (const i of [1, 2, 3, 4]) {
 							try { await fetch('/api/zones-extrema-refresh/' + ASSET + '/' + i); } catch (e) { /* best-effort */ }
 						}
 					}
