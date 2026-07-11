@@ -241,8 +241,6 @@
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
-					const DZN_URL          = '/api/delta-zero-next/' + ASSET;
-					const DZN1_URL         = '/api/delta-zero-next-plus-one/' + ASSET;
 					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
 					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
@@ -340,8 +338,6 @@
 					let priceLines    = [];
 					let monthlyLines  = [];
 					let allLines      = [];
-					let nextLines     = [];
-					let nextPlusOneLines = [];
 					let tomorrowLines = [];
 					let dayAfterTomorrowLines = [];
 
@@ -487,30 +483,6 @@
 						})));
 					}
 
-					async function refreshNextDeltaZero() {
-						const data = await (await fetch(DZN_URL)).json();
-						clearLines(nextLines);
-						if (!SHOW_DAILY_LINES) return;
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => nextLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily',
-						})));
-					}
-
-					async function refreshNextPlusOneDeltaZero() {
-						const data = await (await fetch(DZN1_URL)).json();
-						clearLines(nextPlusOneLines);
-						if (!SHOW_DAILY_LINES) return;
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => nextPlusOneLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1',
-						})));
-					}
-
 					async function refreshTomorrowDeltaZero() {
 						const data = await (await fetch(DZT_URL)).json();
 						clearLines(tomorrowLines);
@@ -519,7 +491,7 @@
 						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily 24H',
+							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily (24H)',
 						})));
 					}
 
@@ -531,7 +503,7 @@
 						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
 							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Daily+1 24H',
+							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily+1 (24H)',
 						})));
 					}
 
@@ -741,7 +713,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshNextDeltaZero(); await refreshNextPlusOneDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -766,8 +738,6 @@
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshNearestExpiry, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
-					setInterval(refreshNextDeltaZero, REFRESH);
-					setInterval(refreshNextPlusOneDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
 					setInterval(refreshWeeklyGamma, REFRESH);

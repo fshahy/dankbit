@@ -81,7 +81,7 @@ class ResConfigSettings(models.TransientModel):
     show_daily_lines = fields.Boolean(
         string="Show Daily Lines",
         default=True,
-        help="Show the Daily 24H / Daily+1 24H delta=0 lines on the TradingView chart.",
+        help="Show the Daily (24H) / Daily+1 (24H) delta=0 lines on the TradingView chart.",
     )
 
     show_weekly_lines = fields.Boolean(
