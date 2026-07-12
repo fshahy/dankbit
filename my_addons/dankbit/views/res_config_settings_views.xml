@@ -12,6 +12,9 @@
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
+                            <field name="zones_box_refresh_interval" placeholder="Zones Box Refresh Interval (s)"/>
+                        </setting>
+                        <setting>
                             <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
                         </setting>
                         <setting>

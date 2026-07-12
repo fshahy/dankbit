@@ -10,6 +10,7 @@ from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
+from . import theta
 
 
 class _AggTrade:
@@ -269,13 +270,17 @@ class ChartController(http.Controller):
             lambda t: t.direction == "buy" and t.option_type == "call" and t.expiration == next_expiration
         )
         long_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_calls)
-        long_call_gamma_peak_price = float(longs_obj.STs[int(np.argmax(long_call_gamma_curve))])
+        long_call_gamma_peak_index = int(np.argmax(long_call_gamma_curve))
+        long_call_gamma_peak_price = float(longs_obj.STs[long_call_gamma_peak_index])
+        long_call_gamma_peak_value = float(long_call_gamma_curve[long_call_gamma_peak_index])
 
         long_puts = trades.filtered(
             lambda t: t.direction == "buy" and t.option_type == "put" and t.expiration == next_expiration
         )
         long_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_puts)
-        long_put_gamma_peak_price = float(longs_obj.STs[int(np.argmax(long_put_gamma_curve))])
+        long_put_gamma_peak_index = int(np.argmax(long_put_gamma_curve))
+        long_put_gamma_peak_price = float(longs_obj.STs[long_put_gamma_peak_index])
+        long_put_gamma_peak_value = float(long_put_gamma_curve[long_put_gamma_peak_index])
 
         # Short positions carry negative gamma (portfolio_gamma's sign for
         # "sell" is -1), so the relevant extremum is where the curve bottoms
@@ -284,13 +289,17 @@ class ChartController(http.Controller):
             lambda t: t.direction == "sell" and t.option_type == "call" and t.expiration == next_expiration
         )
         short_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_calls)
-        short_call_gamma_bottom_price = float(longs_obj.STs[int(np.argmin(short_call_gamma_curve))])
+        short_call_gamma_bottom_index = int(np.argmin(short_call_gamma_curve))
+        short_call_gamma_bottom_price = float(longs_obj.STs[short_call_gamma_bottom_index])
+        short_call_gamma_bottom_value = float(short_call_gamma_curve[short_call_gamma_bottom_index])
 
         short_puts = trades.filtered(
             lambda t: t.direction == "sell" and t.option_type == "put" and t.expiration == next_expiration
         )
         short_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_puts)
-        short_put_gamma_bottom_price = float(longs_obj.STs[int(np.argmin(short_put_gamma_curve))])
+        short_put_gamma_bottom_index = int(np.argmin(short_put_gamma_curve))
+        short_put_gamma_bottom_price = float(longs_obj.STs[short_put_gamma_bottom_index])
+        short_put_gamma_bottom_value = float(short_put_gamma_curve[short_put_gamma_bottom_index])
 
         # Delta-saturation asset prices - same options.delta_saturation_price()
         # dankbit.zones.extrema's own delta_band uses, against this same
@@ -307,25 +316,81 @@ class ChartController(http.Controller):
         short_put_delta_price = options.delta_saturation_price(
             longs_obj.STs, short_puts, self.DELTA_SATURATION_FRACTION, "min")
 
+        # Portfolio-delta value at each saturation price above — interpolated
+        # off the same curve delta_saturation_price() searches (rather than
+        # just DELTA_SATURATION_FRACTION * the curve's own edge value), so
+        # the fallback case (curve never reaches the 90% threshold in this
+        # window, saturation price falls back to the STs edge) still reports
+        # the real value at that price instead of a threshold never reached.
+        long_call_delta_value = float(np.interp(
+            long_call_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, long_calls)))
+        long_put_delta_value = float(np.interp(
+            long_put_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, long_puts)))
+        short_call_delta_value = float(np.interp(
+            short_call_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, short_calls)))
+        short_put_delta_value = float(np.interp(
+            short_put_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, short_puts)))
+
+        # Price where each leg's portfolio theta is most extreme over the
+        # same zoomed price grid gamma/delta use — mirroring gamma's
+        # peak/bottom pattern, but sign-flipped: long positions carry
+        # negative theta (decay cost), so their extremum is the trough
+        # (argmin, worst decay); short positions carry positive theta
+        # (decay gain), so theirs is the peak (argmax, best decay). r=0.0
+        # to match every other Greek computed on this page (see delta/gamma
+        # above — zones deliberately doesn't use the r=0.05 the
+        # combined-portfolio routes use).
+        long_call_theta_curve = theta.portfolio_theta(longs_obj.STs, long_calls)
+        long_call_theta_price = float(longs_obj.STs[int(np.argmin(long_call_theta_curve))])
+
+        long_put_theta_curve = theta.portfolio_theta(longs_obj.STs, long_puts)
+        long_put_theta_price = float(longs_obj.STs[int(np.argmin(long_put_theta_curve))])
+
+        short_call_theta_curve = theta.portfolio_theta(longs_obj.STs, short_calls)
+        short_call_theta_price = float(longs_obj.STs[int(np.argmax(short_call_theta_curve))])
+
+        short_put_theta_curve = theta.portfolio_theta(longs_obj.STs, short_puts)
+        short_put_theta_price = float(longs_obj.STs[int(np.argmax(short_put_theta_curve))])
+
+        # Each line is {text, color} — color is None for the default
+        # (black) styling every line used before per-line colors were
+        # needed; only section headers like "Gamma" below set one.
+        def _line(text, color=None):
+            return {"text": text, "color": color}
+
         zone_info_lines = [
-            "Short Max: ${:,.0f}".format(summary["short_max_price"]),
-            "Long Min: ${:,.0f}".format(summary["long_min_price"]),
-            " ",  # blank spacer line — a truly empty div collapses to zero height
-            f"Top Box: {top_box}",
-            f"Bottom Box: {bottom_box}",
-            " ",
-            "Long Call Gamma Peak: ${:,.0f}".format(long_call_gamma_peak_price),
-            "Long Put Gamma Peak: ${:,.0f}".format(long_put_gamma_peak_price),
-            "Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price),
-            "Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price),
-            " ",
-            "Long Call Delta: ${:,.0f}".format(long_call_delta_price),
-            "Long Put Delta: ${:,.0f}".format(long_put_delta_price),
-            "Short Call Delta: ${:,.0f}".format(short_call_delta_price),
-            "Short Put Delta: ${:,.0f}".format(short_put_delta_price),
-            " ",
-            f"Top Intersection: {top_intersection}",
-            f"Bottom Intersection: {bottom_intersection}",
+            _line("Short Max: ${:,.0f}".format(summary["short_max_price"])),
+            _line("Long Min: ${:,.0f}".format(summary["long_min_price"])),
+            _line(" "),  # blank spacer line — a truly empty div collapses to zero height
+            _line(f"Top Box: {top_box}"),
+            _line(f"Bottom Box: {bottom_box}"),
+            _line(" "),
+            _line(f"Top Intersection: {top_intersection}"),
+            _line(f"Bottom Intersection: {bottom_intersection}"),
+            _line(" "),
+            _line("Gamma", color="violet"),
+            _line("Long Call Gamma Peak: ${:,.0f}".format(long_call_gamma_peak_price)),
+            _line("Long Put Gamma Peak: ${:,.0f}".format(long_put_gamma_peak_price)),
+            _line("Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price)),
+            _line("Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price)),
+            _line(" "),
+            _line("Long Call Gamma Peak Value: {:,.0f}".format(long_call_gamma_peak_value)),
+            _line("Long Put Gamma Peak Value: {:,.0f}".format(long_put_gamma_peak_value)),
+            _line("Short Call Gamma Bottom Value: {:,.0f}".format(short_call_gamma_bottom_value)),
+            _line("Short Put Gamma Bottom Value: {:,.0f}".format(short_put_gamma_bottom_value)),
+            _line(" "),
+            _line("Delta", color="green"),
+            _line("Long Call Delta: ${:,.0f}".format(long_call_delta_price)),
+            _line("Long Put Delta: ${:,.0f}".format(long_put_delta_price)),
+            _line("Short Call Delta: ${:,.0f}".format(short_call_delta_price)),
+            _line("Short Put Delta: ${:,.0f}".format(short_put_delta_price)),
+            _line(" "),
+            _line("Long Call Delta Value: {:,.2f}".format(long_call_delta_value)),
+            _line("Long Put Delta Value: {:,.2f}".format(long_put_delta_value)),
+            _line("Short Call Delta Value: {:,.2f}".format(short_call_delta_value)),
+            _line("Short Put Delta Value: {:,.2f}".format(short_put_delta_value)),
+            # Theta section hidden for now (computed above, not displayed) —
+            # revisit once the right presentation is settled.
         ]
 
         return request.render(
@@ -1343,7 +1408,7 @@ class ChartController(http.Controller):
         computation for expiry_index 1 upward (0, the nearest expiry, already
         gets this as a side effect of /api/zones-box, the only one that draws
         a box) — no box is ever drawn for these, only the Top/Bottom
-        Intersection, Gamma Band, and Delta Band term-structure lines, which
+        Intersection and Gamma Band term-structure lines, which
         read every persisted row for the asset via /api/zones-extrema/<asset>
         regardless of expiry_index. Called by the TradingView chart's
         periodic refresh purely to keep those rows fresh at
@@ -1468,6 +1533,7 @@ class ChartController(http.Controller):
 
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        zones_box_refresh_interval = int(icp.get_param("dankbit.zones_box_refresh_interval", default=3600))
         # QWeb's t-att-* omits the attribute entirely when the value is a
         # falsy Python bool/None, so pass "true"/"false" strings (always
         # truthy) rather than real booleans — otherwise data-show-daily=false
@@ -1508,6 +1574,7 @@ class ChartController(http.Controller):
             "expiry": expiry_str,
             "monthly_instrument": monthly_instrument,
             "refresh_interval": refresh_interval,
+            "zones_box_refresh_interval": zones_box_refresh_interval,
             "show_daily_lines": show_daily_lines,
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,

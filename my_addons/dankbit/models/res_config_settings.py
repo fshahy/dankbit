@@ -34,10 +34,16 @@ class ResConfigSettings(models.TransientModel):
     )
 
     refresh_interval = fields.Integer(
-        string="Refresh interval",
+        string="Refresh interval (s)",
         config_parameter="dankbit.refresh_interval"
     )
-    
+
+    zones_box_refresh_interval = fields.Integer(
+        string="Zones box refresh interval (s)",
+        config_parameter="dankbit.zones_box_refresh_interval",
+        help="How often (in seconds) the TradingView chart re-fetches the yellow/teal zones boxes. Defaults to 3600 (1 hour).",
+    )
+
     deribit_timeout = fields.Float(
         string="Deribit API timeout (s)",
         config_parameter="dankbit.deribit_timeout",

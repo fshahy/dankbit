@@ -85,7 +85,7 @@
 			<body>
 				<div t-if="zone_info_lines" class="zone-info">
 					<t t-foreach="zone_info_lines" t-as="line">
-						<div><t t-esc="line"/></div>
+						<div t-att-style="'color: %s' % line['color'] if line['color'] else None"><t t-esc="line['text']"/></div>
 					</t>
 				</div>
 				<div class="wrap">
@@ -218,7 +218,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
@@ -235,6 +235,7 @@
 					const ASSET            = cfg.asset;
 					const MONTHLY_INST     = cfg.monthly || '';
 					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
+					const ZONES_BOX_REFRESH = parseInt(cfg.zonesBoxRefresh, 10) * 1000;
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
@@ -298,7 +299,6 @@
 					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
-					const deltaBandSeries          = chart.addLineSeries({ color: '#1b5e20', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -545,7 +545,6 @@
 							topIntersectionSeries.setData([]);
 							bottomIntersectionSeries.setData([]);
 							gammaBandSeries.setData([]);
-							deltaBandSeries.setData([]);
 							topIntersectionSeries.setMarkers([]);
 							bottomIntersectionSeries.setMarkers([]);
 							return;
@@ -555,7 +554,6 @@
 						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
 						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
 						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.gamma_band })));
-						deltaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.delta_band })));
 
 						// +/- marker per point: whether the payoff at that
 						// intersection (not the intersection's own price) sits
@@ -660,14 +658,14 @@
 					async function refreshZonesExtremaExtended() {
 						if (INTERVAL !== '4h') return;
 						// Only the nearest active expiry (expiry_index 0) draws a box —
-						// expiry_index 1 through 4 just keep their dankbit.zones.extrema
+						// expiry_index 1 through 2 just keep their dankbit.zones.extrema
 						// rows fresh while the chart is open (see get_box_n), the same way
 						// refreshZonesBoxes() does for 0, so refreshZonesExtrema()'s next
-						// poll picks up fresher Top/Bottom Intersection, Gamma Band, and
-						// Delta Band points for them — no box is rendered from this call's
+						// poll picks up fresher Top/Bottom Intersection and Gamma Band
+						// points for them — no box is rendered from this call's
 						// response, so there's nothing to do with it beyond triggering the
 						// server-side computation.
-						for (const i of [1, 2, 3, 4]) {
+						for (const i of [1, 2]) {
 							try { await fetch('/api/zones-extrema-refresh/' + ASSET + '/' + i); } catch (e) { /* best-effort */ }
 						}
 					}
@@ -743,7 +741,7 @@
 					setInterval(refreshWeeklyGamma, REFRESH);
 					setInterval(refreshMonthlyGamma, REFRESH);
 					setInterval(refreshZonesExtrema, REFRESH);
-					setInterval(refreshZonesBoxes, REFRESH);
+					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
 				//]]></script>
 			</body>

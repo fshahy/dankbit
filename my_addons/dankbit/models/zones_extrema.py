@@ -345,11 +345,11 @@ class ZonesExtrema(models.Model):
     # How many active expiries (soonest-first, 0 = nearest) get a persisted
     # zones-extrema row at all — the TradingView chart only draws an actual
     # box for expiry_index 0 (yellow), but every index up to this bound still
-    # feeds the Top/Bottom Intersection, Gamma Band, and Delta Band
-    # term-structure lines (see get_box_n/refreshZonesExtrema), which render
+    # feeds the Top/Bottom Intersection and Gamma Band term-structure lines
+    # (see get_box_n/refreshZonesExtrema), which render
     # whatever rows exist for the asset regardless of whether a box was ever
     # drawn for them.
-    TRACKED_EXPIRY_COUNT = 5
+    TRACKED_EXPIRY_COUNT = 3
 
     def get_box_n(self, asset, expiry_index):
         """Live zones-extrema computation for `asset`'s `expiry_index`-th
@@ -360,7 +360,7 @@ class ZonesExtrema(models.Model):
         chart). Called directly for expiry_index 1 upward by
         /api/zones-extrema-refresh/<asset>/<expiry_index> — those don't draw
         a box (only the nearest expiry, index 0, gets the yellow box), only
-        feed the Top/Bottom Intersection, Gamma Band, and Delta Band lines,
+        feed the Top/Bottom Intersection and Gamma Band lines,
         which read every persisted row for the asset regardless of
         expiry_index. The 4 box-boundary fields themselves are still never
         persisted, only the computed_at moment's index_price/
