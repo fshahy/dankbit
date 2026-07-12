@@ -79,12 +79,33 @@
 						z-index: 10;
 						user-select: text;
 					}
+
+					.zone-info-right {
+						position: fixed;
+						top: 8px;
+						right: 12px;
+						font-family: sans-serif;
+						font-size: 14pt;
+						font-weight: bold;
+						color: #000;
+						background: rgba(255,255,255,0.88);
+						padding: 4px 10px;
+						border-radius: 4px;
+						z-index: 10;
+						user-select: text;
+						text-align: left;
+					}
 				</style>
 			</head>
 
 			<body>
 				<div t-if="zone_info_lines" class="zone-info">
 					<t t-foreach="zone_info_lines" t-as="line">
+						<div t-att-style="'color: %s' % line['color'] if line['color'] else None"><t t-esc="line['text']"/></div>
+					</t>
+				</div>
+				<div t-if="theta_info_lines" class="zone-info-right">
+					<t t-foreach="theta_info_lines" t-as="line">
 						<div t-att-style="'color: %s' % line['color'] if line['color'] else None"><t t-esc="line['text']"/></div>
 					</t>
 				</div>

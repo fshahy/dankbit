@@ -341,16 +341,24 @@ class ChartController(http.Controller):
         # above — zones deliberately doesn't use the r=0.05 the
         # combined-portfolio routes use).
         long_call_theta_curve = theta.portfolio_theta(longs_obj.STs, long_calls)
-        long_call_theta_price = float(longs_obj.STs[int(np.argmin(long_call_theta_curve))])
+        long_call_theta_index = int(np.argmin(long_call_theta_curve))
+        long_call_theta_price = float(longs_obj.STs[long_call_theta_index])
+        long_call_theta_value = float(long_call_theta_curve[long_call_theta_index])
 
         long_put_theta_curve = theta.portfolio_theta(longs_obj.STs, long_puts)
-        long_put_theta_price = float(longs_obj.STs[int(np.argmin(long_put_theta_curve))])
+        long_put_theta_index = int(np.argmin(long_put_theta_curve))
+        long_put_theta_price = float(longs_obj.STs[long_put_theta_index])
+        long_put_theta_value = float(long_put_theta_curve[long_put_theta_index])
 
         short_call_theta_curve = theta.portfolio_theta(longs_obj.STs, short_calls)
-        short_call_theta_price = float(longs_obj.STs[int(np.argmax(short_call_theta_curve))])
+        short_call_theta_index = int(np.argmax(short_call_theta_curve))
+        short_call_theta_price = float(longs_obj.STs[short_call_theta_index])
+        short_call_theta_value = float(short_call_theta_curve[short_call_theta_index])
 
         short_put_theta_curve = theta.portfolio_theta(longs_obj.STs, short_puts)
-        short_put_theta_price = float(longs_obj.STs[int(np.argmax(short_put_theta_curve))])
+        short_put_theta_index = int(np.argmax(short_put_theta_curve))
+        short_put_theta_price = float(longs_obj.STs[short_put_theta_index])
+        short_put_theta_value = float(short_put_theta_curve[short_put_theta_index])
 
         # Each line is {text, color} — color is None for the default
         # (black) styling every line used before per-line colors were
@@ -374,10 +382,10 @@ class ChartController(http.Controller):
             _line("Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price)),
             _line("Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price)),
             _line(" "),
-            _line("Long Call Gamma Peak Value: {:,.0f}".format(long_call_gamma_peak_value)),
-            _line("Long Put Gamma Peak Value: {:,.0f}".format(long_put_gamma_peak_value)),
-            _line("Short Call Gamma Bottom Value: {:,.0f}".format(short_call_gamma_bottom_value)),
-            _line("Short Put Gamma Bottom Value: {:,.0f}".format(short_put_gamma_bottom_value)),
+            _line("Long Call Gamma Peak Value: {:,.0f}".format(abs(long_call_gamma_peak_value) / 1_000_000)),
+            _line("Long Put Gamma Peak Value: {:,.0f}".format(abs(long_put_gamma_peak_value) / 1_000_000)),
+            _line("Short Call Gamma Bottom Value: {:,.0f}".format(abs(short_call_gamma_bottom_value) / 1_000_000)),
+            _line("Short Put Gamma Bottom Value: {:,.0f}".format(abs(short_put_gamma_bottom_value) / 1_000_000)),
             _line(" "),
             _line("Delta", color="green"),
             _line("Long Call Delta: ${:,.0f}".format(long_call_delta_price)),
@@ -385,12 +393,26 @@ class ChartController(http.Controller):
             _line("Short Call Delta: ${:,.0f}".format(short_call_delta_price)),
             _line("Short Put Delta: ${:,.0f}".format(short_put_delta_price)),
             _line(" "),
-            _line("Long Call Delta Value: {:,.2f}".format(long_call_delta_value)),
-            _line("Long Put Delta Value: {:,.2f}".format(long_put_delta_value)),
-            _line("Short Call Delta Value: {:,.2f}".format(short_call_delta_value)),
-            _line("Short Put Delta Value: {:,.2f}".format(short_put_delta_value)),
-            # Theta section hidden for now (computed above, not displayed) —
-            # revisit once the right presentation is settled.
+            _line("Long Call Delta Value: {:,.0f}".format(abs(long_call_delta_value) / 10)),
+            _line("Long Put Delta Value: {:,.0f}".format(abs(long_put_delta_value) / 10)),
+            _line("Short Call Delta Value: {:,.0f}".format(abs(short_call_delta_value) / 10)),
+            _line("Short Put Delta Value: {:,.0f}".format(abs(short_put_delta_value) / 10)),
+        ]
+
+        # Theta gets its own top-right overlay (see .zone-info-right in
+        # dankbit_page) rather than sitting in the top-left zone_info_lines
+        # column with everything else.
+        theta_info_lines = [
+            _line("Theta", color="orange"),
+            _line("Long Call Theta: ${:,.0f}".format(long_call_theta_price)),
+            _line("Long Put Theta: ${:,.0f}".format(long_put_theta_price)),
+            _line("Short Call Theta: ${:,.0f}".format(short_call_theta_price)),
+            _line("Short Put Theta: ${:,.0f}".format(short_put_theta_price)),
+            _line(" "),
+            _line("Long Call Theta Value: {:,.0f}".format(abs(long_call_theta_value) / 10_000)),
+            _line("Long Put Theta Value: {:,.0f}".format(abs(long_put_theta_value) / 10_000)),
+            _line("Short Call Theta Value: {:,.0f}".format(abs(short_call_theta_value) / 10_000)),
+            _line("Short Put Theta Value: {:,.0f}".format(abs(short_put_theta_value) / 10_000)),
         ]
 
         return request.render(
@@ -401,6 +423,7 @@ class ChartController(http.Controller):
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
                 "zone_info_lines": zone_info_lines,
+                "theta_info_lines": theta_info_lines,
             }
         )
 
