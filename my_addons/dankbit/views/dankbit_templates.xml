@@ -252,11 +252,25 @@
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
-					const berlinOffset = (() => {
+					// Lightweight Charts has no native IANA-timezone support — it always
+					// renders epoch seconds as UTC wall-clock time. To display any other
+					// zone, every timestamp fed into the chart is pre-shifted by that
+					// zone's current UTC offset (DST-aware, since it's computed against
+					// "now"), and localization.timeFormatter below formats with
+					// timeZone: 'UTC' so the shifted epoch reads as real wall-clock time.
+					// The zone itself is auto-detected from the browser rather than
+					// hardcoded, falling back to UTC (offset 0) if detection ever fails.
+					const tzOffset = (() => {
+						let zone;
+						try {
+							zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+						} catch (e) {
+							return 0;
+						}
 						const d = new Date();
 						const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
-						const ber = new Date(d.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
-						return (ber - utc) / 1000;
+						const local = new Date(d.toLocaleString('en-US', { timeZone: zone }));
+						return (local - utc) / 1000;
 					})();
 
 					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
@@ -351,7 +365,7 @@
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
 					function toCandle(k) {
-						return { time: Math.floor(k.t / 1000) + berlinOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
+						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
 					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 365 };
@@ -385,7 +399,7 @@
 						const lastClose = realCandles.length ? realCandles[realCandles.length - 1].close : 0;
 						const lastTime = realCandles.length
 							? realCandles[realCandles.length - 1].time
-							: (Math.floor(Date.now() / 1000) + berlinOffset);
+							: (Math.floor(Date.now() / 1000) + tzOffset);
 						const count = Math.round(FUTURE_MARGIN_DAYS * 86400 / intervalSec);
 						const futureTicks = [];
 						for (let i = 1; i <= count; i++) {
@@ -551,16 +565,16 @@
 						}
 						const data = await (await fetch(ZE_URL)).json();
 						const rows = data.zones_extrema || [];
-						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.top_intersection })));
-						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.bottom_intersection })));
-						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + berlinOffset, value: r.gamma_band })));
+						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.top_intersection })));
+						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.bottom_intersection })));
+						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
 
 						// +/- marker per point: whether the payoff at that
 						// intersection (not the intersection's own price) sits
 						// above or below the zero-payoff line — size:0 hides the
 						// marker's shape glyph so only the text renders.
 						topIntersectionSeries.setMarkers(rows.map(r => ({
-							time: Math.floor(r.t / 1000) + berlinOffset,
+							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
 							color: '#2e7d32',
 							shape: 'circle',
@@ -568,7 +582,7 @@
 							text: r.top_intersection_positive ? '+' : '-',
 						})));
 						bottomIntersectionSeries.setMarkers(rows.map(r => ({
-							time: Math.floor(r.t / 1000) + berlinOffset,
+							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
 							color: '#c62828',
 							shape: 'circle',
@@ -606,7 +620,7 @@
 
 					function snapTo18(sec) {
 						// Snap to 18:00 on the calendar day `sec` falls on — `sec` is
-						// already Berlin-shifted (see berlinOffset), so treat it as UTC
+						// already timezone-shifted (see tzOffset), so treat it as UTC
 						// when reading/writing calendar fields, consistent with the rest
 						// of this file's time handling.
 						const d = new Date(sec * 1000);
@@ -636,9 +650,9 @@
 							smlmBoxBottomLine.setData([]);
 							return;
 						}
-						const anchor = Math.floor(data.t / 1000) + berlinOffset;
+						const anchor = Math.floor(data.t / 1000) + tzOffset;
 						const fromTime = snapTo18(anchor - 2 * 86400);
-						const toTime   = Math.floor(data.expiration / 1000) + berlinOffset;
+						const toTime   = Math.floor(data.expiration / 1000) + tzOffset;
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
