@@ -210,6 +210,12 @@
 					* { margin: 0; padding: 0; box-sizing: border-box; }
 					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
 					#chart-container { width: 100%; height: 100%; }
+					#gamma-point-char {
+						position: fixed; display: none;
+						font-size: 24px; line-height: 1; text-align: center;
+						background: #ffffff; border-radius: 3px;
+						padding: 1px 3px; pointer-events: none; z-index: 5;
+					}
 					#status {
 						position: fixed; bottom: 32px; left: 12px;
 						font-family: monospace; font-size: 11pt;
@@ -239,8 +245,9 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="gamma-point-char">🕸</div>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
@@ -260,6 +267,17 @@
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
+					// Only true on /my/<asset> — /chart/<asset> always passes
+					// show_gamma_point="false" (see _build_tv_chart_context).
+					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
+					// /my/<asset> is the only minimal page (candles + gamma point
+					// only — no Weekly/Monthly/All/Daily delta=0 lines, no gamma
+					// peak/bottom lines, no zones boxes/extrema), and currently the
+					// only one with the gamma point, so this reuses that same
+					// flag rather than adding a second backend-driven one; the
+					// footer (trade count/nearest expiry) is untouched either way.
+					const MINIMAL_CHART = SHOW_GAMMA_POINT;
+					const GAMMA_POINT_URL  = '/api/gamma-point/' + ASSET;
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
@@ -310,7 +328,10 @@
 						},
 					});
 
-					window.addEventListener('resize', () => chart.resize(window.innerWidth, window.innerHeight));
+					window.addEventListener('resize', () => {
+						chart.resize(window.innerWidth, window.innerHeight);
+						if (SHOW_GAMMA_POINT) updateGammaPointCharPosition();
+					});
 
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
@@ -370,6 +391,59 @@
 					});
 					const smlmBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
+					// Gamma point (only on /my/<asset>, see SHOW_GAMMA_POINT) —
+					// average of 4 per-leg gamma extrema across every active
+					// expiry, trailing dankbit.gamma_point_window_hours hours (see
+					// gamma_point_json). Shown as a full-width violet price line
+					// (series.createPriceLine() is a real chart primitive;
+					// applyOptions() moves an existing line to a new price
+					// without flicker, only created/removed when the point itself
+					// appears/disappears) plus a separate white-background 🕸
+					// badge (#gamma-point-char, hardcoded in the template) next to
+					// the line's own axis label — Lightweight Charts combines a
+					// price line's title and price into one axis-label box
+					// sharing a single axisLabelColor, so a differently-colored
+					// character can't share that box and has to be drawn as its
+					// own HTML element instead, positioned via
+					// series.priceToCoordinate()/chart.priceScale('right').width().
+					let gammaPointPrice = null;
+					let gammaPointLine = null;
+
+					function updateGammaPointLine() {
+						if (gammaPointPrice == null) {
+							if (gammaPointLine) { series.removePriceLine(gammaPointLine); gammaPointLine = null; }
+							return;
+						}
+						if (gammaPointLine) {
+							gammaPointLine.applyOptions({ price: gammaPointPrice });
+						} else {
+							gammaPointLine = series.createPriceLine({
+								price: gammaPointPrice, color: 'violet', lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'violet',
+							});
+						}
+					}
+
+					function updateGammaPointCharPosition() {
+						const el = document.getElementById('gamma-point-char');
+						if (gammaPointPrice == null) { el.style.display = 'none'; return; }
+						const y = series.priceToCoordinate(gammaPointPrice);
+						if (y == null) { el.style.display = 'none'; return; }
+						const priceScaleWidth = chart.priceScale('right').width();
+						el.style.right = (priceScaleWidth + 4) + 'px';
+						el.style.top = (y - 14) + 'px';
+						el.style.display = 'block';
+					}
+
+					async function refreshGammaPoint() {
+						if (!SHOW_GAMMA_POINT) return;
+						const data = await (await fetch(GAMMA_POINT_URL)).json();
+						gammaPointPrice = data.gamma_point;
+						updateGammaPointLine();
+						updateGammaPointCharPosition();
+					}
+
 					let priceLines    = [];
 					let monthlyLines  = [];
 					let allLines      = [];
@@ -428,6 +502,13 @@
 						}
 						futureTickCount = futureTicks.length;
 						futureAxisSeries.setData(futureTicks);
+
+						// New candle data can shift the right price scale's
+						// autoscale range even when the gamma point's own price
+						// hasn't changed, so the char badge's y (and the price
+						// scale's width, which its x depends on) need recomputing
+						// here too, not just when refreshGammaPoint() itself runs.
+						if (SHOW_GAMMA_POINT) updateGammaPointCharPosition();
 					}
 
 					async function loadCandles() {
@@ -461,6 +542,7 @@
 					}
 
 					async function refreshDeltaZero() {
+						if (MINIMAL_CHART) return;
 						const data = await (await fetch(DZ_URL)).json();
 						clearLines(priceLines);
 						if (!SHOW_WEEKLY_LINES) return;
@@ -486,7 +568,10 @@
 						if (!MDZ_URL) return;
 						const data = await (await fetch(MDZ_URL)).json();
 						clearLines(monthlyLines);
-						if (SHOW_MONTHLY_LINES) {
+						// Line drawing is skipped in minimal mode, but this fetch
+						// still runs — its trade_count feeds the footer's "N
+						// trades", which stays on /my/<asset> too.
+						if (SHOW_MONTHLY_LINES && !MINIMAL_CHART) {
 							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
 								price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
@@ -508,6 +593,7 @@
 					}
 
 					async function refreshAllDeltaZero() {
+						if (MINIMAL_CHART) return;
 						const data = await (await fetch(ADZ_URL)).json();
 						clearLines(allLines);
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
@@ -519,6 +605,7 @@
 					}
 
 					async function refreshTomorrowDeltaZero() {
+						if (MINIMAL_CHART) return;
 						const data = await (await fetch(DZT_URL)).json();
 						clearLines(tomorrowLines);
 						if (!SHOW_DAILY_LINES) return;
@@ -531,6 +618,7 @@
 					}
 
 					async function refreshDayAfterTomorrowDeltaZero() {
+						if (MINIMAL_CHART) return;
 						const data = await (await fetch(DZT2_URL)).json();
 						clearLines(dayAfterTomorrowLines);
 						if (!SHOW_DAILY_LINES) return;
@@ -565,17 +653,19 @@
 					}
 
 					async function refreshWeeklyGamma() {
+						if (MINIMAL_CHART) return;
 						const data = await (await fetch(GL_W_URL)).json();
 						drawGammaLines(SHOW_WEEKLY_LINES ? data : { peaks: [], bottoms: [] }, weeklyGammaLines, 1, 'Weekly', 'violet');
 					}
 
 					async function refreshMonthlyGamma() {
-						if (!GL_M_URL) return;
+						if (MINIMAL_CHART || !GL_M_URL) return;
 						const data = await (await fetch(GL_M_URL)).json();
 						drawGammaLines(SHOW_MONTHLY_LINES ? data : { peaks: [], bottoms: [] }, monthlyGammaLines, 1, 'Monthly', 'violet');
 					}
 
 					async function refreshZonesExtrema() {
+						if (MINIMAL_CHART) return;
 						if (INTERVAL !== '4h') {
 							topIntersectionSeries.setData([]);
 							bottomIntersectionSeries.setData([]);
@@ -649,6 +739,7 @@
 					}
 
 					async function refreshZonesBoxes() {
+						if (MINIMAL_CHART) return;
 						if (INTERVAL !== '4h') {
 							aboveBoxSeries.setData([]);
 							belowBoxSeries.setData([]);
@@ -691,7 +782,7 @@
 					}
 
 					async function refreshZonesExtremaExtended() {
-						if (INTERVAL !== '4h') return;
+						if (MINIMAL_CHART || INTERVAL !== '4h') return;
 						// Only the nearest active expiry (expiry_index 0) draws a box —
 						// expiry_index 1 through 2 just keep their dankbit.zones.extrema
 						// rows fresh while the chart is open (see get_box_n), the same way
@@ -746,7 +837,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPoint(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -778,6 +869,7 @@
 					setInterval(refreshZonesExtrema, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
+					setInterval(refreshGammaPoint, REFRESH);
 				//]]></script>
 			</body>
 		</html>

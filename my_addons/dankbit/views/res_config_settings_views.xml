@@ -15,6 +15,9 @@
                             <field name="zones_box_refresh_interval" placeholder="Zones Box Refresh Interval (s)"/>
                         </setting>
                         <setting>
+                            <field name="gamma_point_window_hours" placeholder="Gamma Point Window (h)"/>
+                        </setting>
+                        <setting>
                             <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
                         </setting>
                         <setting>

@@ -44,6 +44,12 @@ class ResConfigSettings(models.TransientModel):
         help="How often (in seconds) the TradingView chart re-fetches the yellow/teal zones boxes. Defaults to 3600 (1 hour).",
     )
 
+    gamma_point_window_hours = fields.Integer(
+        string="Gamma Point Window (h)",
+        config_parameter="dankbit.gamma_point_window_hours",
+        help="How many trailing hours of trades (across every active expiry) feed the gamma point line on the /my/<asset> page. Defaults to 8.",
+    )
+
     deribit_timeout = fields.Float(
         string="Deribit API timeout (s)",
         config_parameter="dankbit.deribit_timeout",

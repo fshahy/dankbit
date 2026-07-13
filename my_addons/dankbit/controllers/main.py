@@ -1547,13 +1547,14 @@ class ChartController(http.Controller):
     # TradingView Lightweight Charts pages
     # ------------------------------------------------------------------
 
-    @http.route("/chart/<string:asset>", type="http", auth="public", website=True)
-    def chart_tv(self, asset):
-        asset = asset.upper()
-
-        if not (asset.startswith("BTC") or asset.startswith("ETH")):
-            return request.not_found()
-
+    def _build_tv_chart_context(self, asset):
+        """Shared context-building for /chart/<asset> and /my/<asset> — both
+        render the same dankbit_tv_chart_until template; /my/<asset> just
+        additionally sets show_gamma_point so the template also draws the
+        gamma point line (see gamma_point_json). Returns (context, None) on
+        success or (None, error_message) if the weekly expiry isn't
+        configured/valid for `asset`, so callers can render that as a plain
+        text response the same way this route always has."""
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         zones_box_refresh_interval = int(icp.get_param("dankbit.zones_box_refresh_interval", default=3600))
@@ -1575,23 +1576,17 @@ class ChartController(http.Controller):
         instrument = icp.get_param(weekly_param, default="").upper()
 
         if not instrument:
-            return request.make_response(
-                f"Weekly Expiry for {asset} is not configured. Set it in Settings → Dankbit.",
-                headers=[("Content-Type", "text/plain")],
-            )
+            return None, f"Weekly Expiry for {asset} is not configured. Set it in Settings → Dankbit."
 
         parts = instrument.split("-", 1)
         if len(parts) != 2:
-            return request.make_response(
-                f"Weekly Expiry '{instrument}' is invalid — expected format: {asset}-3JUL26.",
-                headers=[("Content-Type", "text/plain")],
-            )
+            return None, f"Weekly Expiry '{instrument}' is invalid — expected format: {asset}-3JUL26."
 
         expiry_str = parts[1]
 
         monthly_instrument = icp.get_param(monthly_param, default="").upper()
 
-        return request.render("dankbit.dankbit_tv_chart_until", {
+        return {
             "instrument": instrument,
             "asset": asset,
             "expiry": expiry_str,
@@ -1601,4 +1596,115 @@ class ChartController(http.Controller):
             "show_daily_lines": show_daily_lines,
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,
-        })
+            "show_gamma_point": "false",
+        }, None
+
+    @http.route("/chart/<string:asset>", type="http", auth="public", website=True)
+    def chart_tv(self, asset):
+        asset = asset.upper()
+
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        ctx, error = self._build_tv_chart_context(asset)
+        if error:
+            return request.make_response(error, headers=[("Content-Type", "text/plain")])
+
+        return request.render("dankbit.dankbit_tv_chart_until", ctx)
+
+    @http.route("/my/<string:asset>", type="http", auth="public", website=True)
+    def my_chart_tv(self, asset):
+        """Same page as /chart/<asset> (identical template/context), plus the
+        gamma point line (see gamma_point_json) — /chart/<asset> itself is
+        unaffected, it always passes show_gamma_point=false."""
+        asset = asset.upper()
+
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        ctx, error = self._build_tv_chart_context(asset)
+        if error:
+            return request.make_response(error, headers=[("Content-Type", "text/plain")])
+
+        ctx["show_gamma_point"] = "true"
+        return request.render("dankbit.dankbit_tv_chart_until", ctx)
+
+    @http.route("/api/gamma-point/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def gamma_point_json(self, asset):
+        """gamma_point: average of 4 per-leg gamma extrema — Long Call/Put
+        Gamma Peak (argmax), Short Call/Put Gamma Bottom (argmin, since
+        short positions carry negative gamma) — across *every* active
+        expiry for `asset`, restricted to trades from the trailing
+        `dankbit.gamma_point_window_hours` hours (Integer setting, default
+        8 — see Settings fields). None when there are no trades at all in
+        this window. Drawn on the /my/<asset> TradingView page as a
+        horizontal price line, not gated to any one timeframe."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        window_hours = int(icp.get_param("dankbit.gamma_point_window_hours", default=8))
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND active = TRUE
+              AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')
+            GROUP BY strike, option_type, direction, expiration
+        """, (f'%{asset}%', window_hours))
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+
+        gamma_point = None
+        if agg_trades:
+            long_calls_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "call"]
+            long_puts_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "put"]
+            short_calls_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "call"]
+            short_puts_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "put"]
+
+            long_call_gamma_peak_price = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_calls_agg, 0.05)))])
+            long_put_gamma_peak_price = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_puts_agg, 0.05)))])
+            short_call_gamma_bottom_price = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_calls_agg, 0.05)))])
+            short_put_gamma_bottom_price = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_puts_agg, 0.05)))])
+
+            gamma_point = (
+                long_call_gamma_peak_price + long_put_gamma_peak_price
+                + short_call_gamma_bottom_price + short_put_gamma_bottom_price
+            ) / 4.0
+
+        payload = {
+            "asset": asset,
+            "gamma_point": gamma_point,
+            "window_hours": window_hours,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
