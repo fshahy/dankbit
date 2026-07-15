@@ -27,14 +27,21 @@ def _safe_deribit_request(
     """
     Robust GET with retries and exponential backoff.
     Returns parsed JSON dict on success.
-    Returns None on failure unless raise_on_fail=True.
+    Returns None on failure (network error, non-2xx status, or a Deribit-
+    level {"error": ...} envelope in an otherwise-200 response — e.g. rate
+    limiting, which Deribit signals inside the JSON body rather than via
+    HTTP status, so resp.raise_for_status() alone can't catch it) unless
+    raise_on_fail=True.
     """
 
     for attempt in range(1, retries + 1):
         try:
             resp = requests.get(url, params=params, timeout=timeout)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            if isinstance(data, dict) and "error" in data:
+                raise RuntimeError(f"Deribit error: {data['error']}")
+            return data
         except Exception as e:
             _logger.warning(
                 "Deribit request failed (%d/%d) %s params=%s error=%s",
@@ -188,6 +195,13 @@ class Trade(models.Model):
         - Uses timestamp-based pagination (Deribit REST's only supported method).
         - Ensures no gaps, no flooding, no duplicate inserts.
         - Gracefully handles Deribit rate-limit, empty responses, and pagination quirks.
+        - One instrument's failure can't take down the rest of the run: each
+          instrument's fetch is wrapped in its own try/except, so a single
+          malformed response/record only skips that instrument for this
+          cycle rather than aborting every instrument still left in
+          option_instruments (the next cron cycle resumes it normally,
+          since start_ts is always recomputed from the DB's last committed
+          trade).
         """
 
         option_instruments = [
@@ -212,116 +226,136 @@ class Trade(models.Model):
             if not inst_name:
                 continue
 
-            latest_trade = self._get_latest_trade_ts_for_instrument(inst_name)
+            try:
+                latest_trade = self._get_latest_trade_ts_for_instrument(inst_name)
 
-            # choose correct starting point
-            if latest_trade and latest_trade.deribit_ts:
-                dt_val = latest_trade.deribit_ts
-                if isinstance(dt_val, str):
-                    dt_obj = fields.Datetime.from_string(dt_val)
+                # choose correct starting point
+                if latest_trade and latest_trade.deribit_ts:
+                    dt_val = latest_trade.deribit_ts
+                    if isinstance(dt_val, str):
+                        dt_obj = fields.Datetime.from_string(dt_val)
+                    else:
+                        dt_obj = dt_val
+                    if dt_obj.tzinfo is None:
+                        dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+
+                    # Resume AT the last known trade's timestamp, not one ms
+                    # past it: Deribit's start_timestamp bound is inclusive,
+                    # and options books can have multiple trades landing in
+                    # the exact same millisecond (multi-leg/block fills). A
+                    # "+1" here would permanently skip any sibling trades at
+                    # that same millisecond that weren't in the last fetched
+                    # page. The one guaranteed re-fetch of the boundary
+                    # trade itself is cheap: _create_new_trade() already
+                    # silently drops it via the deribit_trade_identifier
+                    # unique-constraint conflict.
+                    start_ts = int(dt_obj.timestamp() * 1000)
                 else:
-                    dt_obj = dt_val
-                if dt_obj.tzinfo is None:
-                    dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+                    # fallback (fresh DB case, or an instrument with zero trades)
+                    start_ts = base_start
 
-                # pick up exactly after the last known trade
-                start_ts = int(dt_obj.timestamp() * 1000) + 1
-            else:
-                # fallback (fresh DB case, or an instrument with zero trades)
-                start_ts = base_start
+                now_ts = int(time_module.time() * 1000)
 
-            now_ts = int(time_module.time() * 1000)
-
-            if start_ts >= now_ts:
-                _logger.debug("Skipping %s — already up to date (start_ts=%s >= now_ts=%s)", inst_name, start_ts, now_ts)
-                continue
-
-            _logger.info(
-                "Fetching trades for %s from %s → %s",
-                inst_name, start_ts, now_ts
-            )
-
-            #
-            # Pagination loop
-            #
-            # Deribit REST pagination works ONLY via timestamp windows.
-            # “has_more” sometimes appears even when “trades=[]”, so we need safety exits.
-            #
-            empty_pages = 0
-            max_empty_pages = 3       # prevent infinite loops
-            max_pages = 5000          # safety guard
-
-            pages = 0
-
-            while pages < max_pages:
-                pages += 1
-
-                params = {
-                    "instrument_name": inst_name,
-                    "count": 1000,
-                    "start_timestamp": start_ts,
-                    "end_timestamp": now_ts,
-                    "sorting": "asc",
-                }
-
-                #
-                # Robust request with backoff
-                #
-                data = _safe_deribit_request(URL, params=params, timeout=timeout)
-                if not data:
-                    _logger.warning("Deribit request failed for %s, stopping pagination.", inst_name)
-                    break
-
-                if not data or "result" not in data:
-                    _logger.warning("No valid result for %s", inst_name)
-                    break
-
-                trades = data["result"].get("trades", [])
-
-                #
-                # Handle empty page
-                #
-                if not trades:
-                    empty_pages += 1
-
-                    # if Deribit signals more but gives nothing — bail
-                    if empty_pages >= max_empty_pages:
-                        _logger.warning(
-                            "Stopping early for %s due to repeated empty pages.",
-                            inst_name
-                        )
-                        break
-
-                    # chill and try next cycle
-                    time_module.sleep(0.05)
+                if start_ts >= now_ts:
+                    _logger.debug("Skipping %s — already up to date (start_ts=%s >= now_ts=%s)", inst_name, start_ts, now_ts)
                     continue
 
-                #
-                # Insert all trades in chronological order
-                #
-                for trd in trades:
-                    self._create_new_trade(
-                        trd,
-                        inst.get("expiration_timestamp")
-                    )
+                _logger.info(
+                    "Fetching trades for %s from %s → %s",
+                    inst_name, start_ts, now_ts
+                )
 
-                # advance pagination timestamp
-                start_ts = trades[-1]["timestamp"] + 1
+                #
+                # Pagination loop
+                #
+                # Deribit REST pagination works ONLY via timestamp windows.
+                # “has_more” sometimes appears even when “trades=[]”, so we need safety exits.
+                #
                 empty_pages = 0
+                max_empty_pages = 3       # prevent infinite loops
+                max_pages = 5000          # safety guard
 
-                #
-                # break if no more pages
-                #
-                if not data["result"].get("has_more"):
-                    break
+                pages = 0
 
-                # polite pacing
-                time_module.sleep(0.05 + random.random() * 0.02)
+                while pages < max_pages:
+                    pages += 1
 
-            # per-instrument commit
-            self.env.cr.commit()
+                    params = {
+                        "instrument_name": inst_name,
+                        "count": 1000,
+                        "start_timestamp": start_ts,
+                        "end_timestamp": now_ts,
+                        "sorting": "asc",
+                    }
 
-            _logger.info("Finished fetching trades for %s", inst_name)
+                    #
+                    # Robust request with backoff — _safe_deribit_request()
+                    # already retries (and eventually gives up with None)
+                    # on a Deribit-level {"error": ...} body, e.g. rate
+                    # limiting, not just on network/HTTP failures.
+                    #
+                    data = _safe_deribit_request(URL, params=params, timeout=timeout)
+                    if not data:
+                        _logger.warning("Deribit request failed for %s, stopping pagination.", inst_name)
+                        break
+
+                    if not data or "result" not in data:
+                        _logger.warning("No valid result for %s", inst_name)
+                        break
+
+                    trades = data["result"].get("trades", [])
+
+                    #
+                    # Handle empty page
+                    #
+                    if not trades:
+                        empty_pages += 1
+
+                        # if Deribit signals more but gives nothing — bail
+                        if empty_pages >= max_empty_pages:
+                            _logger.warning(
+                                "Stopping early for %s due to repeated empty pages.",
+                                inst_name
+                            )
+                            break
+
+                        # chill and try next cycle
+                        time_module.sleep(0.05)
+                        continue
+
+                    #
+                    # Insert all trades in chronological order
+                    #
+                    for trd in trades:
+                        self._create_new_trade(
+                            trd,
+                            inst.get("expiration_timestamp")
+                        )
+
+                    # advance pagination timestamp — inclusive, same
+                    # same-millisecond reasoning as the initial start_ts above.
+                    start_ts = trades[-1]["timestamp"]
+                    empty_pages = 0
+
+                    #
+                    # break if no more pages
+                    #
+                    if not data["result"].get("has_more"):
+                        break
+
+                    # polite pacing
+                    time_module.sleep(0.05 + random.random() * 0.02)
+
+                # per-instrument commit
+                self.env.cr.commit()
+
+                _logger.info("Finished fetching trades for %s", inst_name)
+            except Exception:
+                _logger.exception(
+                    "Unexpected error fetching trades for %s, skipping to next instrument.",
+                    inst_name,
+                )
+                self.env.cr.rollback()
 
             # polite pause between instruments to avoid hammering Deribit
             time_module.sleep(0.1 + random.random() * 0.05)
@@ -438,7 +472,7 @@ class Trade(models.Model):
     def get_views(self, views, options=None):
         """Stamps the "Last N Hours" search filters (see trade_views.xml)
         with concrete UTC timestamps computed server-side, replacing
-        __NOW__/__LAST_2H__/__LAST_4H__/__LAST_8H__ placeholder tokens in the
+        __NOW__/__LAST_2H__/__LAST_4H__/__LAST_8H__/__LAST_24H__ placeholder tokens in the
         search view's arch. Those filters can't compute "now" as a plain
         domain expression themselves: Odoo's client-side domain evaluator
         (py_date.js) only implements datetime.datetime.now() using the
@@ -460,6 +494,7 @@ class Trade(models.Model):
                 "__LAST_2H__": fields.Datetime.to_string(now - timedelta(hours=2)),
                 "__LAST_4H__": fields.Datetime.to_string(now - timedelta(hours=4)),
                 "__LAST_8H__": fields.Datetime.to_string(now - timedelta(hours=8)),
+                "__LAST_24H__": fields.Datetime.to_string(now - timedelta(hours=24)),
             }
             arch = search_view["arch"]
             for token, value in replacements.items():

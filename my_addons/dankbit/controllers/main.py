@@ -11,6 +11,7 @@ from . import options
 from . import delta
 from . import gamma
 from . import theta
+from . import vega
 
 
 class _AggTrade:
@@ -360,6 +361,34 @@ class ChartController(http.Controller):
         short_put_theta_price = float(longs_obj.STs[short_put_theta_index])
         short_put_theta_value = float(short_put_theta_curve[short_put_theta_index])
 
+        # Price where each leg's portfolio vega is most extreme, same
+        # peak/bottom split as gamma (not theta's flipped one): vega has no
+        # call/put distinction and is always positive for a long option,
+        # always negative for a short one (see vega.py), so long legs peak
+        # (argmax) and short legs bottom out (argmax) — mirroring gamma's
+        # sign convention exactly. Same next-expiry-only long_calls/
+        # long_puts/short_calls/short_puts and r=0.0 as gamma/delta/theta
+        # above.
+        long_call_vega_curve = vega.portfolio_vega(longs_obj.STs, long_calls)
+        long_call_vega_index = int(np.argmax(long_call_vega_curve))
+        long_call_vega_price = float(longs_obj.STs[long_call_vega_index])
+        long_call_vega_value = float(long_call_vega_curve[long_call_vega_index])
+
+        long_put_vega_curve = vega.portfolio_vega(longs_obj.STs, long_puts)
+        long_put_vega_index = int(np.argmax(long_put_vega_curve))
+        long_put_vega_price = float(longs_obj.STs[long_put_vega_index])
+        long_put_vega_value = float(long_put_vega_curve[long_put_vega_index])
+
+        short_call_vega_curve = vega.portfolio_vega(longs_obj.STs, short_calls)
+        short_call_vega_index = int(np.argmin(short_call_vega_curve))
+        short_call_vega_price = float(longs_obj.STs[short_call_vega_index])
+        short_call_vega_value = float(short_call_vega_curve[short_call_vega_index])
+
+        short_put_vega_curve = vega.portfolio_vega(longs_obj.STs, short_puts)
+        short_put_vega_index = int(np.argmin(short_put_vega_curve))
+        short_put_vega_price = float(longs_obj.STs[short_put_vega_index])
+        short_put_vega_value = float(short_put_vega_curve[short_put_vega_index])
+
         # Each line is {text, color} — color is None for the default
         # (black) styling every line used before per-line colors were
         # needed; only section headers like "Gamma" below set one.
@@ -399,10 +428,10 @@ class ChartController(http.Controller):
             _line("Short Put Delta Value: {:,.0f}".format(abs(short_put_delta_value) / 10)),
         ]
 
-        # Theta gets its own top-right overlay (see .zone-info-right in
-        # dankbit_page) rather than sitting in the top-left zone_info_lines
-        # column with everything else.
-        theta_info_lines = [
+        # Theta and Vega get their own top-right overlay (see
+        # .zone-info-right in dankbit_page) rather than sitting in the
+        # top-left zone_info_lines column with everything else.
+        right_info_lines = [
             _line("Theta", color="orange"),
             _line("Long Call Theta: ${:,.0f}".format(long_call_theta_price)),
             _line("Long Put Theta: ${:,.0f}".format(long_put_theta_price)),
@@ -413,6 +442,22 @@ class ChartController(http.Controller):
             _line("Long Put Theta Value: {:,.0f}".format(abs(long_put_theta_value) / 10_000)),
             _line("Short Call Theta Value: {:,.0f}".format(abs(short_call_theta_value) / 10_000)),
             _line("Short Put Theta Value: {:,.0f}".format(abs(short_put_theta_value) / 10_000)),
+            _line(" "),
+            _line("Vega", color="blue"),
+            _line("Long Call Vega: ${:,.0f}".format(long_call_vega_price)),
+            _line("Long Put Vega: ${:,.0f}".format(long_put_vega_price)),
+            _line("Short Call Vega: ${:,.0f}".format(short_call_vega_price)),
+            _line("Short Put Vega: ${:,.0f}".format(short_put_vega_price)),
+            _line(" "),
+            # Raw portfolio-vega values sit in the low thousands here — an
+            # order of magnitude below theta's ten-thousands and well above
+            # delta's tens — so /100 keeps these in the same easy-to-copy
+            # 2-3 digit range as the other Value lines (see gamma's /1e6,
+            # theta's /1e4, delta's /10 above).
+            _line("Long Call Vega Value: {:,.0f}".format(abs(long_call_vega_value) / 100)),
+            _line("Long Put Vega Value: {:,.0f}".format(abs(long_put_vega_value) / 100)),
+            _line("Short Call Vega Value: {:,.0f}".format(abs(short_call_vega_value) / 100)),
+            _line("Short Put Vega Value: {:,.0f}".format(abs(short_put_vega_value) / 100)),
         ]
 
         return request.render(
@@ -423,7 +468,7 @@ class ChartController(http.Controller):
                 "refresh_interval": refresh_interval,
                 "image_b64": image_b64,
                 "zone_info_lines": zone_info_lines,
-                "theta_info_lines": theta_info_lines,
+                "theta_info_lines": right_info_lines,
             }
         )
 
@@ -1761,9 +1806,26 @@ class ChartController(http.Controller):
         4 legs (Long Call/Put, Short Call/Put) has the largest absolute
         dollar-gamma magnitude at its own peak/bottom — the biggest
         contributor to the averaged gamma_point; appended to each line's
-        title. Both None when there are no trades at all in this window."""
+        title. Both None when there are no trades at all in this window.
+
+        Optional ?scope= query param narrows which expiries feed the
+        average — driven by the Gamma Chart's Nearest Expiry/Weekly/Monthly
+        checkboxes (mutually exclusive, all unchecked by default, matching
+        this route's original all-expiries behavior when scope is omitted
+        or unrecognized):
+        - "nearest": the single nearest active expiry only (same lookup
+          trial_points_json uses for its own nearest expiry).
+        - "weekly"/"monthly": every expiry from now through the configured
+          dankbit.weekly_expiry/monthly_expiry (or eth_* for ETH) — same
+          expiration <= cutoff convention /BTC/weekly and /BTC/monthly
+          already use via chart_png_until, so this can never disagree with
+          those routes about what "weekly"/"monthly" means. Returns the
+          same empty (gamma_point=None) result as "no trades" if that
+          setting isn't configured or fails to parse.
+        """
         asset = asset.upper()
         window_hours = hours
+        scope = request.httprequest.args.get("scope")
         icp = request.env["ir.config_parameter"].sudo()
         if asset.startswith("BTC"):
             from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -1779,17 +1841,83 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
+        def _empty_payload():
+            return {
+                "asset": asset,
+                "gamma_point": None,
+                "dominant_leg": None,
+                "window_hours": window_hours,
+                "trade_count": 0,
+                "scope": scope,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
         cr = request.env.cr
-        cr.execute("""
+
+        # expiration_filter_sql is always one of a few fixed literals below
+        # (never built from request input), so interpolating it into the
+        # query string is safe; the actual expiration value(s) are still
+        # passed as bound parameters.
+        expiration_filter_sql = ""
+        query_params = [f'%{asset}%']
+
+        if scope == "nearest":
+            # Same lookup trial_points_json uses for its own nearest expiry
+            # — a cheap DISTINCT-expiration query rather than assuming an
+            # ordering from the main aggregation query below.
+            as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+            cr.execute("""
+                SELECT DISTINCT expiration FROM dankbit_trade
+                WHERE name ILIKE %s AND expiration >= %s
+                ORDER BY expiration ASC
+                LIMIT 1
+            """, (f"{asset}-%", as_of))
+            row = cr.fetchone()
+            nearest_expiration = row[0] if row else None
+            if not nearest_expiration:
+                return request.make_response(
+                    json.dumps(_empty_payload()),
+                    headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+                )
+            expiration_filter_sql = "AND expiration = %s"
+            query_params.append(nearest_expiration)
+
+        elif scope in ("weekly", "monthly"):
+            if asset.startswith("ETH"):
+                param = "dankbit.eth_weekly_expiry" if scope == "weekly" else "dankbit.eth_monthly_expiry"
+            else:
+                param = "dankbit.weekly_expiry" if scope == "weekly" else "dankbit.monthly_expiry"
+            configured = icp.get_param(param, default="").upper()
+            # Same "ASSET-DDMMMYY" parsing chart_png_until uses for this
+            # exact setting, so "weekly"/"monthly" here can never mean a
+            # different cutoff than /BTC/weekly or /BTC/monthly do.
+            expiry_dt = None
+            parts = configured.split("-", 1) if configured else []
+            if len(parts) == 2:
+                try:
+                    expiry_dt = datetime.strptime(parts[1], "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
+                except ValueError:
+                    expiry_dt = None
+            if not expiry_dt:
+                return request.make_response(
+                    json.dumps(_empty_payload()),
+                    headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+                )
+            expiration_filter_sql = "AND expiration <= %s"
+            query_params.append(expiry_dt)
+
+        query_params.append(window_hours)
+        cr.execute(f"""
             SELECT strike, option_type, direction, expiration,
                    SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
             FROM dankbit_trade
             WHERE name ILIKE %s
               AND expiration >= NOW()
               AND active = TRUE
+              {expiration_filter_sql}
               AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')
             GROUP BY strike, option_type, direction, expiration
-        """, (f'%{asset}%', window_hours))
+        """, query_params)
         rows = cr.fetchall()
 
         agg_trades = [
@@ -1848,6 +1976,7 @@ class ChartController(http.Controller):
             "dominant_leg": dominant_leg,
             "window_hours": window_hours,
             "trade_count": trade_count,
+            "scope": scope,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         return request.make_response(

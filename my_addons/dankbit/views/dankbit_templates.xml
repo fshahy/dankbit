@@ -260,9 +260,24 @@
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<label class="toggle-label">
-						<input type="checkbox" id="lines-toggle" t-att-checked="'checked' if show_gamma_point == 'true' else None" onchange="onToggleLines()"/>
-						Lines
+						<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
+						<t t-if="show_gamma_point == 'true'">All</t>
+						<t t-if="show_gamma_point == 'false'">Lines</t>
 					</label>
+					<t t-if="show_gamma_point == 'true'">
+						<label class="toggle-label">
+							<input type="checkbox" id="nearest-expiry-toggle" checked="checked" onchange="onToggleGammaScope('nearest')"/>
+							Nearest Expiry
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="weekly-scope-toggle" onchange="onToggleGammaScope('weekly')"/>
+							Weekly
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="monthly-scope-toggle" onchange="onToggleGammaScope('monthly')"/>
+							Monthly
+						</label>
+					</t>
 					<t t-if="show_gamma_point == 'false'">
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-toggle" onchange="onToggleZonesExtrema()"/>
@@ -315,12 +330,12 @@
 					// refresh*() functions skip the fetch entirely while off (see
 					// onToggleLines() below). refreshMonthlyDeltaZero() is the one
 					// exception — it always fetches regardless, since its
-					// trade_count feeds the footer. Defaults to checked/on for
-					// Gamma Chart (/my/<asset>) — its one indicator family *is*
-					// these lines, so hiding them by default would show an empty
-					// chart — and unchecked/off for Delta Chart (/chart/<asset>),
-					// matching the checkbox's own default `checked` state above.
-					let SHOW_ALL_LINES = SHOW_GAMMA_POINT;
+					// trade_count feeds the footer. Unchecked/off by default on
+					// both charts, matching the checkbox's own default (unchecked)
+					// state above — on the Gamma Chart the "Nearest Expiry" scope
+					// (see GAMMA_SCOPE_NEAREST below) is checked by default instead,
+					// so the chart still isn't empty on load.
+					let SHOW_ALL_LINES = false;
 					// User-toggleable via the "Zones Extrema" checkbox (Delta Chart
 					// only — this indicator is already suppressed on DG Chart via
 					// MINIMAL_CHART, so this control isn't shown there at all, see the
@@ -360,7 +375,28 @@
 					// was removed): every window is drawn the same way, titled with its
 					// own hours.
 					const GAMMA_POINT_HOURS = [4, 8, 12, 24];
-					const gammaPointUrl = (hours) => '/api/gamma-point/' + ASSET + '/' + hours;
+					// "All" (the renamed "Lines" checkbox, SHOW_ALL_LINES) / "Nearest
+					// Expiry" / "Weekly" / "Monthly" checkboxes (Gamma Chart only) —
+					// four INDEPENDENT toggles, not mutually exclusive: each draws its
+					// own family of gamma point lines for its own expiry scope, and
+					// checking several at once layers all of them on the chart
+					// together (e.g. every box checked shows All + Nearest + Weekly +
+					// Monthly simultaneously — up to 4 lines per GAMMA_POINT_HOURS
+					// window). "All" reuses SHOW_ALL_LINES itself rather than a
+					// separate flag (same one checkbox already means "show these
+					// lines" for both charts — see MINIMAL_CHART above for the same
+					// one-flag-two-meanings pattern). "All"/Weekly/Monthly default
+					// unchecked (matching SHOW_ALL_LINES's own default, see above);
+					// "Nearest Expiry" defaults checked instead, so the chart still
+					// shows something on load. "nearest" is the single nearest
+					// active expiry; "weekly"/"monthly" are every expiry from now
+					// through the configured weekly/monthly expiry (same cutoff
+					// /BTC/weekly and /BTC/monthly already use) — see
+					// gamma_point_json's ?scope= handling.
+					let GAMMA_SCOPE_NEAREST = true;
+					let GAMMA_SCOPE_WEEKLY = false;
+					let GAMMA_SCOPE_MONTHLY = false;
+					const gammaPointUrl = (hours, scope) => '/api/gamma-point/' + ASSET + '/' + hours + (scope ? '?scope=' + scope : '');
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
@@ -501,27 +537,35 @@
 					const smlmBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
 					// Gamma point lines (only on /my/<asset>, see SHOW_GAMMA_POINT) —
-					// one per GAMMA_POINT_HOURS window, each the average of 4
-					// per-leg gamma extrema across every active expiry restricted
-					// to that trailing window (see gamma_point_json). Plain violet
-					// createPriceLine()s (series.createPriceLine() is a real chart
-					// primitive; applyOptions() moves an existing line to a new
-					// price/title without flicker, only created/removed when that
-					// window's price appears/disappears), titled with the window's
-					// hours, e.g. "8h".
-					const gammaPointLines = {};
+					// one per GAMMA_POINT_HOURS window PER independently-toggleable
+					// scope (All/Nearest/Weekly/Monthly, see the checkboxes above),
+					// each the average of 4 per-leg gamma extrema restricted to that
+					// trailing window and that scope's expiries (see
+					// gamma_point_json). Plain violet createPriceLine()s
+					// (series.createPriceLine() is a real chart primitive;
+					// applyOptions() moves an existing line to a new price/title
+					// without flicker, only created/removed when that window's price
+					// appears/disappears), titled with the window's hours plus the
+					// scope label, e.g. "8h Nearest Long Call" — the scope label is
+					// always included (not just when >1 scope is active) since
+					// several scopes' lines can be on screen at once and otherwise
+					// look identical.
+					const gammaPointLines = {
+						All: {}, Nearest: {}, Weekly: {}, Monthly: {},
+					};
 
-					function updateGammaPointLine(hours, price, dominantLeg) {
-						let line = gammaPointLines[hours];
+					function updateGammaPointLine(scopeLabel, hours, price, dominantLeg) {
+						const store = gammaPointLines[scopeLabel];
+						let line = store[hours];
 						if (price == null) {
-							if (line) { series.removePriceLine(line); delete gammaPointLines[hours]; }
+							if (line) { series.removePriceLine(line); delete store[hours]; }
 							return;
 						}
-						const title = hours + 'h' + (dominantLeg ? ' ' + dominantLeg : '');
+						const title = hours + 'h ' + scopeLabel + (dominantLeg ? ' ' + dominantLeg : '');
 						if (line) {
 							line.applyOptions({ price, title });
 						} else {
-							gammaPointLines[hours] = series.createPriceLine({
+							store[hours] = series.createPriceLine({
 								price, color: 'violet', lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, axisLabelColor: 'violet',
@@ -530,12 +574,28 @@
 						}
 					}
 
-					async function refreshGammaPointLines() {
-						if (!SHOW_GAMMA_POINT || !SHOW_ALL_LINES) return;
-						for (const hours of GAMMA_POINT_HOURS) {
-							const data = await (await fetch(gammaPointUrl(hours))).json();
-							updateGammaPointLine(hours, data.gamma_point, data.dominant_leg);
+					async function refreshGammaScopeLines(scopeLabel, scopeParam, enabled) {
+						// Guarded here (not just in refreshGammaPointLines below) since
+						// onToggleLines()/onToggleGammaScope() call this directly for
+						// just the one scope that changed — those checkboxes only
+						// exist on the Gamma Chart, but "Lines" itself is shared with
+						// the Delta Chart, where SHOW_GAMMA_POINT is always false.
+						if (!SHOW_GAMMA_POINT || !enabled) {
+							GAMMA_POINT_HOURS.forEach(hours => updateGammaPointLine(scopeLabel, hours, null));
+							return;
 						}
+						for (const hours of GAMMA_POINT_HOURS) {
+							const data = await (await fetch(gammaPointUrl(hours, scopeParam))).json();
+							updateGammaPointLine(scopeLabel, hours, data.gamma_point, data.dominant_leg);
+						}
+					}
+
+					async function refreshGammaPointLines() {
+						if (!SHOW_GAMMA_POINT) return;
+						await refreshGammaScopeLines('All', null, SHOW_ALL_LINES);
+						await refreshGammaScopeLines('Nearest', 'nearest', GAMMA_SCOPE_NEAREST);
+						await refreshGammaScopeLines('Weekly', 'weekly', GAMMA_SCOPE_WEEKLY);
+						await refreshGammaScopeLines('Monthly', 'monthly', GAMMA_SCOPE_MONTHLY);
 					}
 
 					let priceLines    = [];
@@ -773,7 +833,7 @@
 					function onToggleLines() {
 						SHOW_ALL_LINES = document.getElementById('lines-toggle').checked;
 						if (SHOW_ALL_LINES) {
-							refreshGammaPointLines();
+							refreshGammaScopeLines('All', null, true);
 							refreshDeltaZero();
 							refreshMonthlyDeltaZero();
 							refreshAllDeltaZero();
@@ -789,7 +849,29 @@
 							clearLines(dayAfterTomorrowLines);
 							clearLines(weeklyGammaLines);
 							clearLines(monthlyGammaLines);
-							GAMMA_POINT_HOURS.forEach(hours => updateGammaPointLine(hours, null));
+							// Only the "All" scope's gamma point lines — Nearest/
+							// Weekly/Monthly are independent toggles and stay as
+							// they are (see refreshGammaScopeLines above).
+							GAMMA_POINT_HOURS.forEach(hours => updateGammaPointLine('All', hours, null));
+						}
+					}
+
+					// "Nearest Expiry" / "Weekly" / "Monthly" checkboxes (Gamma Chart
+					// only) — independent, not mutually exclusive with each other or
+					// with "All" (see gammaPointLines above): just flips that scope's
+					// own flag and re-fetches only that scope's lines (a no-op if
+					// "Lines"/SHOW_GAMMA_POINT gates it off, same as any other
+					// refreshGammaScopeLines() call).
+					function onToggleGammaScope(scope) {
+						if (scope === 'nearest') {
+							GAMMA_SCOPE_NEAREST = document.getElementById('nearest-expiry-toggle').checked;
+							refreshGammaScopeLines('Nearest', 'nearest', GAMMA_SCOPE_NEAREST);
+						} else if (scope === 'weekly') {
+							GAMMA_SCOPE_WEEKLY = document.getElementById('weekly-scope-toggle').checked;
+							refreshGammaScopeLines('Weekly', 'weekly', GAMMA_SCOPE_WEEKLY);
+						} else if (scope === 'monthly') {
+							GAMMA_SCOPE_MONTHLY = document.getElementById('monthly-scope-toggle').checked;
+							refreshGammaScopeLines('Monthly', 'monthly', GAMMA_SCOPE_MONTHLY);
 						}
 					}
 

@@ -104,6 +104,8 @@
                         domain="[('deribit_ts', '&gt;=', '__LAST_4H__'), ('expiration', '&gt;=', '__NOW__')]"/>
                 <filter name="last_8_hours" string="Last 8 Hours"
                         domain="[('deribit_ts', '&gt;=', '__LAST_8H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_24_hours" string="Last 24 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_24H__'), ('expiration', '&gt;=', '__NOW__')]"/>
 
                 <separator/>
 
