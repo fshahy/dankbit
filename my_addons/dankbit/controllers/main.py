@@ -1393,7 +1393,14 @@ class ChartController(http.Controller):
         zones-extrema record (index_price/top_intersection/
         bottom_intersection) on every call — piggybacking the per-expiry
         history this endpoint's own polling interval instead of a separate
-        cron (see dankbit.zones.extrema._persist_extrema)."""
+        cron (see dankbit.zones.extrema._persist_extrema) — UNLESS an
+        explicit `?hours=` override is given, in which case get_box()
+        computes against that trailing-hours trade window instead of the
+        default since-00:00-UTC-through-now one and skips persistence
+        entirely (display-only — see dankbit.zones.extrema.get_box). Driven
+        by /chart/<asset>'s 00:00-UTC-vs-trailing-hours radio toggle (see
+        dankbit_templates.xml); omitting it leaves this endpoint's behavior
+        exactly as before."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1401,7 +1408,10 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
-        data = request.env["dankbit.zones.extrema"].get_box(asset)
+        hours_param = request.httprequest.args.get("hours")
+        hours = int(hours_param) if hours_param else None
+
+        data = request.env["dankbit.zones.extrema"].get_box(asset, hours=hours)
         if not data:
             payload = {"asset": asset, "box": None}
         else:
@@ -1420,6 +1430,112 @@ class ChartController(http.Controller):
                 "long_min_price": float(data["long_min_price"]),
             }
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/trial-points/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def trial_points_json(self, asset):
+        """EXPERIMENTAL trial feature — deliberately kept fully independent
+        from dankbit.zones.extrema: no shared code path, no persistence,
+        never calls that model or any of its methods, so it can never
+        affect the existing Zones Extrema lines/boxes, their cron, or their
+        persisted history. Computes bottom_intersection/top_intersection
+        (the lowest/highest Longs-vs-Shorts payoff-curve crossing) and
+        gamma_band (average of the 4 per-leg gamma extrema) for `asset`'s
+        nearest active expiry, using trades from the trailing
+        `dankbit.zones_box_window_hours` hours through now (the same
+        setting the zones-box trade-window radio toggle uses) — same
+        underlying math as dankbit.zones.extrema._compute_asset()
+        (options.build_zone_curves()/find_zero_crossings(),
+        gamma.portfolio_gamma() with the same r=0.0 convention), but
+        reimplemented standalone here rather than calling that method.
+        Drawn on /chart/<asset> as three single-point markers (red/green/
+        violet) at the current time rather than the existing time-series
+        lines. Every field is None when there's nothing computable."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        window_hours = int(icp.get_param("dankbit.zones_box_window_hours", default=8))
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+
+        bottom_intersection = None
+        top_intersection = None
+        gamma_band = None
+        trade_count = 0
+
+        if index_price:
+            as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+            cr = request.env.cr
+            cr.execute("""
+                SELECT DISTINCT expiration FROM dankbit_trade
+                WHERE name ILIKE %s AND expiration >= %s
+                ORDER BY expiration ASC
+                LIMIT 1
+            """, (f"{asset}-%", as_of))
+            row = cr.fetchone()
+            target_expiration = row[0] if row else None
+
+            if target_expiration:
+                instrument = (
+                    f"{asset}-{target_expiration.day}"
+                    f"{target_expiration.strftime('%b').upper()}{target_expiration.strftime('%y')}"
+                )
+                window_start = as_of - timedelta(hours=window_hours)
+                Trade = request.env["dankbit.trade"].with_context(active_test=False)
+                domain = [
+                    ("name", "=ilike", f"{asset}-%"),
+                    ("expiration", "=", target_expiration),
+                    ("deribit_ts", ">=", window_start),
+                    ("deribit_ts", "<=", as_of),
+                ]
+                trades = Trade.search(domain=domain)
+                trade_count = len(trades)
+
+                if trades:
+                    longs_obj, shorts_obj = options.build_zone_curves(
+                        instrument, index_price, trades, from_price, to_price, steps
+                    )
+                    STs = longs_obj.STs
+                    crossings = options.find_zero_crossings(STs, longs_obj.payoffs - shorts_obj.payoffs)
+                    if crossings:
+                        top_intersection = float(max(crossings))
+                        bottom_intersection = float(min(crossings))
+
+                    long_calls = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "call")
+                    long_puts = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "put")
+                    short_calls = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "call")
+                    short_puts = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put")
+
+                    long_call_peak = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_calls)))])
+                    long_put_peak = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_puts)))])
+                    short_call_bottom = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_calls)))])
+                    short_put_bottom = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_puts)))])
+                    gamma_band = (long_call_peak + long_put_peak + short_call_bottom + short_put_bottom) / 4.0
+
+        payload = {
+            "asset": asset,
+            "window_hours": window_hours,
+            "bottom_intersection": bottom_intersection,
+            "top_intersection": top_intersection,
+            "gamma_band": gamma_band,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
@@ -1468,10 +1584,11 @@ class ChartController(http.Controller):
 
     @http.route("/api/nearest-expiry/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def nearest_expiry_json(self, asset):
-        """The single nearest active expiry for `asset` (e.g. "9JUL26") —
-        the same expiry the yellow zones boxes use, but a cheap standalone
-        lookup (no curve-building) so the TradingView footer can show it
-        regardless of timeframe, unlike the boxes themselves (4h-only)."""
+        """The single nearest active expiry for `asset`, as a full
+        instrument string (e.g. "BTC-9JUL26") — the same expiry the yellow
+        zones boxes use, but a cheap standalone lookup (no curve-building)
+        so the TradingView footer can show it without waiting on the
+        boxes' own full computation."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1558,6 +1675,7 @@ class ChartController(http.Controller):
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         zones_box_refresh_interval = int(icp.get_param("dankbit.zones_box_refresh_interval", default=3600))
+        zones_box_window_hours = int(icp.get_param("dankbit.zones_box_window_hours", default=8))
         # QWeb's t-att-* omits the attribute entirely when the value is a
         # falsy Python bool/None, so pass "true"/"false" strings (always
         # truthy) rather than real booleans — otherwise data-show-daily=false
@@ -1593,6 +1711,7 @@ class ChartController(http.Controller):
             "monthly_instrument": monthly_instrument,
             "refresh_interval": refresh_interval,
             "zones_box_refresh_interval": zones_box_refresh_interval,
+            "zones_box_window_hours": zones_box_window_hours,
             "show_daily_lines": show_daily_lines,
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,
@@ -1629,19 +1748,23 @@ class ChartController(http.Controller):
         ctx["show_gamma_point"] = "true"
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
 
-    @http.route("/api/gamma-point/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def gamma_point_json(self, asset):
+    @http.route("/api/gamma-point/<string:asset>/<int:hours>", type="http", auth="public", website=False, csrf=False)
+    def gamma_point_json(self, asset, hours):
         """gamma_point: average of 4 per-leg gamma extrema — Long Call/Put
         Gamma Peak (argmax), Short Call/Put Gamma Bottom (argmin, since
         short positions carry negative gamma) — across *every* active
-        expiry for `asset`, restricted to trades from the trailing
-        `dankbit.gamma_point_window_hours` hours (Integer setting, default
-        8 — see Settings fields). None when there are no trades at all in
-        this window. Drawn on the /my/<asset> TradingView page as a
-        horizontal price line, not gated to any one timeframe."""
+        expiry for `asset`, restricted to trades from the trailing `hours`
+        hours. No configured default any more (dankbit.gamma_point_window_hours
+        was removed) — /my/<asset> always calls this once per window in
+        GAMMA_POINT_HOURS = [4, 8, 12, 24] (see dankbit_templates.xml), each
+        drawn as its own titled price line. dominant_leg: whichever of the
+        4 legs (Long Call/Put, Short Call/Put) has the largest absolute
+        dollar-gamma magnitude at its own peak/bottom — the biggest
+        contributor to the averaged gamma_point; appended to each line's
+        title. Both None when there are no trades at all in this window."""
         asset = asset.upper()
+        window_hours = hours
         icp = request.env["ir.config_parameter"].sudo()
-        window_hours = int(icp.get_param("dankbit.gamma_point_window_hours", default=8))
         if asset.startswith("BTC"):
             from_price = float(icp.get_param("dankbit.from_price", default=100000))
             to_price = float(icp.get_param("dankbit.to_price", default=150000))
@@ -1681,25 +1804,48 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, steps)
 
         gamma_point = None
+        dominant_leg = None
         if agg_trades:
             long_calls_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "call"]
             long_puts_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "put"]
             short_calls_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "call"]
             short_puts_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "put"]
 
-            long_call_gamma_peak_price = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_calls_agg, 0.05)))])
-            long_put_gamma_peak_price = float(STs[int(np.argmax(gamma.portfolio_gamma(STs, long_puts_agg, 0.05)))])
-            short_call_gamma_bottom_price = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_calls_agg, 0.05)))])
-            short_put_gamma_bottom_price = float(STs[int(np.argmin(gamma.portfolio_gamma(STs, short_puts_agg, 0.05)))])
+            long_call_gamma_curve = gamma.portfolio_gamma(STs, long_calls_agg, 0.05)
+            long_put_gamma_curve = gamma.portfolio_gamma(STs, long_puts_agg, 0.05)
+            short_call_gamma_curve = gamma.portfolio_gamma(STs, short_calls_agg, 0.05)
+            short_put_gamma_curve = gamma.portfolio_gamma(STs, short_puts_agg, 0.05)
+
+            long_call_gamma_peak_idx = int(np.argmax(long_call_gamma_curve))
+            long_put_gamma_peak_idx = int(np.argmax(long_put_gamma_curve))
+            short_call_gamma_bottom_idx = int(np.argmin(short_call_gamma_curve))
+            short_put_gamma_bottom_idx = int(np.argmin(short_put_gamma_curve))
+
+            long_call_gamma_peak_price = float(STs[long_call_gamma_peak_idx])
+            long_put_gamma_peak_price = float(STs[long_put_gamma_peak_idx])
+            short_call_gamma_bottom_price = float(STs[short_call_gamma_bottom_idx])
+            short_put_gamma_bottom_price = float(STs[short_put_gamma_bottom_idx])
 
             gamma_point = (
                 long_call_gamma_peak_price + long_put_gamma_peak_price
                 + short_call_gamma_bottom_price + short_put_gamma_bottom_price
             ) / 4.0
 
+            # Dominant leg: whichever of the 4 extrema has the largest
+            # absolute dollar-gamma magnitude at its own peak/bottom — the
+            # one contributing the most weight to the averaged gamma_point.
+            leg_magnitudes = {
+                "Long Call": abs(float(long_call_gamma_curve[long_call_gamma_peak_idx])),
+                "Long Put": abs(float(long_put_gamma_curve[long_put_gamma_peak_idx])),
+                "Short Call": abs(float(short_call_gamma_curve[short_call_gamma_bottom_idx])),
+                "Short Put": abs(float(short_put_gamma_curve[short_put_gamma_bottom_idx])),
+            }
+            dominant_leg = max(leg_magnitudes, key=leg_magnitudes.get)
+
         payload = {
             "asset": asset,
             "gamma_point": gamma_point,
+            "dominant_leg": dominant_leg,
             "window_hours": window_hours,
             "trade_count": trade_count,
             "generated_at": datetime.now(timezone.utc).isoformat(),

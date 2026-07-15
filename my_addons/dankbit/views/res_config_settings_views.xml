@@ -12,12 +12,6 @@
                             <field name="refresh_interval" placeholder="Refresh Interval"/>
                         </setting>
                         <setting>
-                            <field name="zones_box_refresh_interval" placeholder="Zones Box Refresh Interval (s)"/>
-                        </setting>
-                        <setting>
-                            <field name="gamma_point_window_hours" placeholder="Gamma Point Window (h)"/>
-                        </setting>
-                        <setting>
                             <field name="deribit_timeout" placeholder="Deribit API timeout (s)"/>
                         </setting>
                         <setting>
@@ -44,6 +38,12 @@
                     </block>
 
                     <block title="TradingView Chart Settings" id="dankbit_tv_chart_settings" groups="base.group_no_one">
+                        <setting>
+                            <field name="zones_box_refresh_interval" placeholder="Zones Box Refresh Interval (s)"/>
+                        </setting>
+                        <setting>
+                            <field name="zones_box_window_hours" placeholder="Zones Box Trailing Window (h)"/>
+                        </setting>
                         <setting>
                             <field name="show_daily_lines"/>
                         </setting>
