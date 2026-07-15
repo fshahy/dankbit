@@ -4,3 +4,4 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 "access_dankbit_trade_public_user","dankbit_trade_public","model_dankbit_trade","base.group_public",1,0,0,0
 "access_dankbit_plot_wizard_internal_user","dankbit_plot_wizard_user","model_dankbit_plot_wizard","base.group_user",1,1,1,1
 "access_dankbit_zones_extrema_internal_user","dankbit_zones_extrema_user","model_dankbit_zones_extrema","base.group_user",1,1,1,1
+"access_dankbit_zones_wizard_internal_user","dankbit_zones_wizard_user","model_dankbit_zones_wizard","base.group_user",1,1,1,1

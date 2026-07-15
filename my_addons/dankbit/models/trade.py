@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 import requests, time as time_module
 
@@ -434,6 +434,39 @@ class Trade(models.Model):
             ]
         ).write({"active": False})
 
+    @api.model
+    def get_views(self, views, options=None):
+        """Stamps the "Last N Hours" search filters (see trade_views.xml)
+        with concrete UTC timestamps computed server-side, replacing
+        __NOW__/__LAST_2H__/__LAST_4H__/__LAST_8H__ placeholder tokens in the
+        search view's arch. Those filters can't compute "now" as a plain
+        domain expression themselves: Odoo's client-side domain evaluator
+        (py_date.js) only implements datetime.datetime.now() using the
+        browser's local wall-clock components (no utcnow(), no tz-aware
+        conversion), so a client-evaluated "last N hours" filter would be
+        off by the viewing user's UTC offset when compared against the
+        naive-UTC deribit_ts/expiration columns — the same class of bug
+        just fixed server-side in controllers/main.py's ORM domains.
+        Substituting in the server's own UTC clock here avoids that
+        entirely. Runs once per search-view fetch (e.g. page load), not
+        live on every filter toggle — same effective freshness as any other
+        "recent" filter in this addon."""
+        res = super().get_views(views, options=options)
+        search_view = res.get("views", {}).get("search")
+        if search_view and "arch" in search_view:
+            now = fields.Datetime.now()
+            replacements = {
+                "__NOW__": fields.Datetime.to_string(now),
+                "__LAST_2H__": fields.Datetime.to_string(now - timedelta(hours=2)),
+                "__LAST_4H__": fields.Datetime.to_string(now - timedelta(hours=4)),
+                "__LAST_8H__": fields.Datetime.to_string(now - timedelta(hours=8)),
+            }
+            arch = search_view["arch"]
+            for token, value in replacements.items():
+                arch = arch.replace(token, value)
+            search_view["arch"] = arch
+        return res
+
     def open_plot_wizard_taker(self):
         return {
             "type": "ir.actions.act_window",
@@ -444,4 +477,13 @@ class Trade(models.Model):
             "context": {
                 "dankbit_view_type": "taker",
             }
+        }
+
+    def open_zones_wizard(self):
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": "dankbit.zones_wizard",
+            "view_mode": "form",
+            "view_id": self.env.ref("dankbit.view_zones_wizard_form").id,
+            "target": "new",
         }

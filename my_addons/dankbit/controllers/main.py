@@ -66,7 +66,7 @@ class ChartController(http.Controller):
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
         domain = [
             ("name", "ilike", f"{instrument}"),
-            ("expiration", ">=", datetime.now()),
+            ("expiration", ">=", datetime.now(timezone.utc).replace(tzinfo=None)),
             ("deribit_ts", ">=", cutoff),
         ]
 
@@ -206,7 +206,7 @@ class ChartController(http.Controller):
         ).strftime("%Y-%m-%d %H:%M:%S")
         domain = [
             ("name", "=ilike", f"{instrument}-%"),
-            ("expiration", ">=", datetime.now()),
+            ("expiration", ">=", datetime.now(timezone.utc).replace(tzinfo=None)),
             ("deribit_ts", ">=", midnight_utc),
         ]
         trades = request.env["dankbit.trade"].search(domain=domain)
@@ -513,7 +513,7 @@ class ChartController(http.Controller):
         ).strftime("%Y-%m-%d %H:%M:%S")
         domain = [
             ("name", "=ilike", f"{instrument}-%"),
-            ("expiration", ">=", datetime.now()),
+            ("expiration", ">=", datetime.now(timezone.utc).replace(tzinfo=None)),
             ("deribit_ts", ">=", midnight_utc),
             ("direction", "=", cfg["direction"]),
             ("option_type", "=", cfg["option_type"]),

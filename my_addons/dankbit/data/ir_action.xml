@@ -15,5 +15,17 @@ if records:
             </field>
         </record>
 
+        <record model="ir.actions.server" id="action_dankbit_plot_zones">
+            <field name="name">Plot Zones</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="binding_model_id" ref="model_dankbit_trade" />
+            <field name="binding_view_types">list,form</field>
+            <field name="state">code</field>
+            <field name="code">
+if records:
+    action = records.open_zones_wizard()
+            </field>
+        </record>
+
     </data>
 </odoo>

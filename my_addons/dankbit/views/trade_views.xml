@@ -80,6 +80,33 @@
 
                 <separator/>
 
+                <!-- "Created" here means deribit_ts (the trade's own Deribit
+                     timestamp), the field every other "last N hours" feature
+                     in this addon windows on — not Odoo's create_date (DB
+                     insertion time, which can lag deribit_ts during REST
+                     backfill). Each also requires expiration >= now, i.e.
+                     not (yet) expired: active=False only reflects the daily
+                     _delete_expired_trades() cron, which can lag up to a day
+                     behind a trade's real expiry.
+
+                     The NOW / LAST-N-HOURS domain values below are literal
+                     placeholder tokens, not python expressions — the
+                     client's own domain evaluator
+                     only knows browser-local wall-clock time (no UTC-aware
+                     "now"), which would silently skew these by the viewing
+                     user's UTC offset against the naive-UTC deribit_ts/
+                     expiration columns. dankbit.trade.get_views() replaces
+                     these tokens with the server's real UTC clock before
+                     this arch ever reaches the browser. -->
+                <filter name="last_2_hours" string="Last 2 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_2H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_4_hours" string="Last 4 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_4H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_8_hours" string="Last 8 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_8H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+
+                <separator/>
+
                 <filter name="only_expired_trades" string="Expired" domain="[('active', '=', False)]"/>
                 
                 <group expand="0" string="Group By">

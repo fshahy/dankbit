@@ -18,6 +18,7 @@
         "views/zones_extrema_views.xml",
         "views/dankbit_templates.xml",
         "wizard/plot_wizard_view.xml",
+        "wizard/zones_wizard_view.xml",
     ],
     "installable": True,
     "application": True,
