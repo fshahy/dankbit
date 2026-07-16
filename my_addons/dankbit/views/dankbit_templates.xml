@@ -255,8 +255,8 @@
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn" onclick="setTf('4h')">4h</button>
-					<button class="tf-btn active" onclick="setTf('1d')">1d</button>
+					<button t-attf-class="tf-btn#{' active' if show_gamma_point == 'false' else ''}" onclick="setTf('4h')">4h</button>
+					<button t-attf-class="tf-btn#{' active' if show_gamma_point == 'true' else ''}" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<t t-if="show_gamma_point == 'true'">
@@ -290,10 +290,6 @@
 						<label class="toggle-label">
 							<input type="radio" name="zones-box-window" id="zones-box-window-hours" onchange="onZonesBoxWindowChange()"/>
 							<t t-esc="zones_box_window_hours"/>h ago
-						</label>
-						<label class="toggle-label">
-							<input type="checkbox" id="trial-points-toggle" onchange="onToggleTrialPoints()"/>
-							Trial Points
 						</label>
 						<span class="tf-label">UTC Now:</span>
 						<span id="utc-now-label" class="tf-label"/>
@@ -361,12 +357,6 @@
 					// hourly compute_snapshot() cron and every other viewer's default
 					// midnight-based view are completely unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
-					// "Trial Points" checkbox (Delta Chart only, next to the zones-box
-					// window radio buttons) — unchecked by default. Stops
-					// refreshTrialPoints() from calling the server at all while off
-					// (see onToggleTrialPoints() below), same server-load-reducing
-					// pattern as "Lines"/"Zones Extrema" above.
-					let SHOW_TRIAL_POINTS = false;
 					// "Nearest" / "Weekly" / "Monthly" checkboxes (Gamma Chart only)
 					// — each toggles BOTH of that scope's line sets together (e.g.
 					// "Nearest" hides/shows the black Nearest line AND the orange
@@ -388,9 +378,8 @@
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
-					const TRIAL_POINTS_URL = '/api/trial-points/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
-					let   INTERVAL         = '1d';
+					let   INTERVAL         = SHOW_GAMMA_POINT ? '1d' : '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					// Lightweight Charts has no native IANA-timezone support — it always
@@ -456,32 +445,6 @@
 					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
-
-					// TRIAL FEATURE — deliberately separate from the Zones Extrema
-					// lines above (see /api/trial-points/<asset>, main.py's
-					// trial_points_json, which never touches dankbit.zones.extrema
-					// at all). Three single-point markers, not time-series lines,
-					// showing what bottom_intersection/top_intersection/gamma_band
-					// would be if computed from only the trailing
-					// dankbit.zones_box_window_hours hours of trades (the same
-					// setting the zones-box trade-window radio toggle uses) — same
-					// colors as their Zones Extrema line counterparts (red/green/
-					// violet) for visual association, but plotted as a dot at the
-					// current time via lineVisible:false + pointMarkersVisible:true
-					// (a single-point addLineSeries draws nothing without this,
-					// since there's no second point to connect a line to).
-					const trialBottomPoint = chart.addLineSeries({
-						color: '#c62828', lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 6,
-						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-					const trialTopPoint = chart.addLineSeries({
-						color: '#2e7d32', lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 6,
-						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-					const trialGammaPoint = chart.addLineSeries({
-						color: '#c9a0dc', lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 6,
-						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -672,9 +635,9 @@
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
-					// "UTC Now:" clock (Delta Chart only, next to "Trial Points" — see
-					// #utc-now-label's t-if) — plain wall-clock readout, no fetch
-					// involved, ticks every second independent of any REFRESH poll.
+					// "UTC Now:" clock (Delta Chart only — see #utc-now-label's t-if)
+					// — plain wall-clock readout, no fetch involved, ticks every
+					// second independent of any REFRESH poll.
 					function updateUtcNowLabel() {
 						const el = document.getElementById('utc-now-label');
 						if (!el) return;
@@ -1033,46 +996,6 @@
 						}
 					}
 
-					// TRIAL FEATURE (Delta Chart only) — see trialBottomPoint/
-					// trialTopPoint/trialGammaPoint above and trial_points_json in
-					// main.py. Gated by the "Trial Points" checkbox (SHOW_TRIAL_POINTS,
-					// unchecked by default), not by timeframe — unlike the Zones
-					// Extrema lines/boxes. Polled on the same REFRESH interval as most
-					// other indicators, not ZONES_BOX_REFRESH, since it's unrelated to
-					// that poll's own cadence despite sharing the same window-hours
-					// setting.
-					async function refreshTrialPoints() {
-						if (MINIMAL_CHART || !SHOW_TRIAL_POINTS) return;
-						const data = await (await fetch(TRIAL_POINTS_URL)).json();
-						// Always drawn on the current (latest) candle rather than raw
-						// "now" — Date.now() can land mid-bucket on coarser timeframes
-						// (4h/1d), which would place the point floating between candles
-						// instead of sitting on the one it's actually describing.
-						const t = realCandles.length
-							? realCandles[realCandles.length - 1].time
-							: (Math.floor(Date.now() / 1000) + tzOffset);
-						trialBottomPoint.setData(data.bottom_intersection != null ? [{ time: t, value: data.bottom_intersection }] : []);
-						trialTopPoint.setData(data.top_intersection != null ? [{ time: t, value: data.top_intersection }] : []);
-						trialGammaPoint.setData(data.gamma_band != null ? [{ time: t, value: data.gamma_band }] : []);
-					}
-
-					// "Trial Points" checkbox — stops refreshTrialPoints() from calling
-					// the server at all while off (see SHOW_TRIAL_POINTS above), not
-					// just hiding the result. Clears the 3 points immediately when
-					// switched off (refreshTrialPoints() itself returns before drawing
-					// anything when SHOW_TRIAL_POINTS is false, so the toggle handler
-					// clears them directly) and fetches immediately when switched on.
-					function onToggleTrialPoints() {
-						SHOW_TRIAL_POINTS = document.getElementById('trial-points-toggle').checked;
-						if (SHOW_TRIAL_POINTS) {
-							refreshTrialPoints();
-						} else {
-							trialBottomPoint.setData([]);
-							trialTopPoint.setData([]);
-							trialGammaPoint.setData([]);
-						}
-					}
-
 					// "Zones Extrema" checkbox (Delta Chart only, next to "Lines") —
 					// controls only the Top/Bottom Intersection + Gamma Band lines
 					// (green/red/dashed violet), NOT the yellow/teal zones boxes,
@@ -1145,7 +1068,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshTrialPoints(); await refreshNearestExpiry(); await refreshGammaPointLines(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPointLines(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -1179,7 +1102,6 @@
 					setInterval(refreshZonesExtrema, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
-					setInterval(refreshTrialPoints, REFRESH);
 					setInterval(refreshGammaPointLines, REFRESH);
 				//]]></script>
 			</body>
