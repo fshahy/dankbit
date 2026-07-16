@@ -1276,6 +1276,13 @@ class ChartController(http.Controller):
 
     @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
     def gamma_levels_json(self, instrument):
+        """Optional ?hours= query param restricts trades to the trailing
+        `hours` hours (deribit_ts >= NOW() - hours) on top of the usual
+        expiration >= NOW() AND expiration <= <instrument's expiry> window —
+        same trailing-hours-override pattern get_box()'s own ?hours= param
+        uses. Omitted (the default) means every trade through that expiry,
+        as before. Used by the Gamma Chart's orange "Nearest 24h" line.
+        """
         parts = instrument.upper().split("-", 1)
         if len(parts) != 2:
             return request.make_response(
@@ -1307,8 +1314,15 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
+        hours_param = request.httprequest.args.get("hours")
+        query_params = [f'%{asset}%', expiry_dt]
+        time_filter_sql = ""
+        if hours_param:
+            time_filter_sql = "AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')"
+            query_params.append(float(hours_param))
+
         cr = request.env.cr
-        cr.execute("""
+        cr.execute(f"""
             SELECT strike, option_type, direction, expiration,
                    SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
             FROM dankbit_trade
@@ -1316,8 +1330,9 @@ class ChartController(http.Controller):
               AND expiration >= NOW()
               AND expiration <= %s
               AND active = TRUE
+              {time_filter_sql}
             GROUP BY strike, option_type, direction, expiration
-        """, (f'%{asset}%', expiry_dt))
+        """, query_params)
         rows = cr.fetchall()
 
         agg_trades = [
@@ -1792,194 +1807,3 @@ class ChartController(http.Controller):
 
         ctx["show_gamma_point"] = "true"
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
-
-    @http.route("/api/gamma-point/<string:asset>/<int:hours>", type="http", auth="public", website=False, csrf=False)
-    def gamma_point_json(self, asset, hours):
-        """gamma_point: average of 4 per-leg gamma extrema — Long Call/Put
-        Gamma Peak (argmax), Short Call/Put Gamma Bottom (argmin, since
-        short positions carry negative gamma) — across *every* active
-        expiry for `asset`, restricted to trades from the trailing `hours`
-        hours. No configured default any more (dankbit.gamma_point_window_hours
-        was removed) — /my/<asset> always calls this once per window in
-        GAMMA_POINT_HOURS = [4, 8, 12, 24] (see dankbit_templates.xml), each
-        drawn as its own titled price line. dominant_leg: whichever of the
-        4 legs (Long Call/Put, Short Call/Put) has the largest absolute
-        dollar-gamma magnitude at its own peak/bottom — the biggest
-        contributor to the averaged gamma_point; appended to each line's
-        title. Both None when there are no trades at all in this window.
-
-        Optional ?scope= query param narrows which expiries feed the
-        average — driven by the Gamma Chart's Nearest Expiry/Weekly/Monthly
-        checkboxes (mutually exclusive, all unchecked by default, matching
-        this route's original all-expiries behavior when scope is omitted
-        or unrecognized):
-        - "nearest": the single nearest active expiry only (same lookup
-          trial_points_json uses for its own nearest expiry).
-        - "weekly"/"monthly": every expiry from now through the configured
-          dankbit.weekly_expiry/monthly_expiry (or eth_* for ETH) — same
-          expiration <= cutoff convention /BTC/weekly and /BTC/monthly
-          already use via chart_png_until, so this can never disagree with
-          those routes about what "weekly"/"monthly" means. Returns the
-          same empty (gamma_point=None) result as "no trades" if that
-          setting isn't configured or fails to parse.
-        """
-        asset = asset.upper()
-        window_hours = hours
-        scope = request.httprequest.args.get("scope")
-        icp = request.env["ir.config_parameter"].sudo()
-        if asset.startswith("BTC"):
-            from_price = float(icp.get_param("dankbit.from_price", default=100000))
-            to_price = float(icp.get_param("dankbit.to_price", default=150000))
-            steps = int(icp.get_param("dankbit.steps", default=100))
-        elif asset.startswith("ETH"):
-            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=50))
-        else:
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        def _empty_payload():
-            return {
-                "asset": asset,
-                "gamma_point": None,
-                "dominant_leg": None,
-                "window_hours": window_hours,
-                "trade_count": 0,
-                "scope": scope,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-        cr = request.env.cr
-
-        # expiration_filter_sql is always one of a few fixed literals below
-        # (never built from request input), so interpolating it into the
-        # query string is safe; the actual expiration value(s) are still
-        # passed as bound parameters.
-        expiration_filter_sql = ""
-        query_params = [f'%{asset}%']
-
-        if scope == "nearest":
-            # Same lookup trial_points_json uses for its own nearest expiry
-            # — a cheap DISTINCT-expiration query rather than assuming an
-            # ordering from the main aggregation query below.
-            as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-            cr.execute("""
-                SELECT DISTINCT expiration FROM dankbit_trade
-                WHERE name ILIKE %s AND expiration >= %s
-                ORDER BY expiration ASC
-                LIMIT 1
-            """, (f"{asset}-%", as_of))
-            row = cr.fetchone()
-            nearest_expiration = row[0] if row else None
-            if not nearest_expiration:
-                return request.make_response(
-                    json.dumps(_empty_payload()),
-                    headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-                )
-            expiration_filter_sql = "AND expiration = %s"
-            query_params.append(nearest_expiration)
-
-        elif scope in ("weekly", "monthly"):
-            if asset.startswith("ETH"):
-                param = "dankbit.eth_weekly_expiry" if scope == "weekly" else "dankbit.eth_monthly_expiry"
-            else:
-                param = "dankbit.weekly_expiry" if scope == "weekly" else "dankbit.monthly_expiry"
-            configured = icp.get_param(param, default="").upper()
-            # Same "ASSET-DDMMMYY" parsing chart_png_until uses for this
-            # exact setting, so "weekly"/"monthly" here can never mean a
-            # different cutoff than /BTC/weekly or /BTC/monthly do.
-            expiry_dt = None
-            parts = configured.split("-", 1) if configured else []
-            if len(parts) == 2:
-                try:
-                    expiry_dt = datetime.strptime(parts[1], "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
-                except ValueError:
-                    expiry_dt = None
-            if not expiry_dt:
-                return request.make_response(
-                    json.dumps(_empty_payload()),
-                    headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-                )
-            expiration_filter_sql = "AND expiration <= %s"
-            query_params.append(expiry_dt)
-
-        query_params.append(window_hours)
-        cr.execute(f"""
-            SELECT strike, option_type, direction, expiration,
-                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND expiration >= NOW()
-              AND active = TRUE
-              {expiration_filter_sql}
-              AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')
-            GROUP BY strike, option_type, direction, expiration
-        """, query_params)
-        rows = cr.fetchall()
-
-        agg_trades = [
-            _AggTrade(
-                strike=row[0], option_type=row[1], direction=row[2],
-                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
-            )
-            for row in rows
-        ]
-        trade_count = sum(int(row[6]) for row in rows)
-
-        STs = np.arange(from_price, to_price, steps)
-
-        gamma_point = None
-        dominant_leg = None
-        if agg_trades:
-            long_calls_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "call"]
-            long_puts_agg = [t for t in agg_trades if t.direction == "buy" and t.option_type == "put"]
-            short_calls_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "call"]
-            short_puts_agg = [t for t in agg_trades if t.direction == "sell" and t.option_type == "put"]
-
-            long_call_gamma_curve = gamma.portfolio_gamma(STs, long_calls_agg, 0.05)
-            long_put_gamma_curve = gamma.portfolio_gamma(STs, long_puts_agg, 0.05)
-            short_call_gamma_curve = gamma.portfolio_gamma(STs, short_calls_agg, 0.05)
-            short_put_gamma_curve = gamma.portfolio_gamma(STs, short_puts_agg, 0.05)
-
-            long_call_gamma_peak_idx = int(np.argmax(long_call_gamma_curve))
-            long_put_gamma_peak_idx = int(np.argmax(long_put_gamma_curve))
-            short_call_gamma_bottom_idx = int(np.argmin(short_call_gamma_curve))
-            short_put_gamma_bottom_idx = int(np.argmin(short_put_gamma_curve))
-
-            long_call_gamma_peak_price = float(STs[long_call_gamma_peak_idx])
-            long_put_gamma_peak_price = float(STs[long_put_gamma_peak_idx])
-            short_call_gamma_bottom_price = float(STs[short_call_gamma_bottom_idx])
-            short_put_gamma_bottom_price = float(STs[short_put_gamma_bottom_idx])
-
-            gamma_point = (
-                long_call_gamma_peak_price + long_put_gamma_peak_price
-                + short_call_gamma_bottom_price + short_put_gamma_bottom_price
-            ) / 4.0
-
-            # Dominant leg: whichever of the 4 extrema has the largest
-            # absolute dollar-gamma magnitude at its own peak/bottom — the
-            # one contributing the most weight to the averaged gamma_point.
-            leg_magnitudes = {
-                "Long Call": abs(float(long_call_gamma_curve[long_call_gamma_peak_idx])),
-                "Long Put": abs(float(long_put_gamma_curve[long_put_gamma_peak_idx])),
-                "Short Call": abs(float(short_call_gamma_curve[short_call_gamma_bottom_idx])),
-                "Short Put": abs(float(short_put_gamma_curve[short_put_gamma_bottom_idx])),
-            }
-            dominant_leg = max(leg_magnitudes, key=leg_magnitudes.get)
-
-        payload = {
-            "asset": asset,
-            "gamma_point": gamma_point,
-            "dominant_leg": dominant_leg,
-            "window_hours": window_hours,
-            "trade_count": trade_count,
-            "scope": scope,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
