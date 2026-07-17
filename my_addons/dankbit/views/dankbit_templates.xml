@@ -259,6 +259,10 @@
 					<button t-attf-class="tf-btn#{' active' if show_gamma_point == 'true' else ''}" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
+						<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
+						Forecast
+					</label>
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
 							<input type="checkbox" id="nearest-expiry-toggle" checked="checked" onchange="onToggleGammaScope('nearest')"/>
@@ -379,6 +383,11 @@
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
+					const FORECAST_URL     = '/api/forecast/' + ASSET;
+					// "Forecast" checkbox (both Delta and Gamma Chart, next to
+					// Ruler) — unchecked by default, same server-load-reducing
+					// pattern as every other optional indicator on this chart.
+					let SHOW_FORECAST = false;
 					let   INTERVAL         = SHOW_GAMMA_POINT ? '1d' : '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -480,6 +489,25 @@
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					const smlmBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+
+					// Forecast candles (both Delta and Gamma Chart, "Forecast"
+					// checkbox) — one simulated GBM price path extending 2
+					// days past the last real candle, sourced from
+					// /api/forecast/<asset> (see forecast.simulate_path).
+					// Real OHLC bodies (an earlier version forced
+					// open === close on every bar, which drew nothing but
+					// a wick — no candle actually has a visible body
+					// without open/close differing), built server-side from
+					// finer intra-hour sub-steps so each candle has a
+					// genuine range, not just a single jump. Muted
+					// green/up, red/down — same convention as the real
+					// candles, just pastel so it's still visually clear
+					// which series is the forecast.
+					const forecastSeries = chart.addCandlestickSeries({
+						upColor: '#a5d6a7', downColor: '#ef9a9a', borderVisible: false,
+						wickUpColor: '#66bb6a', wickDownColor: '#e57373',
+						lastValueVisible: false, priceLineVisible: false,
+					});
 
 					// Gamma point lines (only on /my/<asset>, see SHOW_GAMMA_POINT) —
 					// 6 line sets in 3 scopes, each scope toggled by its own
@@ -714,6 +742,7 @@
 						await refreshZonesExtrema();
 						await refreshZonesBoxes();
 						await refreshZonesExtremaExtended();
+						await updateForecastVisibility();
 					}
 
 					async function refreshDeltaZero() {
@@ -1001,6 +1030,77 @@
 						}
 					}
 
+					function clearForecastLines() {
+						forecastSeries.setData([]);
+					}
+
+					// The Forecast candles are 4h resolution (see
+					// forecast.simulate_path's step_hours default) and only
+					// make visual sense lined up against real 4h-spaced
+					// candles, so both the checkbox and the series itself
+					// are restricted to the 4h timeframe — shown/hidden by
+					// updateForecastVisibility() on every timeframe switch
+					// (both Delta and Gamma Chart, since both share setTf()).
+					function updateForecastVisibility() {
+						const visible = INTERVAL === '4h';
+						document.getElementById('forecast-toggle-wrap').style.display = visible ? '' : 'none';
+						refreshForecast();
+					}
+
+					// "Forecast" checkbox (both Delta and Gamma Chart) — fetches
+					// /api/forecast/<asset> and draws the forecast candles (see
+					// FORECAST_URL, forecastSeries above). Stops fetching
+					// entirely while off, or while not on the 4h timeframe
+					// (see updateForecastVisibility above), same server-load-
+					// reducing pattern as every other optional indicator here.
+					// Display time is NOT taken from the server's `t` (an
+					// arbitrary now-relative timestamp) — it's recomputed
+					// here, anchored to the same grid futureAxisSeries uses
+					// for its own future ticks (realCandles[last].time,
+					// stepped by intervalSec). Lightweight Charts builds one
+					// shared logical time axis from the union of every
+					// series' timestamps; server-relative "now" timestamps
+					// almost never land on that grid, so forecastSeries'
+					// points ended up alternating with futureAxisSeries'
+					// ticks in the same stretch — each series only getting
+					// every other logical slot, which rendered as every
+					// other forecast candle missing.
+					//
+					// The anchor walks forward from realCandles[last].time
+					// (a whole number of intervalSec steps at a time, so it
+					// never leaves the grid) until it's strictly past "now"
+					// — rather than assuming realCandles[last] is always
+					// the current still-forming candle (one step behind
+					// "now"), which would silently break if Deribit or the
+					// 5s updateLatestCandle() poll ever returned a stale
+					// last-closed candle instead. This guarantees the first
+					// forecast candle is always the next 4h candle after
+					// now, on the correct grid, regardless of which one
+					// realCandles[last] actually is.
+					async function refreshForecast() {
+						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
+						const data = await (await fetch(FORECAST_URL)).json();
+						const points = data.points || [];
+						if (!points.length) { clearForecastLines(); return; }
+						const intervalSec = INTERVAL_SECONDS[INTERVAL];
+						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
+						let firstTime = realCandles[realCandles.length - 1].time;
+						while (firstTime <= nowShifted) firstTime += intervalSec;
+						forecastSeries.setData(points.map((p, i) => ({
+							time: firstTime + i * intervalSec,
+							open: p.open, high: p.high, low: p.low, close: p.close,
+						})));
+					}
+
+					function onToggleForecast() {
+						SHOW_FORECAST = document.getElementById('forecast-toggle').checked;
+						if (SHOW_FORECAST) {
+							refreshForecast();
+						} else {
+							clearForecastLines();
+						}
+					}
+
 					// 00:00-UTC-vs-trailing-hours radio toggle for the zones boxes
 					// (see ZONES_BOX_WINDOW_MODE above) — re-fetches immediately on
 					// change rather than waiting for the next ZONES_BOX_REFRESH poll.
@@ -1050,7 +1150,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPointLines(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPointLines(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -1083,6 +1183,7 @@
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
 					setInterval(refreshGammaPointLines, REFRESH);
+					setInterval(refreshForecast, REFRESH);
 				//]]></script>
 			</body>
 		</html>

@@ -12,6 +12,7 @@ from . import delta
 from . import gamma
 from . import theta
 from . import vega
+from . import forecast
 
 
 class _AggTrade:
@@ -1611,6 +1612,70 @@ class ChartController(http.Controller):
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/forecast/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def forecast_json(self, asset, **kw):
+        """2-day-ahead price forecast — one simulated GBM price path (see
+        forecast.simulate_path) seeded by the trailing-24h amount-weighted
+        average IV across `asset`'s trades, computed the same way
+        gamma_levels_json aggregates IV (SUM(iv*amount)/NULLIF(SUM(amount),0)).
+        The path carries no assumed drift (same r=0.0 convention this
+        addon's other Greeks use) — it isn't a directional call, just one
+        randomly sampled realization consistent with the market's own
+        implied volatility. `seed` is derived from the current UTC hour (not
+        true randomness) so the path stays stable between polls within the
+        same hour rather than jittering on every REFRESH tick, and only
+        moves on to a new realization once new IV data rolls in. Candles are
+        4h by default (see simulate_path — matches the TradingView chart's
+        4h timeframe, the only one that fetches/draws this; the endpoint
+        itself doesn't know or care which timeframe the caller is on).
+        `points` is empty when there's no index price or no trades in the
+        trailing 24h to estimate a volatility from."""
+        asset = asset.upper()
+        if asset not in ("BTC", "ETH"):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
+        """, (f"{asset}-%",))
+        avg_iv, trade_count = cr.fetchone()
+        sigma_annual = float(avg_iv) / 100.0 if avg_iv else None
+
+        points = []
+        if index_price and sigma_annual:
+            now = datetime.now(timezone.utc)
+            now_ms = int(now.timestamp() * 1000)
+            seed = int(now.timestamp() // 3600) + (0 if asset == "BTC" else 1)
+            for p in forecast.simulate_path(index_price, sigma_annual, seed=seed):
+                points.append({
+                    "t": now_ms + int(p["hours"] * 3600 * 1000),
+                    "open": p["open"],
+                    "high": p["high"],
+                    "low": p["low"],
+                    "close": p["close"],
+                })
+
+        payload = {
+            "asset": asset,
+            "index_price": index_price,
+            "sigma_annual": sigma_annual,
+            "trade_count": int(trade_count or 0),
+            "points": points,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
