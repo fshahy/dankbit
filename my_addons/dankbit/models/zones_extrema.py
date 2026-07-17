@@ -396,6 +396,33 @@ class ZonesExtrema(models.Model):
             return self._compute_asset(asset, expiry_index=0, hours=hours)
         return self.get_box_n(asset, 0)
 
+    def get_levels(self, asset):
+        """Top/bottom intersection + gamma band from `asset`'s nearest
+        tracked instrument's persisted row — the exact same numbers the
+        TradingView chart's Zones Extrema lines currently draw for their
+        latest point (see /api/zones-extrema/<asset>), used by
+        forecast2_json to steer the "Forecast 2" path. Deliberately reads
+        the persisted row rather than recomputing live (get_box_n()):
+        those lines are only ever refreshed by the chart's own polling, so
+        reusing that stored value keeps Forecast 2 consistent with what's
+        actually drawn instead of doing a second, independent (and
+        expensive) curve rebuild on every forecast poll. self.sudo() since
+        this is reached from an auth="public" route with no public grant
+        on this model (see ir.model.access.csv). Returns None if there's no
+        active expiry, or nothing persisted for it yet."""
+        instrument = self.nearest_expiry(asset)
+        if not instrument:
+            return None
+        record = self.sudo().search([("instrument", "=", instrument)], limit=1)
+        if not record:
+            return None
+        return {
+            "instrument": instrument,
+            "top_intersection": record.top_intersection,
+            "bottom_intersection": record.bottom_intersection,
+            "gamma_band": record.gamma_band,
+        }
+
     def compute_snapshot(self):
         """Cron entry point (every 15 minutes — see data/ir_cron.xml) — a
         fallback so instrument rows keep updating even when nobody's

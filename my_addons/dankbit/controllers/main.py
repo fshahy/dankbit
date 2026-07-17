@@ -1679,6 +1679,77 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route("/api/forecast2/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def forecast2_json(self, asset, **kw):
+        """"Forecast 2" — same GBM path as forecast_json, but additionally
+        steered by the Zones Extrema levels the plain forecast ignores:
+        pulled toward gamma_band and softly reflected off
+        top_intersection/bottom_intersection (see
+        forecast.simulate_path_with_levels), using
+        dankbit.zones.extrema.get_levels() for asset's nearest tracked
+        instrument — the same numbers currently drawn as the Top/Bottom
+        Intersection and Gamma Band lines. Shares forecast_json's index
+        price, IV, and hour-seed (so the two paths use the exact same
+        random draws and differ only in the added mean-reversion/barrier
+        terms, making them directly comparable). `points` is empty when
+        there's no index price, no trailing-24h trades to estimate
+        volatility from, or no persisted levels yet for this asset's
+        nearest instrument."""
+        asset = asset.upper()
+        if asset not in ("BTC", "ETH"):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
+        """, (f"{asset}-%",))
+        avg_iv, trade_count = cr.fetchone()
+        sigma_annual = float(avg_iv) / 100.0 if avg_iv else None
+
+        levels = request.env["dankbit.zones.extrema"].get_levels(asset)
+
+        points = []
+        if index_price and sigma_annual and levels and levels["gamma_band"]:
+            now = datetime.now(timezone.utc)
+            now_ms = int(now.timestamp() * 1000)
+            seed = int(now.timestamp() // 3600) + (0 if asset == "BTC" else 1)
+            top = levels["top_intersection"] or None
+            bottom = levels["bottom_intersection"] or None
+            for p in forecast.simulate_path_with_levels(
+                index_price, sigma_annual, top, bottom, levels["gamma_band"], seed=seed,
+            ):
+                points.append({
+                    "t": now_ms + int(p["hours"] * 3600 * 1000),
+                    "open": p["open"],
+                    "high": p["high"],
+                    "low": p["low"],
+                    "close": p["close"],
+                })
+
+        payload = {
+            "asset": asset,
+            "index_price": index_price,
+            "sigma_annual": sigma_annual,
+            "trade_count": int(trade_count or 0),
+            "top_intersection": levels["top_intersection"] if levels else None,
+            "bottom_intersection": levels["bottom_intersection"] if levels else None,
+            "gamma_band": levels["gamma_band"] if levels else None,
+            "points": points,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     # ------------------------------------------------------------------
     # TradingView Lightweight Charts pages
     # ------------------------------------------------------------------
