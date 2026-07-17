@@ -13,6 +13,7 @@ from . import gamma
 from . import theta
 from . import vega
 from . import forecast
+from . import forecast3
 
 
 class _AggTrade:
@@ -1561,24 +1562,27 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def klines_proxy(self, asset, interval="4h", limit="500"):
+    def _fetch_candles(self, asset, interval="4h", limit=500):
+        """Real Deribit perpetual-futures candles, oldest-first — shared by
+        klines_proxy (below, which reverses to newest-first for the
+        frontend) and forecast3_json (which needs real historical bars for
+        its ATR/momentum/liquidity-sweep detection, see forecast3.py).
+        Deribit has no native 4h resolution (240 is rejected as "unsupported
+        resolution") — fetch 1h candles and aggregate every 4 into one,
+        bucketed by timestamp (not position) so buckets stay calendar-
+        aligned to 00:00 UTC regardless of the fetch window's exact
+        boundaries."""
         instrument_map = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
         instrument = instrument_map.get(asset.upper(), asset.upper() + "-PERPETUAL")
         resolution_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
                           "1h": 60, "1d": "1D"}
-        limit_int = int(limit)
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # Deribit has no native 4h resolution (240 is rejected as "unsupported
-        # resolution") — fetch 1h candles and aggregate every 4 into one,
-        # bucketed by timestamp (not position) so buckets stay calendar-aligned
-        # to 00:00 UTC regardless of the fetch window's exact boundaries.
         bucket_hours = 4 if interval == "4h" else 1
         resolution = 60 if interval == "4h" else resolution_map.get(interval, 360)
         granularity_ms = (86400000 if resolution == "1D"
                           else int(resolution) * 60 * 1000)
-        start_ms = now_ms - limit_int * bucket_hours * granularity_ms
+        start_ms = now_ms - limit * bucket_hours * granularity_ms
         url = (f"https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
                f"?instrument_name={instrument}&resolution={resolution}"
                f"&start_timestamp={start_ms}&end_timestamp={now_ms}")
@@ -1589,7 +1593,6 @@ class ChartController(http.Controller):
         highs  = result.get("high",   [])
         lows   = result.get("low",    [])
         closes = result.get("close",  [])
-        # Deribit returns oldest-first
         candles = [
             {"t": ticks[i], "o": opens[i], "h": highs[i], "l": lows[i], "c": closes[i]}
             for i in range(len(ticks))
@@ -1609,6 +1612,11 @@ class ChartController(http.Controller):
                     b["c"] = c["c"]
             candles = [buckets[k] for k in sorted(buckets)]
 
+        return candles
+
+    @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def klines_proxy(self, asset, interval="4h", limit="500"):
+        candles = self._fetch_candles(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
@@ -1742,6 +1750,95 @@ class ChartController(http.Controller):
             "top_intersection": levels["top_intersection"] if levels else None,
             "bottom_intersection": levels["bottom_intersection"] if levels else None,
             "gamma_band": levels["gamma_band"] if levels else None,
+            "points": points,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    _FORECAST3_SNAPSHOT_FIELDS = [
+        "top", "low", "bml", "smp",
+        "bcg_price", "bpg_price", "scg_price", "spg_price",
+        "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
+        "bcd_price", "bpd_price", "scd_price", "spd_price",
+        "bcd_abs", "bpd_abs", "scd_abs", "spd_abs",
+        "bct_price", "bpt_price", "sct_price", "spt_price",
+        "bct_abs", "bpt_abs", "sct_abs", "spt_abs",
+        "bcv_price", "bpv_price", "scv_price", "spv_price",
+        "bcv_abs", "bpv_abs", "scv_abs", "spv_abs",
+        "lower_liq_price", "lower_liq_m", "upper_liq_price", "upper_liq_m",
+    ]
+
+    def _snapshot_to_dict(self, record):
+        """dankbit.forecast3.snapshot record -> plain dict keyed exactly as
+        forecast3.py's engine expects (see per_leg_greeks/derive_levels),
+        plus bucket_epoch (UTC epoch seconds) for the Gamma-Band
+        Consensus/center-slope real-elapsed-time math."""
+        data = {f: getattr(record, f) for f in self._FORECAST3_SNAPSHOT_FIELDS}
+        data["bucket_epoch"] = record.bucket_start.replace(tzinfo=timezone.utc).timestamp()
+        return data
+
+    @http.route("/api/forecast3/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def forecast3_json(self, asset, **kw):
+        """"Forecast 3" — full port of Thales's "Thales Bands" Pine
+        indicator's forecast-candle engine (see forecast3.py) onto
+        Dankbit's own live per-leg gamma/delta/theta/vega Greeks, rather
+        than Thales's manually-typed-in daily CSV rows. Unlike
+        Forecast/Forecast 2, this path is fully deterministic — no GBM/
+        random component anywhere, matching the source script, which has
+        none either; every candle is a direct function of the current
+        Greeks, the last couple of persisted dankbit.forecast3.snapshot
+        rows (for the Gamma-Band Consensus slope), and recent real 4h
+        candles (for ATR/momentum/liquidity-sweep detection). `points` is
+        empty when there's nothing computable yet for this asset (no index
+        price, no active expiry, or no trades in the current 00:00-UTC
+        window — see dankbit.forecast3.snapshot.compute_and_persist)."""
+        asset = asset.upper()
+        if asset not in ("BTC", "ETH"):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        index_price = request.env["dankbit.trade"].get_index_price(asset)
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND deribit_ts >= NOW() - INTERVAL '24 hours'
+        """, (f"{asset}-%",))
+        avg_iv_row = cr.fetchone()
+        sigma_annual = float(avg_iv_row[0]) / 100.0 if avg_iv_row and avg_iv_row[0] else None
+
+        Snapshot = request.env["dankbit.forecast3.snapshot"]
+        current_record = Snapshot.compute_and_persist(asset)
+
+        points = []
+        if index_price and sigma_annual and current_record:
+            history_records = Snapshot.recent_history(asset, limit=4).filtered(
+                lambda r: r.bucket_start != current_record.bucket_start
+            )[:3]
+            current = self._snapshot_to_dict(current_record)
+            history = [self._snapshot_to_dict(r) for r in history_records]
+            candles = self._fetch_candles(asset, interval="4h", limit=40)
+
+            now = datetime.now(timezone.utc)
+            now_ms = int(now.timestamp() * 1000)
+            for p in forecast3.simulate_forecast3(index_price, sigma_annual, current, history, candles):
+                points.append({
+                    "t": now_ms + int(p["hours"] * 3600 * 1000),
+                    "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
+                    "mode": p["mode"],
+                })
+
+        payload = {
+            "asset": asset,
+            "index_price": index_price,
+            "sigma_annual": sigma_annual,
             "points": points,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }

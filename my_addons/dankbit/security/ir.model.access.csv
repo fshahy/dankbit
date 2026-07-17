@@ -6,3 +6,5 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 "access_dankbit_zones_extrema_internal_user","dankbit_zones_extrema_user","model_dankbit_zones_extrema","base.group_user",1,1,1,1
 "access_dankbit_zones_wizard_internal_user","dankbit_zones_wizard_user","model_dankbit_zones_wizard","base.group_user",1,1,1,1
 "access_dankbit_http_log_internal_user","dankbit_http_log_user","model_dankbit_http_log","base.group_user",1,1,1,1
+"access_dankbit_forecast3_snapshot_internal_user","dankbit_forecast3_snapshot_user","model_dankbit_forecast3_snapshot","base.group_user",1,1,1,1
+"access_dankbit_liquidity_snapshot_internal_user","dankbit_liquidity_snapshot_user","model_dankbit_liquidity_snapshot","base.group_user",1,1,1,1

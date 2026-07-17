@@ -267,6 +267,10 @@
 						<input type="checkbox" id="forecast2-toggle" onchange="onToggleForecast2()"/>
 						Forecast 2
 					</label>
+					<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
+						<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
+						Thales Forecast
+					</label>
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
 							<input type="checkbox" id="nearest-expiry-toggle" checked="checked" onchange="onToggleGammaScope('nearest')"/>
@@ -389,6 +393,7 @@
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					const FORECAST_URL     = '/api/forecast/' + ASSET;
 					const FORECAST2_URL    = '/api/forecast2/' + ASSET;
+					const FORECAST3_URL    = '/api/forecast3/' + ASSET;
 					// "Forecast" checkbox (both Delta and Gamma Chart, next to
 					// Ruler) — unchecked by default, same server-load-reducing
 					// pattern as every other optional indicator on this chart.
@@ -398,6 +403,11 @@
 					// additionally steered by the Zones Extrema levels (gamma
 					// band, top/bottom intersection) the plain Forecast ignores.
 					let SHOW_FORECAST2 = false;
+					// "Forecast 3" checkbox — same pattern, unchecked by default.
+					// Draws a third, fully deterministic path (see FORECAST3_URL)
+					// ported from Thales's own forecast-candle engine rather than
+					// a random walk — see forecast3.py.
+					let SHOW_FORECAST3 = false;
 					let   INTERVAL         = SHOW_GAMMA_POINT ? '1d' : '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -529,6 +539,17 @@
 					const forecast2Series = chart.addCandlestickSeries({
 						upColor: '#90caf9', downColor: '#ce93d8', borderVisible: false,
 						wickUpColor: '#42a5f5', wickDownColor: '#ab47bc',
+						lastValueVisible: false, priceLineVisible: false,
+					});
+
+					// "Forecast 3" candles ("Forecast 3" checkbox) — Thales's
+					// deterministic forecast-candle engine (see forecast3.py),
+					// sourced from /api/forecast3/<asset>. Amber/brown so it
+					// stays visually distinct from the real candles and both
+					// other forecast series.
+					const forecast3Series = chart.addCandlestickSeries({
+						upColor: '#ffcc80', downColor: '#bcaaa4', borderVisible: false,
+						wickUpColor: '#ff9800', wickDownColor: '#8d6e63',
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
@@ -1061,6 +1082,10 @@
 						forecast2Series.setData([]);
 					}
 
+					function clearForecast3Lines() {
+						forecast3Series.setData([]);
+					}
+
 					// The Forecast candles are 4h resolution (see
 					// forecast.simulate_path's step_hours default) and only
 					// make visual sense lined up against real 4h-spaced
@@ -1074,8 +1099,10 @@
 						const visible = INTERVAL === '4h';
 						document.getElementById('forecast-toggle-wrap').style.display = visible ? '' : 'none';
 						document.getElementById('forecast2-toggle-wrap').style.display = visible ? '' : 'none';
+						document.getElementById('forecast3-toggle-wrap').style.display = visible ? '' : 'none';
 						refreshForecast();
 						refreshForecast2();
+						refreshForecast3();
 					}
 
 					// "Forecast" checkbox (both Delta and Gamma Chart) — fetches
@@ -1157,6 +1184,33 @@
 							refreshForecast2();
 						} else {
 							clearForecast2Lines();
+						}
+					}
+
+					// "Forecast 3" — same anchoring/grid logic as refreshForecast()
+					// (see its own comment above), just against
+					// forecast3Series/FORECAST3_URL.
+					async function refreshForecast3() {
+						if (!SHOW_FORECAST3 || INTERVAL !== '4h' || !realCandles.length) { clearForecast3Lines(); return; }
+						const data = await (await fetch(FORECAST3_URL)).json();
+						const points = data.points || [];
+						if (!points.length) { clearForecast3Lines(); return; }
+						const intervalSec = INTERVAL_SECONDS[INTERVAL];
+						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
+						let firstTime = realCandles[realCandles.length - 1].time;
+						while (firstTime <= nowShifted) firstTime += intervalSec;
+						forecast3Series.setData(points.map((p, i) => ({
+							time: firstTime + i * intervalSec,
+							open: p.open, high: p.high, low: p.low, close: p.close,
+						})));
+					}
+
+					function onToggleForecast3() {
+						SHOW_FORECAST3 = document.getElementById('forecast3-toggle').checked;
+						if (SHOW_FORECAST3) {
+							refreshForecast3();
+						} else {
+							clearForecast3Lines();
 						}
 					}
 
@@ -1244,6 +1298,7 @@
 					setInterval(refreshGammaPointLines, REFRESH);
 					setInterval(refreshForecast, REFRESH);
 					setInterval(refreshForecast2, REFRESH);
+					setInterval(refreshForecast3, REFRESH);
 				//]]></script>
 			</body>
 		</html>
