@@ -99,13 +99,13 @@ class ResConfigSettings(models.TransientModel):
     show_weekly_lines = fields.Boolean(
         string="Show Weekly Lines",
         default=True,
-        help="Show the Weekly delta=0 and Weekly gamma peak/bottom lines on the TradingView chart.",
+        help="Show the Weekly delta=0 line on the TradingView chart.",
     )
 
     show_monthly_lines = fields.Boolean(
         string="Show Monthly Lines",
         default=True,
-        help="Show the Monthly delta=0 and Monthly gamma peak/bottom lines on the TradingView chart.",
+        help="Show the Monthly delta=0 line on the TradingView chart.",
     )
 
     def get_values(self):

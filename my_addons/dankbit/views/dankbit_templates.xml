@@ -311,23 +311,23 @@
 					// show_gamma_point="false" (see _build_tv_chart_context).
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
 					// /my/<asset> is the only minimal page (candles + gamma point
-					// only — no Weekly/Monthly/All/Daily delta=0 lines, no gamma
-					// peak/bottom lines, no zones boxes/extrema), and currently the
-					// only one with the gamma point, so this reuses that same
-					// flag rather than adding a second backend-driven one; the
-					// footer (trade count/nearest expiry) is untouched either way.
+					// only — no Weekly/Monthly/All/Daily delta=0 lines, no zones
+					// boxes/extrema), and currently the only one with the gamma
+					// point, so this reuses that same flag rather than adding a
+					// second backend-driven one; the footer (trade count/nearest
+					// expiry) is untouched either way.
 					const MINIMAL_CHART = SHOW_GAMMA_POINT;
 					// User-toggleable via the "Lines" checkbox next to the Ruler
 					// button (Delta Chart only — the Gamma Chart has no checkboxes
 					// at all, see refreshGammaPointLines below) — hides every
-					// horizontal price-line indicator (delta=0 sets, gamma
-					// peak/bottom lines) and, to actually cut server load rather
-					// than just hiding the result client-side, makes each of their
-					// refresh*() functions skip the fetch entirely while off (see
-					// onToggleLines() below). refreshMonthlyDeltaZero() is the one
-					// exception — it always fetches regardless, since its
-					// trade_count feeds the footer. Unchecked/off by default,
-					// matching the checkbox's own default (unchecked) state above.
+					// horizontal price-line indicator (delta=0 sets) and, to
+					// actually cut server load rather than just hiding the result
+					// client-side, makes each of their refresh*() functions skip
+					// the fetch entirely while off (see onToggleLines() below).
+					// refreshMonthlyDeltaZero() is the one exception — it always
+					// fetches regardless, since its trade_count feeds the footer.
+					// Unchecked/off by default, matching the checkbox's own
+					// default (unchecked) state above.
 					let SHOW_ALL_LINES = false;
 					// User-toggleable via the "Zones Extrema" checkbox (Delta Chart
 					// only — this indicator is already suppressed on DG Chart via
@@ -618,14 +618,11 @@
 						arr.forEach(pl => series.removePriceLine(pl));
 						arr.length = 0;
 					}
-					let weeklyGammaLines = [];
-					let monthlyGammaLines = [];
 					// Gamma Chart's own 3 gamma-extrema line sets (see
-					// refreshGammaPointLines below) — separate stores from
-					// weeklyGammaLines/monthlyGammaLines above since those are the
-					// Delta Chart's own indicator (different lineWidth, and gated
-					// by SHOW_ALL_LINES/SHOW_WEEKLY_LINES/SHOW_MONTHLY_LINES, which
-					// don't apply here).
+					// refreshGammaPointLines below) — the Delta Chart has no
+					// gamma peak/bottom line indicator of its own any more
+					// (removed; that indicator now lives only on the Gamma
+					// Chart).
 					let nearestGammaPointLines = [];
 					let weeklyGammaPointLines = [];
 					let monthlyGammaPointLines = [];
@@ -830,27 +827,16 @@
 						});
 					}
 
-					async function refreshWeeklyGamma() {
-						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(GL_W_URL)).json();
-						drawGammaLines(SHOW_WEEKLY_LINES ? data : { peaks: [], bottoms: [] }, weeklyGammaLines, 1, 'Weekly', 'violet');
-					}
-
-					async function refreshMonthlyGamma() {
-						if (MINIMAL_CHART || !GL_M_URL || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(GL_M_URL)).json();
-						drawGammaLines(SHOW_MONTHLY_LINES ? data : { peaks: [], bottoms: [] }, monthlyGammaLines, 1, 'Monthly', 'violet');
-					}
-
 					// "Lines" checkbox (next to Ruler) — hides every horizontal
-					// price-line indicator and stops their refresh*() functions from
-					// even fetching (see SHOW_ALL_LINES above), to actually cut
-					// server load rather than just hiding the result. Turning off
-					// clears everything immediately rather than waiting for each
-					// set's own next poll (their refresh*() functions return before
-					// their own clearLines() call when SHOW_ALL_LINES is false).
-					// Turning back on re-fetches everything immediately for the same
-					// reason. refreshMonthlyDeltaZero() is untouched here — it always
+					// price-line indicator (delta=0 sets) and stops their
+					// refresh*() functions from even fetching (see SHOW_ALL_LINES
+					// above), to actually cut server load rather than just hiding
+					// the result. Turning off clears everything immediately rather
+					// than waiting for each set's own next poll (their refresh*()
+					// functions return before their own clearLines() call when
+					// SHOW_ALL_LINES is false). Turning back on re-fetches
+					// everything immediately for the same reason.
+					// refreshMonthlyDeltaZero() is untouched here — it always
 					// keeps polling regardless, for the footer's trade count.
 					function onToggleLines() {
 						SHOW_ALL_LINES = document.getElementById('lines-toggle').checked;
@@ -860,16 +846,12 @@
 							refreshAllDeltaZero();
 							refreshTomorrowDeltaZero();
 							refreshDayAfterTomorrowDeltaZero();
-							refreshWeeklyGamma();
-							refreshMonthlyGamma();
 						} else {
 							clearLines(priceLines);
 							clearLines(monthlyLines);
 							clearLines(allLines);
 							clearLines(tomorrowLines);
 							clearLines(dayAfterTomorrowLines);
-							clearLines(weeklyGammaLines);
-							clearLines(monthlyGammaLines);
 						}
 					}
 
@@ -1068,7 +1050,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshWeeklyGamma(); await refreshMonthlyGamma(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPointLines(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaPointLines(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -1097,8 +1079,6 @@
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
-					setInterval(refreshWeeklyGamma, REFRESH);
-					setInterval(refreshMonthlyGamma, REFRESH);
 					setInterval(refreshZonesExtrema, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
