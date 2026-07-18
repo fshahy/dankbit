@@ -255,8 +255,8 @@
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
-					<button t-attf-class="tf-btn#{' active' if show_gamma_point == 'false' else ''}" onclick="setTf('4h')">4h</button>
-					<button t-attf-class="tf-btn#{' active' if show_gamma_point == 'true' else ''}" onclick="setTf('1d')">1d</button>
+					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
+					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
@@ -273,7 +273,7 @@
 					</label>
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
-							<input type="checkbox" id="nearest-expiry-toggle" checked="checked" onchange="onToggleGammaScope('nearest')"/>
+							<input type="checkbox" id="nearest-expiry-toggle" onchange="onToggleGammaScope('nearest')"/>
 							Nearest
 						</label>
 						<label class="toggle-label">
@@ -283,6 +283,10 @@
 						<label class="toggle-label">
 							<input type="checkbox" id="monthly-scope-toggle" onchange="onToggleGammaScope('monthly')"/>
 							Monthly
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="universal-scope-toggle" onchange="onToggleGammaScope('universal')"/>
+							Universal
 						</label>
 					</t>
 					<t t-if="show_gamma_point == 'false'">
@@ -369,24 +373,33 @@
 					// hourly compute_snapshot() cron and every other viewer's default
 					// midnight-based view are completely unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
-					// "Nearest" / "Weekly" / "Monthly" checkboxes (Gamma Chart only)
-					// — each toggles BOTH of that scope's line sets together (e.g.
-					// "Nearest" hides/shows the black Nearest line AND the orange
-					// Nearest 24h line as one unit — see refreshGammaPointLines'
-					// gating below). "Nearest" is checked by default (so the chart
-					// isn't empty on load); Weekly/Monthly default unchecked,
-					// matching each checkbox's own default state — same
-					// server-load-reducing pattern as "Lines"/"Zones Extrema" on
-					// the Delta Chart: nothing is fetched until switched on.
-					let GAMMA_SCOPE_NEAREST = true;
+					// "Nearest" / "Weekly" / "Monthly" / "Universal" checkboxes
+					// (Gamma Chart only) — each toggles BOTH of that scope's line
+					// sets together (e.g. "Nearest" hides/shows the black Nearest
+					// line AND the orange Nearest 24h line as one unit; "Universal"
+					// hides/shows the black Universal line AND the violet
+					// Universal 24h line — see refreshGammaPointLines' gating
+					// below). All scopes default unchecked, matching each
+					// checkbox's own default state — same server-load-reducing
+					// pattern as "Lines"/"Zones Extrema" on the Delta Chart:
+					// nothing is fetched until switched on, and the chart is
+					// empty of gamma-point lines until a scope is checked.
+					let GAMMA_SCOPE_NEAREST = false;
 					let GAMMA_SCOPE_WEEKLY = false;
 					let GAMMA_SCOPE_MONTHLY = false;
+					let GAMMA_SCOPE_UNIVERSAL = false;
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
 					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
 					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
 					const GL_W_URL         = '/api/gamma-levels/' + INSTRUMENT;
+					// Universal — same drawGammaLines() mechanism as Nearest/
+					// Weekly/Monthly, but with no expiration cutoff at all
+					// (gamma_levels_all_json: expiration >= NOW() only), so it
+					// covers every currently active expiry rather than one
+					// instrument or one configured weekly/monthly cutoff.
+					const GL_ALL_URL       = '/api/gamma-levels-all/' + ASSET;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -408,7 +421,7 @@
 					// ported from Thales's own forecast-candle engine rather than
 					// a random walk — see forecast3.py.
 					let SHOW_FORECAST3 = false;
-					let   INTERVAL         = SHOW_GAMMA_POINT ? '1d' : '4h';
+					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
 					// Lightweight Charts has no native IANA-timezone support — it always
@@ -604,6 +617,34 @@
 						drawGammaLines(data, monthlyGammaPointLines, 1, 'Monthly', 'black', 'black');
 					}
 
+					// Black "Universal" line set — same drawGammaLines() mechanism
+					// as Nearest/Weekly/Monthly, sourced from GL_ALL_URL (no
+					// expiration cutoff at all, unlike Weekly/Monthly's configured
+					// cutoff), so it covers every active expiry.
+					async function refreshGammaPointUniversal() {
+						if (!SHOW_GAMMA_POINT || !GAMMA_SCOPE_UNIVERSAL) {
+							drawGammaLines({ peaks: [], bottoms: [] }, universalGammaPointLines, 1, 'Universal', 'black', 'black');
+							return;
+						}
+						const data = await (await fetch(GL_ALL_URL)).json();
+						drawGammaLines(data, universalGammaPointLines, 1, 'Universal', 'black', 'black');
+					}
+
+					// Violet "Universal 24h" line — same all-active-expiries scope
+					// as the black Universal line above (GL_ALL_URL), just
+					// restricted to the trailing 24h of trades via the same
+					// ?hours= override the other 24h variants use (see
+					// gamma_levels_all_json). Gated by the same
+					// GAMMA_SCOPE_UNIVERSAL checkbox as its black counterpart.
+					async function refreshGammaPointUniversal24h() {
+						if (!SHOW_GAMMA_POINT || !GAMMA_SCOPE_UNIVERSAL) {
+							drawGammaLines({ peaks: [], bottoms: [] }, universal24hGammaPointLines, 1, 'Universal 24h', 'violet', 'violet');
+							return;
+						}
+						const data = await (await fetch(GL_ALL_URL + '?hours=24')).json();
+						drawGammaLines(data, universal24hGammaPointLines, 1, 'Universal 24h', 'violet', 'violet');
+					}
+
 					// Orange "Nearest 24h" line — same nearest expiry as the black
 					// Nearest line above, but restricted to the trailing 24h of
 					// trades (gamma-levels' own ?hours= override, see
@@ -657,13 +698,15 @@
 						await refreshGammaPointNearest24h();
 						await refreshGammaPointWeekly24h();
 						await refreshGammaPointMonthly24h();
+						await refreshGammaPointUniversal();
+						await refreshGammaPointUniversal24h();
 					}
 
-					// "Nearest" / "Weekly" / "Monthly" checkboxes (Gamma Chart
-					// only) — independent, not mutually exclusive: flips that
-					// scope's flag and re-fetches (or clears, if just turned off)
-					// only that scope's 2 line sets, leaving the other two scopes
-					// untouched.
+					// "Nearest" / "Weekly" / "Monthly" / "Universal" checkboxes
+					// (Gamma Chart only) — independent, not mutually exclusive:
+					// flips that scope's flag and re-fetches (or clears, if just
+					// turned off) only that scope's own line set(s), leaving the
+					// other scopes untouched.
 					function onToggleGammaScope(scope) {
 						if (scope === 'nearest') {
 							GAMMA_SCOPE_NEAREST = document.getElementById('nearest-expiry-toggle').checked;
@@ -677,6 +720,10 @@
 							GAMMA_SCOPE_MONTHLY = document.getElementById('monthly-scope-toggle').checked;
 							refreshGammaPointMonthly();
 							refreshGammaPointMonthly24h();
+						} else if (scope === 'universal') {
+							GAMMA_SCOPE_UNIVERSAL = document.getElementById('universal-scope-toggle').checked;
+							refreshGammaPointUniversal();
+							refreshGammaPointUniversal24h();
 						}
 					}
 
@@ -701,6 +748,8 @@
 					let nearest24hGammaPointLines = [];
 					let weekly24hGammaPointLines = [];
 					let monthly24hGammaPointLines = [];
+					let universalGammaPointLines = [];
+					let universal24hGammaPointLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 

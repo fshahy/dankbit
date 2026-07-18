@@ -64,7 +64,7 @@ class PlotWizard(models.TransientModel):
         market_deltas = delta.portfolio_delta(STs, trades, 0.05)
         market_gammas = gamma.portfolio_gamma(STs, trades, 0.05)
 
-        fig, ax = obj.plot(index_price, market_deltas, market_gammas, True)
+        fig, ax = obj.plot(index_price, market_deltas, market_gammas, False)
 
         ax.text(
             0.01, 0.02,

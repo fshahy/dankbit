@@ -1368,6 +1368,83 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route("/api/gamma-levels-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def gamma_levels_all_json(self, asset):
+        """Same peaks/bottoms computation as gamma_levels_json, but with no
+        expiration cutoff at all (expiration >= NOW() only, same domain
+        delta_zero_all_json uses) — every currently active expiry's trades
+        combined into one portfolio gamma curve, rather than one named
+        instrument or one configured weekly/monthly cutoff. Feeds the Gamma
+        Chart's "Universal" checkbox (see TradingView Chart Notes). Optional
+        ?hours= restricts to the trailing `hours` hours of trades on top of
+        that (same trailing-hours-override pattern gamma_levels_json's own
+        ?hours= uses) — feeds the violet "Universal 24h" line set."""
+        asset = asset.upper()
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset.startswith("BTC"):
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            steps = int(icp.get_param("dankbit.steps", default=100))
+        elif asset.startswith("ETH"):
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            steps = int(icp.get_param("dankbit.eth_steps", default=50))
+        else:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        hours_param = request.httprequest.args.get("hours")
+        query_params = [f'%{asset}%']
+        time_filter_sql = ""
+        if hours_param:
+            time_filter_sql = "AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')"
+            query_params.append(float(hours_param))
+
+        cr = request.env.cr
+        cr.execute(f"""
+            SELECT strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND active = TRUE
+              {time_filter_sql}
+            GROUP BY strike, option_type, direction, expiration
+        """, query_params)
+        rows = cr.fetchall()
+
+        agg_trades = [
+            _AggTrade(
+                strike=row[0], option_type=row[1], direction=row[2],
+                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
+            )
+            for row in rows
+        ]
+        trade_count = sum(int(row[6]) for row in rows)
+
+        STs = np.arange(from_price, to_price, steps)
+        g_arr = gamma.portfolio_gamma(STs, agg_trades, 0.05)
+        d_arr = delta.portfolio_delta(STs, agg_trades, 0.05)
+
+        peaks   = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
+                   for px, _ in self.find_gamma_peaks(STs, g_arr)]
+        bottoms = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
+                   for px, _ in self.find_gamma_bottoms(STs, g_arr)]
+
+        payload = {
+            "asset": asset,
+            "peaks": peaks,
+            "bottoms": bottoms,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_extrema_json(self, asset):
         """One point per instrument stored in dankbit.zones.extrema (each
