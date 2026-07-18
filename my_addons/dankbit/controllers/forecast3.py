@@ -16,24 +16,30 @@ sigma_annual inputs. The only thing that varies over real time is the
 *history* used by the Gamma-Band Consensus engine's slope math (see
 gamma_band_consensus below), which compares the current snapshot against
 the last couple of persisted dankbit.forecast3.snapshot rows.
+
+Ported from a newer Pine version (v6.2.1) than the original port: added
+Smart Role-Aware Synthetic Liquidity (smart_synthetic_liquidity —
+computes liquidity levels straight from the per-leg Greeks, replacing
+Dankbit's earlier manually-entered dankbit.liquidity.snapshot workflow,
+removed once this automated equivalent existed), Gamma-Band Trend Lock
+(locks against a one-candle countertrend flip while a strong 3-way-
+aligned consensus holds, see the gb_counter_trend_locked block in
+simulate_forecast3), and the Wick-to-Body Acceptance Engine
+(wick_to_body_acceptance — converts part of an asymmetric wick into the
+candle body when one side's Market-Maker force dominance and
+independent signals agree). The newest version's other additions (a
+deeper Market-Maker engine with per-leg delta-confirmation/momentum-
+factor/contest-detection, full regime-adaptive coefficient blending,
+granular per-phase weekend move caps, theta breakout impulse, gamma-abs
+pull/pin/shock multipliers, and confirmed-scenario/live-bar gating) were
+deliberately deferred to a later pass — see each function's own
+docstring for what it does and doesn't cover.
 """
 
 import math
 from datetime import datetime, timezone
 
-import numpy as np
-
-from . import delta as delta_lib
-from . import gamma as gamma_lib
-from . import theta as theta_lib
-from . import vega as vega_lib
-from .options import delta_saturation_price
-
-# Same 90%-of-own-extreme convention options.delta_saturation_price() uses
-# elsewhere in this addon (see chart_png_zones) — an independent constant
-# rather than importing ChartController's, to keep this module decoupled
-# from main.py.
-DELTA_SATURATION_FRACTION = 0.9
+from . import options as options_lib
 
 # Fallback real-hours-ago gap between snapshots when `candles` is empty
 # (no real klines available to anchor "now" to) — matches
@@ -47,54 +53,34 @@ def per_leg_greeks(STs, trades):
     delta value/10, theta value/1e4, vega value/100) for the 4 legs in
     `trades` — Thales's BCG/BPG/SCG/SPG, BCD/BPD/SCD/SPD, BCT/BPT/SCT/SPT,
     BCV/BPV/SCV/SPV plus their *Abs strength counterparts. `trades` should
-    already be filtered to one expiry."""
-    long_calls = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "call")
-    long_puts = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "put")
-    short_calls = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "call")
-    short_puts = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put")
+    already be filtered to one expiry.
 
-    def extreme(curve, argfn):
-        idx = int(argfn(curve))
-        return float(STs[idx]), float(curve[idx])
-
-    bcg_price, bcg_val = extreme(gamma_lib.portfolio_gamma(STs, long_calls), np.argmax)
-    bpg_price, bpg_val = extreme(gamma_lib.portfolio_gamma(STs, long_puts), np.argmax)
-    scg_price, scg_val = extreme(gamma_lib.portfolio_gamma(STs, short_calls), np.argmin)
-    spg_price, spg_val = extreme(gamma_lib.portfolio_gamma(STs, short_puts), np.argmin)
-
-    bct_price, bct_val = extreme(theta_lib.portfolio_theta(STs, long_calls), np.argmin)
-    bpt_price, bpt_val = extreme(theta_lib.portfolio_theta(STs, long_puts), np.argmin)
-    sct_price, sct_val = extreme(theta_lib.portfolio_theta(STs, short_calls), np.argmax)
-    spt_price, spt_val = extreme(theta_lib.portfolio_theta(STs, short_puts), np.argmax)
-
-    bcv_price, bcv_val = extreme(vega_lib.portfolio_vega(STs, long_calls), np.argmax)
-    bpv_price, bpv_val = extreme(vega_lib.portfolio_vega(STs, long_puts), np.argmax)
-    scv_price, scv_val = extreme(vega_lib.portfolio_vega(STs, short_calls), np.argmin)
-    spv_price, spv_val = extreme(vega_lib.portfolio_vega(STs, short_puts), np.argmin)
-
-    def delta_leg(leg_trades, side):
-        price = delta_saturation_price(STs, leg_trades, DELTA_SATURATION_FRACTION, side)
-        value = float(np.interp(price, STs, delta_lib.portfolio_delta(STs, leg_trades)))
-        return price, value
-
-    bcd_price, bcd_val = delta_leg(long_calls, "max")
-    bpd_price, bpd_val = delta_leg(long_puts, "min")
-    scd_price, scd_val = delta_leg(short_calls, "max")
-    spd_price, spd_val = delta_leg(short_puts, "min")
+    A thin Pine-naming translation layer over options.per_leg_greeks() —
+    the actual computation (which leg peaks/bottoms via which argmax/argmin,
+    delta-saturation side per leg) lives there now, shared with
+    chart_png_zones (main.py) and dankbit.zones.extrema's gamma_band/
+    delta_band, so all three can never quietly disagree on these numbers
+    for the same trades."""
+    legs = options_lib.per_leg_greeks(STs, trades)
+    lc, lp, sc, sp = legs["long_call"], legs["long_put"], legs["short_call"], legs["short_put"]
 
     return {
-        "bcg_price": bcg_price, "bpg_price": bpg_price, "scg_price": scg_price, "spg_price": spg_price,
-        "bcg_abs": abs(bcg_val) / 1_000_000, "bpg_abs": abs(bpg_val) / 1_000_000,
-        "scg_abs": abs(scg_val) / 1_000_000, "spg_abs": abs(spg_val) / 1_000_000,
-        "bcd_price": bcd_price, "bpd_price": bpd_price, "scd_price": scd_price, "spd_price": spd_price,
-        "bcd_abs": abs(bcd_val) / 10, "bpd_abs": abs(bpd_val) / 10,
-        "scd_abs": abs(scd_val) / 10, "spd_abs": abs(spd_val) / 10,
-        "bct_price": bct_price, "bpt_price": bpt_price, "sct_price": sct_price, "spt_price": spt_price,
-        "bct_abs": abs(bct_val) / 10_000, "bpt_abs": abs(bpt_val) / 10_000,
-        "sct_abs": abs(sct_val) / 10_000, "spt_abs": abs(spt_val) / 10_000,
-        "bcv_price": bcv_price, "bpv_price": bpv_price, "scv_price": scv_price, "spv_price": spv_price,
-        "bcv_abs": abs(bcv_val) / 100, "bpv_abs": abs(bpv_val) / 100,
-        "scv_abs": abs(scv_val) / 100, "spv_abs": abs(spv_val) / 100,
+        "bcg_price": lc["gamma_price"], "bpg_price": lp["gamma_price"],
+        "scg_price": sc["gamma_price"], "spg_price": sp["gamma_price"],
+        "bcg_abs": abs(lc["gamma_value"]) / 1_000_000, "bpg_abs": abs(lp["gamma_value"]) / 1_000_000,
+        "scg_abs": abs(sc["gamma_value"]) / 1_000_000, "spg_abs": abs(sp["gamma_value"]) / 1_000_000,
+        "bcd_price": lc["delta_price"], "bpd_price": lp["delta_price"],
+        "scd_price": sc["delta_price"], "spd_price": sp["delta_price"],
+        "bcd_abs": abs(lc["delta_value"]) / 10, "bpd_abs": abs(lp["delta_value"]) / 10,
+        "scd_abs": abs(sc["delta_value"]) / 10, "spd_abs": abs(sp["delta_value"]) / 10,
+        "bct_price": lc["theta_price"], "bpt_price": lp["theta_price"],
+        "sct_price": sc["theta_price"], "spt_price": sp["theta_price"],
+        "bct_abs": abs(lc["theta_value"]) / 10_000, "bpt_abs": abs(lp["theta_value"]) / 10_000,
+        "sct_abs": abs(sc["theta_value"]) / 10_000, "spt_abs": abs(sp["theta_value"]) / 10_000,
+        "bcv_price": lc["vega_price"], "bpv_price": lp["vega_price"],
+        "scv_price": sc["vega_price"], "spv_price": sp["vega_price"],
+        "bcv_abs": abs(lc["vega_value"]) / 100, "bpv_abs": abs(lp["vega_value"]) / 100,
+        "scv_abs": abs(sc["vega_value"]) / 100, "spv_abs": abs(sp["vega_value"]) / 100,
     }
 
 
@@ -129,9 +115,9 @@ def level_proximity(price_value, level_value, band_width, max_distance_band):
 # forecastDeltaCenterWeight defaults to 0 in the source script (delta only
 # feeds the shock modules by default, not the blended center) so it is
 # omitted here.
-GAMMA_CENTER_WEIGHT = 0.55
-CURVE_CENTER_WEIGHT = 0.30
-THETA_CENTER_WEIGHT = 0.15
+GAMMA_CENTER_WEIGHT = 0.70
+CURVE_CENTER_WEIGHT = 0.20
+THETA_CENTER_WEIGHT = 0.10
 
 # Gamma-Curve Divergence Mode's reweighting, used instead of the defaults
 # above whenever the plain gamma average and the curve (BML/SMP) average
@@ -152,19 +138,44 @@ THETA_ABS_NORMALIZER = 500.0
 VEGA_ABS_NORMALIZER = 2500.0
 
 
-def derive_levels(current):
+def derive_levels(current, cfg=None):
     """From one per_leg_greeks()+snapshot dict, derive the blended
     gamma/curve/theta averages and the weighted center Thales's forecast
     loop pulls price toward. `current` is a plain dict with the
     dankbit.forecast3.snapshot field names (bcg_price, bcg_abs, bml, smp,
-    top, low, ...)."""
-    bcg_w = min(max(current["bcg_abs"] / GAMMA_ABS_NORMALIZER, 0.0), 2.0)
-    bpg_w = min(max(current["bpg_abs"] / GAMMA_ABS_NORMALIZER, 0.0), 2.0)
-    scg_w = min(max(current["scg_abs"] / GAMMA_ABS_NORMALIZER, 0.0), 2.0)
-    spg_w = min(max(current["spg_abs"] / GAMMA_ABS_NORMALIZER, 0.0), 2.0)
-    buyer_gamma = weighted_avg2(current["bcg_price"], current["bpg_price"], bcg_w, bpg_w)
-    seller_gamma = weighted_avg2(current["scg_price"], current["spg_price"], scg_w, spg_w)
-    gamma_avg = weighted_avg2(buyer_gamma, seller_gamma, bcg_w + bpg_w, scg_w + spg_w)
+    top, low, ...).
+
+    `buyer_gamma`/`seller_gamma`/`gamma_avg` are the PLAIN unweighted
+    averages (buyerGammaVal/sellerGammaVal/avgGammaVal in the source
+    script — (BCG+BPG)/2 and (SCG+SPG)/2), not the "Gamma Pressure
+    Center" the script's "Calculate Gamma Pressure Center From S
+    Strengths" toggle computes: tracing every use of that weighted value
+    in the source script (v6.2.1) shows it only ever feeds a diagnostic
+    label (diagGammaPressureCenter) — the real forecast center blend and
+    the Gamma-Band Consensus slope math both read from the plain-average
+    arrays (stepGammaAvg/selectedSimpleGammaAvg) instead. An earlier
+    version of this port used the strength-weighted average here, which
+    didn't match the reference script's actual (if seemingly
+    unintentional) behavior; corrected to match after review.
+
+    `cfg` (optional, see simulate_forecast3/_cfg) can override
+    GAMMA_CENTER_WEIGHT/CURVE_CENTER_WEIGHT/THETA_CENTER_WEIGHT — the
+    only knob in this function exposed to res.config.settings' "Thales
+    Forecast" section, added after the original Pine script's own author
+    asked for the forecast to weight gamma more heavily so candles track
+    the gamma reference line more closely. The Gamma-Curve Divergence
+    Mode reweighting below (DIVERGENCE_*) is unaffected by cfg — that
+    mode deliberately pulls gamma's weight back down toward parity with
+    curve when the two disagree, a separate risk-management behavior
+    from Thales's own source that isn't part of this request."""
+    cfg = cfg or {}
+    GAMMA_CENTER_WEIGHT = _cfg(cfg, "GAMMA_CENTER_WEIGHT")
+    CURVE_CENTER_WEIGHT = _cfg(cfg, "CURVE_CENTER_WEIGHT")
+    THETA_CENTER_WEIGHT = _cfg(cfg, "THETA_CENTER_WEIGHT")
+
+    buyer_gamma = (current["bcg_price"] + current["bpg_price"]) / 2.0
+    seller_gamma = (current["scg_price"] + current["spg_price"]) / 2.0
+    gamma_avg = (buyer_gamma + seller_gamma) / 2.0
 
     curve_avg = (current["bml"] + current["smp"]) / 2.0
 
@@ -429,10 +440,23 @@ MM_SELLER_PIN_STRENGTH = 0.14
 MM_BODY_SCALE = 1.00
 MM_MAX_IMPULSE = 0.18
 MM_WICK_BIAS_STRENGTH = 0.22
+# Thales's own mmMinimumOutcomeForce — a floor used to normalize the raw
+# call/put breakout-vs-pin force magnitude into a 0-1 scale for
+# wick_to_body_acceptance (see below); this port doesn't use it for the
+# newest version's contest-detection/outcome-labeling, which is deferred.
+MM_MINIMUM_OUTCOME_FORCE = 0.08
 
 
 def market_maker_gamma_contest(current, projected_price, band_width, body_confidence_hint, step):
-    """Returns (impulse, upper_wick_boost, lower_wick_boost)."""
+    """Returns a dict: impulse, upper_wick_boost, lower_wick_boost, plus
+    upper_force_total/upper_net_force/lower_force_total/lower_net_force —
+    the LOCAL (price-proximity-gated) call/put breakout-vs-pin forces,
+    exposed for wick_to_body_acceptance. The newest Pine version's deeper
+    enrichment of these forces (per-leg delta-confirmation multipliers,
+    real-candle momentum factors, seller theta/rejection pin context,
+    contest detection/outcome labeling) is deferred — this keeps the
+    simpler proximity-only weighting the rest of this function already
+    had."""
     def norm(v):
         return min(max(v / GAMMA_ABS_NORMALIZER, 0.0), 1.5)
 
@@ -460,19 +484,200 @@ def market_maker_gamma_contest(current, projected_price, band_width, body_confid
 
     upper_wick_boost = upper_activity * MM_WICK_BIAS_STRENGTH
     lower_wick_boost = lower_activity * MM_WICK_BIAS_STRENGTH
-    return impulse, upper_wick_boost, lower_wick_boost
+    return {
+        "impulse": impulse, "upper_wick_boost": upper_wick_boost, "lower_wick_boost": lower_wick_boost,
+        "upper_force_total": call_breakout + call_pin, "upper_net_force": call_breakout - call_pin,
+        "lower_force_total": put_breakdown + put_support, "lower_net_force": put_breakdown - put_support,
+    }
 
 
 # ============================================================
-# Liquidity Map Engine (Thales's liquidity block) — manually-entered
-# CoinGlass resting-liquidity levels (see dankbit.liquidity.snapshot) act
-# as magnets/rejection points: whichever side has the stronger, closer
-# liquidity pulls price its way (once dominant enough over the other
-# side), and a real candle sweeping through a level and reversing away
-# from it fires an extra rejection impulse. Fully inert (returns 0
-# impulse, no floors/compression) whenever no liquidity has been entered
-# yet for this asset — same na-safe behavior the source script has for a
-# blank liquidity column.
+# Smart Role-Aware Synthetic Liquidity (Thales's newest-version engine)
+# — the source script's newer data format dropped its manually-typed
+# CoinGlass lower/upper liquidity columns entirely and replaced them with
+# levels computed straight from the same per-leg gamma/delta/theta/vega
+# Greeks this module already has: seller call/put legs act in a "pin"
+# role (short options a market-maker must defend, i.e. resistance/
+# support), buyer call/put legs act in a "sweep" role (long options whose
+# holders push price toward their strike), each weighted by that leg's
+# own Abs strength. A seller call/put's delta contribution flips from
+# pin to sweep once a real close has pushed convincingly (by
+# SMART_LIQ_SELLER_DELTA_FLIP_BUFFER band-widths) past that leg's own
+# delta level — the theory being that once the market maker's short
+# option is decisively broken, their hedging flips them from a price
+# anchor into a momentum accelerant. The raw pin/sweep blend is then
+# nudged toward (if close to) or damped away from (if far past) the
+# nearest zones-box edge (top/low), mirroring the source script's
+# f_smartBandAdjustedLevel/f_smartBandAdjustedStrength. This fully
+# replaces Dankbit's earlier manually-entered dankbit.liquidity.snapshot
+# workflow (removed once this automated equivalent existed) — see
+# simulate_forecast3, which feeds this straight into liquidity_map_engine
+# with no manual data involved.
+# ============================================================
+SMART_LIQ_SELLER_PIN_WEIGHT = 1.10
+SMART_LIQ_BUYER_SWEEP_WEIGHT = 0.85
+SMART_LIQ_SELLER_DELTA_PIN_WEIGHT = 0.45
+SMART_LIQ_SELLER_DELTA_FLIP_WEIGHT = 0.80
+SMART_LIQ_SELLER_DELTA_FLIP_BUFFER = 0.03
+SMART_LIQ_BAND_MERGE_DISTANCE = 0.18
+SMART_LIQ_BAND_REINFORCE_MULT = 1.15
+SMART_LIQ_OUTSIDE_BAND_DISTANCE = 0.45
+SMART_LIQ_OUTSIDE_BAND_BLEND = 0.35
+SMART_LIQ_OUTSIDE_BAND_DAMPING = 0.35
+SYNTH_LIQ_GAMMA_WEIGHT = 1.00
+SYNTH_LIQ_DELTA_WEIGHT = 0.85
+SYNTH_LIQ_THETA_WEIGHT = 0.45
+SYNTH_LIQ_VEGA_WEIGHT = 0.65
+
+
+def _synth_liq_weight(level, abs_val, normalizer, multiplier):
+    if level is None or abs_val is None or normalizer <= 0:
+        return 0.0
+    return min(max(abs(abs_val) / normalizer, 0.0), 2.0) * multiplier
+
+
+def _smart_band_adjusted_level(raw_level, band_level, band_width, merge_distance, outside_distance, outside_blend):
+    if raw_level is None or band_level is None or band_width <= 0:
+        return raw_level
+    d = abs(raw_level - band_level) / band_width
+    if d <= merge_distance:
+        return weighted_avg2(raw_level, band_level, 0.35, 0.65)
+    if d > outside_distance:
+        return band_level + (raw_level - band_level) * outside_blend
+    return raw_level
+
+
+def _smart_band_adjusted_strength(raw_level, band_level, band_width, base_weight, merge_distance, band_mult, outside_distance, outside_damp):
+    if raw_level is None or band_level is None or band_width <= 0:
+        return base_weight
+    d = abs(raw_level - band_level) / band_width
+    if d <= merge_distance:
+        return base_weight * band_mult
+    if d > outside_distance:
+        return base_weight * outside_damp
+    return base_weight
+
+
+def smart_synthetic_liquidity(current, top, low, band_width, role_close):
+    """Returns {lower_liq_price, lower_liq_m, upper_liq_price, upper_liq_m}
+    computed purely from `current`'s per-leg Greeks (see per_leg_greeks) —
+    no manual data entry needed. `role_close` is the most recent real
+    close, used only to detect a seller-delta "flip" from pin to sweep."""
+    upper_flip_level = max(top, current["scd_price"])
+    lower_flip_level = min(low, current["spd_price"])
+    seller_call_flipped = role_close > upper_flip_level + band_width * SMART_LIQ_SELLER_DELTA_FLIP_BUFFER
+    seller_put_flipped = role_close < lower_flip_level - band_width * SMART_LIQ_SELLER_DELTA_FLIP_BUFFER
+
+    up_pin_sum = up_pin_w = up_sweep_sum = up_sweep_w = 0.0
+    low_pin_sum = low_pin_w = low_sweep_sum = low_sweep_w = 0.0
+
+    # Upper side: seller-call pin roles, buyer-call sweep roles.
+    sw = _synth_liq_weight(current["scg_price"], current["scg_abs"], GAMMA_ABS_NORMALIZER, SYNTH_LIQ_GAMMA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT)
+    if sw > 0:
+        up_pin_sum += current["scg_price"] * sw
+        up_pin_w += sw
+    sw = _synth_liq_weight(current["sct_price"], current["sct_abs"], THETA_ABS_NORMALIZER, SYNTH_LIQ_THETA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT)
+    if sw > 0:
+        up_pin_sum += current["sct_price"] * sw
+        up_pin_w += sw
+    sw = _synth_liq_weight(current["scv_price"], current["scv_abs"], VEGA_ABS_NORMALIZER, SYNTH_LIQ_VEGA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT * 0.70)
+    if sw > 0:
+        up_pin_sum += current["scv_price"] * sw
+        up_pin_w += sw
+    sw = _synth_liq_weight(current["scd_price"], current["scd_abs"], DELTA_ABS_NORMALIZER, SYNTH_LIQ_DELTA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT * SMART_LIQ_SELLER_DELTA_PIN_WEIGHT)
+    if sw > 0:
+        if seller_call_flipped:
+            flip_sw = sw * SMART_LIQ_SELLER_DELTA_FLIP_WEIGHT
+            up_sweep_sum += current["scd_price"] * flip_sw
+            up_sweep_w += flip_sw
+        else:
+            up_pin_sum += current["scd_price"] * sw
+            up_pin_w += sw
+    sw = _synth_liq_weight(current["bcg_price"], current["bcg_abs"], GAMMA_ABS_NORMALIZER, SYNTH_LIQ_GAMMA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        up_sweep_sum += current["bcg_price"] * sw
+        up_sweep_w += sw
+    sw = _synth_liq_weight(current["bcd_price"], current["bcd_abs"], DELTA_ABS_NORMALIZER, SYNTH_LIQ_DELTA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        up_sweep_sum += current["bcd_price"] * sw
+        up_sweep_w += sw
+    sw = _synth_liq_weight(current["bcv_price"], current["bcv_abs"], VEGA_ABS_NORMALIZER, SYNTH_LIQ_VEGA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        up_sweep_sum += current["bcv_price"] * sw
+        up_sweep_w += sw
+    sw = _synth_liq_weight(current["bct_price"], current["bct_abs"], THETA_ABS_NORMALIZER, SYNTH_LIQ_THETA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT * 0.35)
+    if sw > 0:
+        up_sweep_sum += current["bct_price"] * sw
+        up_sweep_w += sw
+
+    # Lower side: seller-put pin roles, buyer-put sweep roles (mirror of above).
+    sw = _synth_liq_weight(current["spg_price"], current["spg_abs"], GAMMA_ABS_NORMALIZER, SYNTH_LIQ_GAMMA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT)
+    if sw > 0:
+        low_pin_sum += current["spg_price"] * sw
+        low_pin_w += sw
+    sw = _synth_liq_weight(current["spt_price"], current["spt_abs"], THETA_ABS_NORMALIZER, SYNTH_LIQ_THETA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT)
+    if sw > 0:
+        low_pin_sum += current["spt_price"] * sw
+        low_pin_w += sw
+    sw = _synth_liq_weight(current["spv_price"], current["spv_abs"], VEGA_ABS_NORMALIZER, SYNTH_LIQ_VEGA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT * 0.70)
+    if sw > 0:
+        low_pin_sum += current["spv_price"] * sw
+        low_pin_w += sw
+    sw = _synth_liq_weight(current["spd_price"], current["spd_abs"], DELTA_ABS_NORMALIZER, SYNTH_LIQ_DELTA_WEIGHT * SMART_LIQ_SELLER_PIN_WEIGHT * SMART_LIQ_SELLER_DELTA_PIN_WEIGHT)
+    if sw > 0:
+        if seller_put_flipped:
+            flip_sw = sw * SMART_LIQ_SELLER_DELTA_FLIP_WEIGHT
+            low_sweep_sum += current["spd_price"] * flip_sw
+            low_sweep_w += flip_sw
+        else:
+            low_pin_sum += current["spd_price"] * sw
+            low_pin_w += sw
+    sw = _synth_liq_weight(current["bpg_price"], current["bpg_abs"], GAMMA_ABS_NORMALIZER, SYNTH_LIQ_GAMMA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        low_sweep_sum += current["bpg_price"] * sw
+        low_sweep_w += sw
+    sw = _synth_liq_weight(current["bpd_price"], current["bpd_abs"], DELTA_ABS_NORMALIZER, SYNTH_LIQ_DELTA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        low_sweep_sum += current["bpd_price"] * sw
+        low_sweep_w += sw
+    sw = _synth_liq_weight(current["bpv_price"], current["bpv_abs"], VEGA_ABS_NORMALIZER, SYNTH_LIQ_VEGA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT)
+    if sw > 0:
+        low_sweep_sum += current["bpv_price"] * sw
+        low_sweep_w += sw
+    sw = _synth_liq_weight(current["bpt_price"], current["bpt_abs"], THETA_ABS_NORMALIZER, SYNTH_LIQ_THETA_WEIGHT * SMART_LIQ_BUYER_SWEEP_WEIGHT * 0.35)
+    if sw > 0:
+        low_sweep_sum += current["bpt_price"] * sw
+        low_sweep_w += sw
+
+    up_pin_level = up_pin_sum / up_pin_w if up_pin_w > 0 else None
+    up_sweep_level = up_sweep_sum / up_sweep_w if up_sweep_w > 0 else None
+    low_pin_level = low_pin_sum / low_pin_w if low_pin_w > 0 else None
+    low_sweep_level = low_sweep_sum / low_sweep_w if low_sweep_w > 0 else None
+
+    upper_raw = weighted_avg2(up_pin_level, up_sweep_level, up_pin_w, up_sweep_w)
+    lower_raw = weighted_avg2(low_pin_level, low_sweep_level, low_pin_w, low_sweep_w)
+    raw_upper_weight = up_pin_w + up_sweep_w
+    raw_lower_weight = low_pin_w + low_sweep_w
+
+    upper_price = _smart_band_adjusted_level(upper_raw, top, band_width, SMART_LIQ_BAND_MERGE_DISTANCE, SMART_LIQ_OUTSIDE_BAND_DISTANCE, SMART_LIQ_OUTSIDE_BAND_BLEND)
+    lower_price = _smart_band_adjusted_level(lower_raw, low, band_width, SMART_LIQ_BAND_MERGE_DISTANCE, SMART_LIQ_OUTSIDE_BAND_DISTANCE, SMART_LIQ_OUTSIDE_BAND_BLEND)
+    upper_m = _smart_band_adjusted_strength(upper_raw, top, band_width, raw_upper_weight, SMART_LIQ_BAND_MERGE_DISTANCE, SMART_LIQ_BAND_REINFORCE_MULT, SMART_LIQ_OUTSIDE_BAND_DISTANCE, SMART_LIQ_OUTSIDE_BAND_DAMPING) * LIQUIDITY_VOLUME_NORMALIZER
+    lower_m = _smart_band_adjusted_strength(lower_raw, low, band_width, raw_lower_weight, SMART_LIQ_BAND_MERGE_DISTANCE, SMART_LIQ_BAND_REINFORCE_MULT, SMART_LIQ_OUTSIDE_BAND_DISTANCE, SMART_LIQ_OUTSIDE_BAND_DAMPING) * LIQUIDITY_VOLUME_NORMALIZER
+
+    return {"lower_liq_price": lower_price, "lower_liq_m": lower_m, "upper_liq_price": upper_price, "upper_liq_m": upper_m}
+
+
+# ============================================================
+# Liquidity Map Engine (Thales's liquidity block) — resting-liquidity
+# levels act as magnets/rejection points: whichever side has the
+# stronger, closer liquidity pulls price its way (once dominant enough
+# over the other side), and a real candle sweeping through a level and
+# reversing away from it fires an extra rejection impulse. Fully inert
+# (returns 0 impulse, no floors/compression) whenever neither side
+# produced a level — same na-safe behavior the source script has for a
+# blank liquidity column. Fed entirely by smart_synthetic_liquidity()
+# (computed from this expiry's own Greeks, no manual data entry needed)
+# — see simulate_forecast3.
 # ============================================================
 LIQUIDITY_VOLUME_NORMALIZER = 1000.0
 LIQUIDITY_DISTANCE_BAND_WIDTH = 0.60
@@ -616,6 +821,140 @@ def gamma_neutral_score(projected_price, current_close, gamma_ref, band_width, a
 
 
 # ============================================================
+# Wick-to-Body Acceptance Engine (Thales's newest-version addition) —
+# converts part of an overly asymmetric wick into the candle body when
+# one side's Market-Maker force clearly dominates and enough independent
+# signals (force dominance, real-candle momentum, liquidity dominance)
+# agree — modeling a market that "accepts" a directional move rather than
+# merely wicking through it and snapping back. Simplified relative to the
+# source script: uses only the LOCAL (price-proximity-gated) MM forces
+# from market_maker_gamma_contest, not the newest version's richer
+# "global pressure" blend (which needs the deferred per-leg delta-
+# confirmation/momentum-factor MM enrichment — see that function).
+# ============================================================
+WICK_ABSORPTION_MIN_ASYMMETRY = 0.58
+WICK_ABSORPTION_ACCEPTANCE_THRESHOLD = 0.10
+WICK_ABSORPTION_FLIP_THRESHOLD = 0.72
+WICK_ABSORPTION_NORMAL_MAX_SHARE = 0.30
+WICK_ABSORPTION_WEEKEND_MAX_SHARE = 0.20
+WICK_ABSORPTION_WEEKEND_RECOVERY_BONUS = 0.08
+WICK_ABSORPTION_MOMENTUM_MAX_SHARE = 0.35
+WICK_ABSORPTION_SHOCK_MAX_SHARE = 0.40
+WICK_ABSORPTION_RESIDUAL_FLOOR = 0.45
+WICK_ABSORPTION_MOMENTUM_WEIGHT = 0.20
+WICK_ABSORPTION_LIQUIDITY_WEIGHT = 0.15
+
+
+def wick_to_body_acceptance(
+    projected_open, projected_close, upper_wick, lower_wick,
+    mm_upper_force_total, mm_upper_net_force, mm_lower_force_total, mm_lower_net_force,
+    momentum_bull, momentum_bear, last_close, last_open, atr,
+    liquidity, price_structure_bull, price_structure_bear,
+    bull_shock_active, bear_shock_active,
+    gb_consensus_active, gb_all_aligned, gb_consensus_direction, gb_consensus_strength,
+    is_weekend, gamma_neutral_active, any_shock_active,
+):
+    """Returns (adjusted_close, mode_text) — mode_text is "" when no
+    absorption happened. `upper_wick`/`lower_wick` are this step's
+    already-computed (pre-absorption) wick sizes."""
+    body_top = max(projected_open, projected_close)
+    body_bottom = min(projected_open, projected_close)
+    pre_absorption_high = body_top + upper_wick
+    pre_absorption_low = body_bottom - lower_wick
+    total_wick = upper_wick + lower_wick
+    upper_asym = upper_wick / total_wick if total_wick > 1e-9 else 0.5
+    lower_asym = lower_wick / total_wick if total_wick > 1e-9 else 0.5
+    denom = max(1.0 - WICK_ABSORPTION_MIN_ASYMMETRY, 0.01)
+    upper_asym_score = min(max((upper_asym - WICK_ABSORPTION_MIN_ASYMMETRY) / denom, 0.0), 1.0)
+    lower_asym_score = min(max((lower_asym - WICK_ABSORPTION_MIN_ASYMMETRY) / denom, 0.0), 1.0)
+
+    upper_dominance = max(mm_upper_net_force, 0.0) / mm_upper_force_total if mm_upper_force_total > 0 else 0.0
+    lower_dominance = max(mm_lower_net_force, 0.0) / mm_lower_force_total if mm_lower_force_total > 0 else 0.0
+    upper_magnitude = min(mm_upper_force_total / max(MM_MINIMUM_OUTCOME_FORCE * 2.0, 0.01), 1.0)
+    lower_magnitude = min(mm_lower_force_total / max(MM_MINIMUM_OUTCOME_FORCE * 2.0, 0.01), 1.0)
+
+    body_atr_ratio = abs(last_close - last_open) / max(atr, 1e-9)
+    upper_momentum_accept = 1.0 if momentum_bull else (min(body_atr_ratio / max(MOMENTUM_BODY_ATR_MULT, 0.01), 1.0) if last_close > last_open else 0.0)
+    lower_momentum_accept = 1.0 if momentum_bear else (min(body_atr_ratio / max(MOMENTUM_BODY_ATR_MULT, 0.01), 1.0) if last_close < last_open else 0.0)
+
+    upper_liq_accept = min(liquidity["bias_abs"], 1.0) if (liquidity["upper_dominant"] and price_structure_bull) else 0.0
+    lower_liq_accept = min(liquidity["bias_abs"], 1.0) if (liquidity["lower_dominant"] and price_structure_bear) else 0.0
+
+    base_weight = max(1.0 - WICK_ABSORPTION_MOMENTUM_WEIGHT - WICK_ABSORPTION_LIQUIDITY_WEIGHT, 0.0)
+    upper_score = upper_dominance * upper_magnitude * (base_weight + upper_momentum_accept * WICK_ABSORPTION_MOMENTUM_WEIGHT + upper_liq_accept * WICK_ABSORPTION_LIQUIDITY_WEIGHT)
+    lower_score = lower_dominance * lower_magnitude * (base_weight + lower_momentum_accept * WICK_ABSORPTION_MOMENTUM_WEIGHT + lower_liq_accept * WICK_ABSORPTION_LIQUIDITY_WEIGHT)
+
+    if bull_shock_active and upper_dominance > 0:
+        upper_score = max(upper_score, 0.85 * upper_magnitude)
+    if bear_shock_active and lower_dominance > 0:
+        lower_score = max(lower_score, 0.85 * lower_magnitude)
+    if gamma_neutral_active and not any_shock_active:
+        upper_score *= 0.65
+        lower_score *= 0.65
+
+    if gb_consensus_active:
+        bonus = GAMMA_BAND_WEEKEND_WICK_ACCEPTANCE_BONUS if is_weekend else GAMMA_BAND_WEEKDAY_WICK_ACCEPTANCE_BONUS
+        if gb_consensus_direction > 0:
+            upper_score += gb_consensus_strength * bonus
+        elif gb_consensus_direction < 0:
+            lower_score += gb_consensus_strength * bonus
+
+    upper_score = min(max(upper_score, 0.0), 1.0)
+    lower_score = min(max(lower_score, 0.0), 1.0)
+
+    upper_body_aligned = projected_close >= projected_open or upper_score >= WICK_ABSORPTION_FLIP_THRESHOLD
+    lower_body_aligned = projected_close <= projected_open or lower_score >= WICK_ABSORPTION_FLIP_THRESHOLD
+    upper_candidate = upper_asym >= WICK_ABSORPTION_MIN_ASYMMETRY and upper_score >= WICK_ABSORPTION_ACCEPTANCE_THRESHOLD and upper_body_aligned
+    lower_candidate = lower_asym >= WICK_ABSORPTION_MIN_ASYMMETRY and lower_score >= WICK_ABSORPTION_ACCEPTANCE_THRESHOLD and lower_body_aligned
+    upper_priority = upper_asym_score * upper_score if upper_candidate else 0.0
+    lower_priority = lower_asym_score * lower_score if lower_candidate else 0.0
+    absorb_upper = upper_candidate and upper_priority > lower_priority
+    absorb_lower = lower_candidate and lower_priority >= upper_priority and lower_priority > 0
+
+    if not (absorb_upper or absorb_lower):
+        return projected_close, ""
+
+    active_score = upper_score if absorb_upper else lower_score
+    active_asym_score = upper_asym_score if absorb_upper else lower_asym_score
+    active_momentum = momentum_bull if absorb_upper else momentum_bear
+    active_shock = bull_shock_active if absorb_upper else bear_shock_active
+
+    weekend_recovery_used = 0.0
+    if is_weekend:
+        weekend_recovery_used = active_score * WICK_ABSORPTION_WEEKEND_RECOVERY_BONUS
+        if gb_all_aligned:
+            weekend_recovery_used += gb_consensus_strength * GAMMA_BAND_WEEKEND_RECOVERY_BONUS
+
+    max_share = (WICK_ABSORPTION_WEEKEND_MAX_SHARE + weekend_recovery_used) if is_weekend else WICK_ABSORPTION_NORMAL_MAX_SHARE
+    if active_momentum:
+        candidate = min(WICK_ABSORPTION_MOMENTUM_MAX_SHARE, WICK_ABSORPTION_WEEKEND_MAX_SHARE + WICK_ABSORPTION_WEEKEND_RECOVERY_BONUS + 0.05) if is_weekend else WICK_ABSORPTION_MOMENTUM_MAX_SHARE
+        max_share = max(max_share, candidate)
+    if active_shock:
+        candidate = min(WICK_ABSORPTION_SHOCK_MAX_SHARE, WICK_ABSORPTION_WEEKEND_MAX_SHARE + WICK_ABSORPTION_WEEKEND_RECOVERY_BONUS + 0.10) if is_weekend else WICK_ABSORPTION_SHOCK_MAX_SHARE
+        max_share = max(max_share, candidate)
+    max_share = min(max_share, max(1.0 - WICK_ABSORPTION_RESIDUAL_FLOOR, 0.0))
+
+    wick_body_share = max_share * math.sqrt(max(active_score * active_asym_score, 0.0))
+    wick_body_share = min(max(wick_body_share, 0.0), max_share)
+
+    upper_flip_distance = (projected_open - projected_close) if (absorb_upper and projected_close < projected_open) else 0.0
+    lower_flip_distance = (projected_close - projected_open) if (absorb_lower and projected_close > projected_open) else 0.0
+    if absorb_upper:
+        shift = upper_flip_distance + upper_wick * wick_body_share
+    else:
+        shift = -(lower_flip_distance + lower_wick * wick_body_share)
+    adjusted_close = projected_close + shift
+
+    if absorb_upper:
+        adjusted_close = min(adjusted_close, pre_absorption_high - upper_wick * WICK_ABSORPTION_RESIDUAL_FLOOR)
+    if absorb_lower:
+        adjusted_close = max(adjusted_close, pre_absorption_low + lower_wick * WICK_ABSORPTION_RESIDUAL_FLOOR)
+
+    mode = "Wick→Body " + ("Up" if absorb_upper else "Down")
+    return adjusted_close, mode
+
+
+# ============================================================
 # Session-aware + weekend/regime multiplier tables (Thales's own defaults,
 # UTC-only — sessionTimezone defaults to "Etc/UTC" in the source script, and
 # every other server-side computation in this addon already works in UTC).
@@ -670,6 +1009,22 @@ GAMMA_BAND_CONFIDENCE_BOOST = 0.20
 GAMMA_BAND_CONFLICT_BODY_DAMPING = 0.30
 GAMMA_BAND_CONFLICT_WICK_EXPANSION = 0.25
 GAMMA_BAND_OPPOSING_MAGNET_DAMPING = 0.60
+GAMMA_BAND_WEEKDAY_WICK_ACCEPTANCE_BONUS = 0.26
+GAMMA_BAND_WEEKEND_WICK_ACCEPTANCE_BONUS = 0.22
+GAMMA_BAND_WEEKEND_RECOVERY_BONUS = 0.10
+
+# Gamma-Band Trend Lock (Thales's newest-version addition) — once an
+# all-3-aligned consensus is strong and a real close still sits on its
+# "correct" side of the gamma reference, a single countertrend real
+# candle is treated as a retest rather than a reversal: its body impulse
+# is damped and the forecast's opposite-direction impulse is capped,
+# until a real candle actually escapes back through the gamma reference
+# with enough body-to-ATR force (GAMMA_BAND_COUNTER_ESCAPE_ATR) to earn
+# the lock being lifted.
+GAMMA_BAND_TREND_LOCK_STRENGTH = 0.55
+GAMMA_BAND_COUNTER_BODY_DAMPING = 0.18
+GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE = 0.030
+GAMMA_BAND_COUNTER_ESCAPE_ATR = 0.95
 
 GAMMA_CONFIRM_BARS = 2
 GAMMA_CONFIRM_BUFFER_PCT = 0.06
@@ -736,8 +1091,18 @@ def _atr14(candles):
     return sum(trs) / len(trs)
 
 
+def _cfg(cfg, name):
+    """Returns cfg[name] if the caller supplied an override for it, else
+    this module's own hardcoded constant of that name. Used only by
+    simulate_forecast3's own top-level tunables (see its `cfg` parameter
+    and res.config.settings' "Thales Forecast" section) — constants
+    private to nested helper functions are not overridable this way and
+    keep using their bare module-level name directly."""
+    return cfg[name] if cfg and name in cfg else globals()[name]
+
+
 def simulate_forecast3(index_price, sigma_annual, current, history, candles,
-                        hours_ahead=24, step_hours=4, start_offset_hours=4):
+                        hours_ahead=72, step_hours=4, start_offset_hours=4, cfg=None):
     """The full forecast-candle cascade, ported from Thales's per-step Pine
     loop. `current` and each row of `history` are dankbit.forecast3.snapshot
     field dicts (newest history row first); `candles` are recent real 4h
@@ -747,13 +1112,76 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     engine (matching the source script, which has none either); every
     candle is a direct function of the current Greeks and recent price
     action. Returns a list of {hours, open, high, low, close, mode} dicts,
-    one per step_hours-spaced candle out to hours_ahead. `hours_ahead=24`
-    (6 candles) matches Thales's own `forecastCandleCount` default —
-    shorter than Forecast/Forecast 2's 48h horizon, since nothing in the
-    engine assumes a specific cutoff (the per-step decay terms like
-    `0.75 ** step`/`0.82 ** step`/etc. just keep tapering either way), this
-    is a plain parameter choice, not a structural limit."""
-    levels = derive_levels(current)
+    one per step_hours-spaced candle out to hours_ahead. `hours_ahead=72`
+    (18 candles) — Thales's own `forecastCandleCount` default is 6 (24h),
+    widened here since nothing in the engine assumes a specific cutoff
+    (the per-step decay terms like `0.75 ** step`/`0.82 ** step`/etc. just
+    keep tapering either way), so this is a plain parameter choice, not a
+    structural limit.
+
+    `cfg` (optional dict, keyed by the module constant's own name, e.g.
+    {"FORECAST_PULL_FACTOR": 0.6, "SESSION_BODY_FACTOR": {...}}) lets a
+    caller override this function's own top-level tunables — the ones
+    referenced directly in this function's body, listed exhaustively
+    right below — without touching this module's hardcoded defaults for
+    anyone who doesn't pass a cfg (e.g. tests, or a call with cfg=None).
+    Sourced from res.config.settings' "Thales Forecast" section by
+    main.py's forecast3_json, falling back to these same hardcoded
+    defaults for any setting left unset. Constants private to nested
+    helper functions (vega_regime, market_maker_gamma_contest, cluster_*,
+    smart_synthetic_liquidity's internals, delta_shock_module,
+    gamma_shock_module, etc.) are NOT overridable via cfg — see the
+    "Top-level only" scoping decision in CLAUDE.md's Forecast 3 candles
+    section."""
+    cfg = cfg or {}
+    FORECAST_PULL_FACTOR = _cfg(cfg, "FORECAST_PULL_FACTOR")
+    FORECAST_SLOPE_FACTOR = _cfg(cfg, "FORECAST_SLOPE_FACTOR")
+    FORECAST_BODY_FACTOR = _cfg(cfg, "FORECAST_BODY_FACTOR")
+    FORECAST_CURVE_EXTREME_BODY_WEIGHT = _cfg(cfg, "FORECAST_CURVE_EXTREME_BODY_WEIGHT")
+    FORECAST_WICK_FACTOR = _cfg(cfg, "FORECAST_WICK_FACTOR")
+    FORECAST_ATR_FACTOR = _cfg(cfg, "FORECAST_ATR_FACTOR")
+    FORECAST_CURVE_WICK_WEIGHT = _cfg(cfg, "FORECAST_CURVE_WICK_WEIGHT")
+    GAMMA_BAND_OPPOSITE_WICK_COMPRESSION = _cfg(cfg, "GAMMA_BAND_OPPOSITE_WICK_COMPRESSION")
+    GAMMA_BAND_CONFIRMED_TARGET_BOOST = _cfg(cfg, "GAMMA_BAND_CONFIRMED_TARGET_BOOST")
+    GAMMA_BAND_CONFIDENCE_BOOST = _cfg(cfg, "GAMMA_BAND_CONFIDENCE_BOOST")
+    GAMMA_BAND_CONFLICT_BODY_DAMPING = _cfg(cfg, "GAMMA_BAND_CONFLICT_BODY_DAMPING")
+    GAMMA_BAND_CONFLICT_WICK_EXPANSION = _cfg(cfg, "GAMMA_BAND_CONFLICT_WICK_EXPANSION")
+    GAMMA_BAND_OPPOSING_MAGNET_DAMPING = _cfg(cfg, "GAMMA_BAND_OPPOSING_MAGNET_DAMPING")
+    GAMMA_BAND_TREND_LOCK_STRENGTH = _cfg(cfg, "GAMMA_BAND_TREND_LOCK_STRENGTH")
+    GAMMA_BAND_COUNTER_BODY_DAMPING = _cfg(cfg, "GAMMA_BAND_COUNTER_BODY_DAMPING")
+    GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE = _cfg(cfg, "GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE")
+    GAMMA_BAND_COUNTER_ESCAPE_ATR = _cfg(cfg, "GAMMA_BAND_COUNTER_ESCAPE_ATR")
+    GAMMA_CONFIRM_BUFFER_PCT = _cfg(cfg, "GAMMA_CONFIRM_BUFFER_PCT")
+    CLUSTER_ALIGNMENT_THRESHOLD = _cfg(cfg, "CLUSTER_ALIGNMENT_THRESHOLD")
+    CLUSTER_BODY_CONFIDENCE_FLOOR = _cfg(cfg, "CLUSTER_BODY_CONFIDENCE_FLOOR")
+    CLUSTER_COMPRESSED_THRESHOLD = _cfg(cfg, "CLUSTER_COMPRESSED_THRESHOLD")
+    CLUSTER_COMPRESSION_BODY_DAMPING = _cfg(cfg, "CLUSTER_COMPRESSION_BODY_DAMPING")
+    CLUSTER_COMPRESSION_WICK_COMPRESSION = _cfg(cfg, "CLUSTER_COMPRESSION_WICK_COMPRESSION")
+    CLUSTER_EXPANSION_THRESHOLD = _cfg(cfg, "CLUSTER_EXPANSION_THRESHOLD")
+    LIQUIDITY_ALIGNED_WICK_COMPRESSION = _cfg(cfg, "LIQUIDITY_ALIGNED_WICK_COMPRESSION")
+    LIQUIDITY_BODY_CONFIDENCE_FLOOR = _cfg(cfg, "LIQUIDITY_BODY_CONFIDENCE_FLOOR")
+    LIQUIDITY_OPPOSITE_WICK_COMPRESSION = _cfg(cfg, "LIQUIDITY_OPPOSITE_WICK_COMPRESSION")
+    LIQUIDITY_SWEEP_WICK_COMPRESSION = _cfg(cfg, "LIQUIDITY_SWEEP_WICK_COMPRESSION")
+    MOMENTUM_BODY_CONFIDENCE_FLOOR = _cfg(cfg, "MOMENTUM_BODY_CONFIDENCE_FLOOR")
+    MOMENTUM_WICK_COMPRESSION = _cfg(cfg, "MOMENTUM_WICK_COMPRESSION")
+    NEAR_GAMMA_BODY_DAMPING = _cfg(cfg, "NEAR_GAMMA_BODY_DAMPING")
+    NEAR_GAMMA_WICK_EXPANSION = _cfg(cfg, "NEAR_GAMMA_WICK_EXPANSION")
+    HIGH_VOL_PULL_FACTOR = _cfg(cfg, "HIGH_VOL_PULL_FACTOR")
+    LOW_VOL_PULL_FACTOR = _cfg(cfg, "LOW_VOL_PULL_FACTOR")
+    WEEKDAY_PULL_FACTOR = _cfg(cfg, "WEEKDAY_PULL_FACTOR")
+    HIGH_VOL_SHOCK_FACTOR = _cfg(cfg, "HIGH_VOL_SHOCK_FACTOR")
+    LOW_VOL_SHOCK_FACTOR = _cfg(cfg, "LOW_VOL_SHOCK_FACTOR")
+    WEEKDAY_SHOCK_FACTOR = _cfg(cfg, "WEEKDAY_SHOCK_FACTOR")
+    WEEKEND_ATR_FACTOR = _cfg(cfg, "WEEKEND_ATR_FACTOR")
+    WEEKEND_BODY_FACTOR = _cfg(cfg, "WEEKEND_BODY_FACTOR")
+    WEEKEND_SHOCK_FACTOR = _cfg(cfg, "WEEKEND_SHOCK_FACTOR")
+    BUCKET_HOURS_FALLBACK = _cfg(cfg, "BUCKET_HOURS_FALLBACK")
+    SESSION_BODY_FACTOR = _cfg(cfg, "SESSION_BODY_FACTOR")
+    SESSION_ATR_FACTOR = _cfg(cfg, "SESSION_ATR_FACTOR")
+    SESSION_SHOCK_FACTOR = _cfg(cfg, "SESSION_SHOCK_FACTOR")
+    SESSION_FIRST_MOVE_ATR = _cfg(cfg, "SESSION_FIRST_MOVE_ATR")
+
+    levels = derive_levels(current, cfg)
     band_width = levels["band_width"]
     top, low = current["top"], current["low"]
     gamma_ref = levels["gamma_avg"]
@@ -765,8 +1193,8 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     consensus = None
     if len(history) >= 2:
         prev, prev_prev = history[0], history[1]
-        prev_levels = derive_levels(prev)
-        prev_prev_levels = derive_levels(prev_prev)
+        prev_levels = derive_levels(prev, cfg)
+        prev_prev_levels = derive_levels(prev_prev, cfg)
         prev_hours_ago = (now_utc - prev["bucket_epoch"]) / 3600.0 if now_utc else BUCKET_HOURS_FALLBACK
         prev_prev_hours_ago = (now_utc - prev_prev["bucket_epoch"]) / 3600.0 if now_utc else BUCKET_HOURS_FALLBACK * 2
         consensus = gamma_band_consensus(
@@ -784,7 +1212,7 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     # "momentum" for the base pull term (see FORECAST_SLOPE_FACTOR below).
     center_slope = 0.0
     if history:
-        prev_levels = derive_levels(history[0])
+        prev_levels = derive_levels(history[0], cfg)
         prev_hours_ago = max((now_utc - history[0]["bucket_epoch"]) / 3600.0, 1.0) if now_utc else BUCKET_HOURS_FALLBACK
         center_slope = (levels["center"] - prev_levels["center"]) / prev_hours_ago
 
@@ -792,6 +1220,26 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     closes = [c["c"] for c in candles]
     confirmed_above, confirmed_below = _gamma_confirmation(closes, gamma_ref, gamma_confirm_buffer)
     momentum_bear, momentum_bull, sweep_boost = _momentum_override(candles, atr)
+
+    # Gamma-Band Trend Lock — computed once, from the current consensus and
+    # the single most recent real candle (both step-invariant), same as
+    # consensus/momentum above.
+    last_close = closes[-1] if closes else index_price
+    last_open = candles[-1]["o"] if candles else index_price
+    current_body_atr_ratio = abs(last_close - last_open) / max(atr, 1e-9)
+    gb_strong_trend_lock = consensus["all_aligned"] and consensus["consensus_strength"] >= GAMMA_BAND_TREND_LOCK_STRENGTH
+    gb_locked_bear_context = gb_strong_trend_lock and consensus["consensus_direction"] < 0 and last_close < gamma_ref - gamma_confirm_buffer
+    gb_locked_bull_context = gb_strong_trend_lock and consensus["consensus_direction"] > 0 and last_close > gamma_ref + gamma_confirm_buffer
+    gb_counter_body_against_consensus = (gb_locked_bear_context and last_close > last_open) or (gb_locked_bull_context and last_close < last_open)
+    gb_counter_gamma_escape = (
+        (gb_locked_bear_context and last_close > gamma_ref + gamma_confirm_buffer) or
+        (gb_locked_bull_context and last_close < gamma_ref - gamma_confirm_buffer)
+    )
+    gb_counter_trend_escape = gb_counter_body_against_consensus and current_body_atr_ratio >= GAMMA_BAND_COUNTER_ESCAPE_ATR and gb_counter_gamma_escape
+    gb_counter_trend_locked = gb_counter_body_against_consensus and not gb_counter_trend_escape
+    if gb_counter_trend_locked:
+        momentum_bear = False
+        momentum_bull = False
 
     put_delta_level = weighted_avg2(current["bpd_price"], current["spd_price"], 1.0, 1.0)
     call_delta_level = weighted_avg2(current["bcd_price"], current["scd_price"], 1.0, 1.0)
@@ -813,7 +1261,7 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     expansion_score = 0.0
     cluster_direction_matches_body = None
     if history:
-        prev_levels = derive_levels(history[0])
+        prev_levels = derive_levels(history[0], cfg)
         prev_dispersion = cluster_dispersion(history[0]["top"], history[0]["low"], prev_levels["buyer_gamma"], prev_levels["seller_gamma"], history[0]["bml"], history[0]["smp"])
         if dispersion is not None and prev_dispersion is not None:
             dispersion_change = dispersion - prev_dispersion
@@ -829,6 +1277,12 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     cluster_center_price = cluster_center(top, low, levels["buyer_gamma"], levels["seller_gamma"], current["bml"], current["smp"])
     cluster_directional_expansion = expansion_score > 0 and alignment >= CLUSTER_ALIGNMENT_THRESHOLD
     cluster_compressed = compression_score > 0
+
+    # Smart Role-Aware Synthetic Liquidity — computed once (all its inputs
+    # are step-invariant).
+    synthetic_liq = smart_synthetic_liquidity(current, top, low, band_width, last_close)
+    lower_liq_price, lower_liq_m = synthetic_liq["lower_liq_price"], synthetic_liq["lower_liq_m"]
+    upper_liq_price, upper_liq_m = synthetic_liq["upper_liq_price"], synthetic_liq["upper_liq_m"]
 
     points = []
     projected_open = index_price
@@ -872,6 +1326,8 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
         current_body_impulse = (last_body / band_width) * FORECAST_BODY_FACTOR * (0.75 ** step) * combined_body_mult
         if momentum_bear or momentum_bull:
             current_body_impulse *= sweep_boost
+        if gb_counter_trend_locked:
+            current_body_impulse *= GAMMA_BAND_COUNTER_BODY_DAMPING
 
         center_bias = (levels["center"] - projected_open) + slope_impulse * band_width + last_body * 0.25
         upper_curve_pull = (current["smp"] - projected_open) / band_width
@@ -904,12 +1360,13 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
             current["bml"], current["smp"], put_delta_level, call_delta_level,
         )
 
-        mm_impulse, mm_upper_wick_boost, mm_lower_wick_boost = market_maker_gamma_contest(
-            current, projected_open, band_width, combined_body_mult, step,
-        )
+        mm = market_maker_gamma_contest(current, projected_open, band_width, combined_body_mult, step)
+        mm_impulse = mm["impulse"]
+        mm_upper_wick_boost = mm["upper_wick_boost"]
+        mm_lower_wick_boost = mm["lower_wick_boost"]
 
         liquidity = liquidity_map_engine(
-            current["lower_liq_price"], current["lower_liq_m"], current["upper_liq_price"], current["upper_liq_m"],
+            lower_liq_price, lower_liq_m, upper_liq_price, upper_liq_m,
             projected_open, levels["center"], band_width, candles[-1] if candles else None, combined_body_mult, step,
         )
         if liquidity["has_map"] and not (momentum_bear or momentum_bull):
@@ -976,6 +1433,12 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
             + liquidity["impulse"]
         ) * body_confidence
+        if gb_counter_trend_locked:
+            allowed_opposite = GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE * max(1.0 - consensus["consensus_strength"], 0.05)
+            if consensus["consensus_direction"] < 0 and forecast_impulse > 0:
+                forecast_impulse = min(forecast_impulse, allowed_opposite)
+            elif consensus["consensus_direction"] > 0 and forecast_impulse < 0:
+                forecast_impulse = max(forecast_impulse, -allowed_opposite)
         impulse_limit = 0.85 if any_shock_active else 0.45
         forecast_impulse = max(min(forecast_impulse, impulse_limit), -impulse_limit)
 
@@ -1023,10 +1486,34 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
             else:
                 upper_wick *= 1.0 - cut
 
+        pre_absorption_high = body_top + max(upper_wick, 0.0)
+        pre_absorption_low = body_bottom - max(lower_wick, 0.0)
+        adjusted_close, absorption_mode = wick_to_body_acceptance(
+            projected_open, projected_close, max(upper_wick, 0.0), max(lower_wick, 0.0),
+            mm["upper_force_total"], mm["upper_net_force"], mm["lower_force_total"], mm["lower_net_force"],
+            momentum_bull, momentum_bear, last_close, last_open, atr,
+            liquidity, projected_open > levels["center"], projected_open < levels["center"],
+            bull_delta_shock or bull_shock, bear_delta_shock or bear_shock,
+            consensus["consensus_direction"] != 0, consensus["all_aligned"],
+            consensus["consensus_direction"], consensus["consensus_strength"],
+            is_weekend, neutral_score > 0 and not any_shock_active, any_shock_active,
+        )
+        if absorption_mode:
+            projected_close = adjusted_close
+            projected_bull = projected_close >= projected_open
+            body_top = max(projected_open, projected_close)
+            body_bottom = min(projected_open, projected_close)
+            upper_wick = max(pre_absorption_high - body_top, 0.0)
+            lower_wick = max(body_bottom - pre_absorption_low, 0.0)
+
         projected_high = max(body_top + max(upper_wick, 0.0), body_top)
         projected_low = min(body_bottom - max(lower_wick, 0.0), body_bottom)
 
         mode = []
+        if absorption_mode:
+            mode.append(absorption_mode)
+        if gb_counter_trend_locked:
+            mode.append("G-B " + ("Bear" if consensus["consensus_direction"] < 0 else "Bull") + " Trend Lock")
         if any_shock_active:
             mode.append("Shock")
         if consensus["all_aligned"]:

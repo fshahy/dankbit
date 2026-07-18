@@ -250,7 +250,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-forecast3-up-color="forecast3_up_color" t-att-data-forecast3-down-color="forecast3_down_color" t-att-data-forecast3-wick-up-color="forecast3_wick_up_color" t-att-data-forecast3-wick-down-color="forecast3_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
@@ -259,18 +259,6 @@
 					<button class="tf-btn" onclick="setTf('1d')">1d</button>
 					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
-					<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
-						<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
-						Forecast
-					</label>
-					<label class="toggle-label" id="forecast2-toggle-wrap" style="display:none">
-						<input type="checkbox" id="forecast2-toggle" onchange="onToggleForecast2()"/>
-						Forecast 2
-					</label>
-					<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
-						<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
-						Thales Forecast
-					</label>
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
 							<input type="checkbox" id="nearest-expiry-toggle" onchange="onToggleGammaScope('nearest')"/>
@@ -288,6 +276,10 @@
 							<input type="checkbox" id="universal-scope-toggle" onchange="onToggleGammaScope('universal')"/>
 							Universal
 						</label>
+						<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
+							<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
+							Thales Forecast
+						</label>
 					</t>
 					<t t-if="show_gamma_point == 'false'">
 						<label class="toggle-label">
@@ -295,8 +287,16 @@
 							Lines
 						</label>
 						<label class="toggle-label">
+							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
+							Zones
+						</label>
+						<label class="toggle-label">
 							<input type="checkbox" id="zones-toggle" onchange="onToggleZonesExtrema()"/>
 							Zones Extrema
+						</label>
+						<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
+							<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
+							Thales Forecast
 						</label>
 						<span class="tf-label">Boxes from:</span>
 						<label class="toggle-label">
@@ -326,6 +326,14 @@
 					// Only true on /my/<asset> — /chart/<asset> always passes
 					// show_gamma_point="false" (see _build_tv_chart_context).
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
+					// Thales Forecast candle colors — user-configurable via
+					// Settings → Dankbit → Thales Forecast (res.config.settings),
+					// defaults are light red/green so forecast candles stay
+					// easily distinguishable from the real teal/red candle series.
+					const FORECAST3_UP_COLOR = cfg.forecast3UpColor || '#a5d6a7';
+					const FORECAST3_DOWN_COLOR = cfg.forecast3DownColor || '#ef9a9a';
+					const FORECAST3_WICK_UP_COLOR = cfg.forecast3WickUpColor || '#66bb6a';
+					const FORECAST3_WICK_DOWN_COLOR = cfg.forecast3WickDownColor || '#e57373';
 					// /my/<asset> is the only minimal page (candles + gamma point
 					// only — no Weekly/Monthly/All/Daily delta=0 lines, no zones
 					// boxes/extrema), and currently the only one with the gamma
@@ -345,22 +353,37 @@
 					// Unchecked/off by default, matching the checkbox's own
 					// default (unchecked) state above.
 					let SHOW_ALL_LINES = false;
+					// User-toggleable via the "Zones" checkbox (Delta Chart only,
+					// right after "Lines") — controls the yellow top/bottom
+					// zero-crossing boxes (High Zone/Low Zone) and the teal Seller
+					// Max Profit/Buyer Max Loss box (Middle Zone), i.e. everything
+					// refreshZonesBoxes()/clearZonesBoxes() draw. Checked/on by
+					// default (matching the checkbox's own default-checked state
+					// above), since these boxes were always-on before this flag
+					// existed — unchecking it stops refreshZonesBoxes() from
+					// calling the server at all, which also means this browser's
+					// own polling stops refreshing the nearest expiry's
+					// dankbit.zones.extrema row (expiry_index 0) — same trade-off
+					// "Zones Extrema" below already accepts for expiry_index 1/2;
+					// the 4-hourly compute_snapshot() cron still keeps that row
+					// fresh on its own regardless.
+					let SHOW_ZONES_BOXES = true;
 					// User-toggleable via the "Zones Extrema" checkbox (Delta Chart
 					// only — this indicator is already suppressed on DG Chart via
 					// MINIMAL_CHART, so this control isn't shown there at all, see the
-					// t-if on its markup). Controls only the Top/Bottom Intersection +
+					// t-if on its markup). Controls only the High/Resistance + Low/Support +
 					// Gamma Band lines (green/red/dashed violet) — deliberately NOT
-					// the yellow/teal zones boxes, which stay always-on for now (a
-					// separate show/hide control for those is planned but not added
-					// yet). Stops refreshZonesExtrema()/refreshZonesExtremaExtended()
+					// the yellow/teal zones boxes, which have their own separate
+					// "Zones" checkbox instead (SHOW_ZONES_BOXES above). Stops
+					// refreshZonesExtrema()/refreshZonesExtremaExtended()
 					// from calling the server at all while off — including the
 					// expiry_index 1/2 background-refresh calls, so this page's own
 					// live polling stops feeding those two expiries' rows in
 					// dankbit.zones.extrema while off; expiry_index 0 (the nearest
-					// expiry, via refreshZonesBoxes()) keeps persisting regardless,
-					// since that endpoint isn't gated by this flag. The hourly
-					// compute_snapshot() cron is untouched either way and keeps every
-					// tracked expiry's row fresh on its own regardless of either flag.
+					// expiry, via refreshZonesBoxes()) is governed by SHOW_ZONES_BOXES
+					// instead, not by this flag. The 4-hourly compute_snapshot() cron
+					// is untouched either way and keeps every tracked expiry's row
+					// fresh on its own regardless of any of these flags.
 					let SHOW_ZONES_EXTREMA = false;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
 					// only, radio toggle next to "Zones Extrema") — 'midnight' is the
@@ -404,22 +427,14 @@
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
-					const FORECAST_URL     = '/api/forecast/' + ASSET;
-					const FORECAST2_URL    = '/api/forecast2/' + ASSET;
 					const FORECAST3_URL    = '/api/forecast3/' + ASSET;
-					// "Forecast" checkbox (both Delta and Gamma Chart, next to
-					// Ruler) — unchecked by default, same server-load-reducing
-					// pattern as every other optional indicator on this chart.
-					let SHOW_FORECAST = false;
-					// "Forecast 2" checkbox — same pattern, unchecked by default.
-					// Draws a second simulated path (see FORECAST2_URL) that is
-					// additionally steered by the Zones Extrema levels (gamma
-					// band, top/bottom intersection) the plain Forecast ignores.
-					let SHOW_FORECAST2 = false;
-					// "Forecast 3" checkbox — same pattern, unchecked by default.
-					// Draws a third, fully deterministic path (see FORECAST3_URL)
-					// ported from Thales's own forecast-candle engine rather than
-					// a random walk — see forecast3.py.
+					// "Thales Forecast" checkbox (both Delta and Gamma Chart —
+					// after "Zones Extrema" on the Delta Chart; after "Universal"
+					// on the Gamma Chart) — unchecked by default, same server-
+					// load-reducing pattern as every other optional indicator on
+					// this chart.
+					// Draws a fully deterministic path (see FORECAST3_URL) ported
+					// from Thales's own forecast-candle engine — see forecast3.py.
 					let SHOW_FORECAST3 = false;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
@@ -484,8 +499,8 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					const topIntersectionSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const bottomIntersectionSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const highResistanceSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const lowSupportSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
@@ -510,59 +525,28 @@
 					const aboveBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 					const belowBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
-					// Short Max / Long Min box — same left/right time edges as the yellow
+					// Seller Max Profit / Buyer Max Loss box — same left/right time edges as the yellow
 					// box above (both come from the same get_box() call for the nearest
 					// expiry), teal so it stays visually distinct from yellow/violet/
 					// green. setBoxData() already draws a single line instead of a box
 					// when top and bottom coincide (or only one is available).
-					const smlmBoxSeries = chart.addBaselineSeries({
+					const smpBmlBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
 						topLineColor: 'teal', topFillColor1: 'rgba(0, 128, 128, 0.25)', topFillColor2: 'rgba(0, 128, 128, 0.25)',
 						bottomLineColor: 'teal', bottomFillColor1: 'rgba(0, 128, 128, 0.25)', bottomFillColor2: 'rgba(0, 128, 128, 0.25)',
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
-					const smlmBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const smpBmlBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
-					// Forecast candles (both Delta and Gamma Chart, "Forecast"
-					// checkbox) — one simulated GBM price path extending 2
-					// days past the last real candle, sourced from
-					// /api/forecast/<asset> (see forecast.simulate_path).
-					// Real OHLC bodies (an earlier version forced
-					// open === close on every bar, which drew nothing but
-					// a wick — no candle actually has a visible body
-					// without open/close differing), built server-side from
-					// finer intra-hour sub-steps so each candle has a
-					// genuine range, not just a single jump. Muted
-					// green/up, red/down — same convention as the real
-					// candles, just pastel so it's still visually clear
-					// which series is the forecast.
-					const forecastSeries = chart.addCandlestickSeries({
-						upColor: '#a5d6a7', downColor: '#ef9a9a', borderVisible: false,
-						wickUpColor: '#66bb6a', wickDownColor: '#e57373',
-						lastValueVisible: false, priceLineVisible: false,
-					});
-
-					// "Forecast 2" candles ("Forecast 2" checkbox) — same shape as
-					// forecastSeries, sourced from /api/forecast2/<asset> (see
-					// forecast.simulate_path_with_levels): pulled toward the Gamma
-					// Band and softly reflected off the Top/Bottom Intersection
-					// lines instead of a plain unguided random walk. Blue/purple
-					// so it stays visually distinct from both the real candles and
-					// the plain Forecast series.
-					const forecast2Series = chart.addCandlestickSeries({
-						upColor: '#90caf9', downColor: '#ce93d8', borderVisible: false,
-						wickUpColor: '#42a5f5', wickDownColor: '#ab47bc',
-						lastValueVisible: false, priceLineVisible: false,
-					});
-
-					// "Forecast 3" candles ("Forecast 3" checkbox) — Thales's
-					// deterministic forecast-candle engine (see forecast3.py),
-					// sourced from /api/forecast3/<asset>. Amber/brown so it
-					// stays visually distinct from the real candles and both
-					// other forecast series.
+					// Thales Forecast candles ("Thales Forecast" checkbox) —
+					// Thales's deterministic forecast-candle engine (see
+					// forecast3.py), sourced from /api/forecast3/<asset>. Light
+					// red/green (user-configurable, see FORECAST3_UP_COLOR etc.
+					// above) so it stays easily distinguishable from the real
+					// candles' own teal/red at a glance.
 					const forecast3Series = chart.addCandlestickSeries({
-						upColor: '#ffcc80', downColor: '#bcaaa4', borderVisible: false,
-						wickUpColor: '#ff9800', wickDownColor: '#8d6e63',
+						upColor: FORECAST3_UP_COLOR, downColor: FORECAST3_DOWN_COLOR, borderVisible: false,
+						wickUpColor: FORECAST3_WICK_UP_COLOR, wickDownColor: FORECAST3_WICK_DOWN_COLOR,
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
@@ -978,40 +962,40 @@
 					}
 
 					function clearZonesExtremaLines() {
-						topIntersectionSeries.setData([]);
-						bottomIntersectionSeries.setData([]);
+						highResistanceSeries.setData([]);
+						lowSupportSeries.setData([]);
 						gammaBandSeries.setData([]);
-						topIntersectionSeries.setMarkers([]);
-						bottomIntersectionSeries.setMarkers([]);
+						highResistanceSeries.setMarkers([]);
+						lowSupportSeries.setMarkers([]);
 					}
 
 					async function refreshZonesExtrema() {
 						if (MINIMAL_CHART || !SHOW_ZONES_EXTREMA) return;
 						const data = await (await fetch(ZE_URL)).json();
 						const rows = data.zones_extrema || [];
-						topIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.top_intersection })));
-						bottomIntersectionSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.bottom_intersection })));
+						highResistanceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.high_resistance })));
+						lowSupportSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.low_support })));
 						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
 
 						// +/- marker per point: whether the payoff at that
 						// intersection (not the intersection's own price) sits
 						// above or below the zero-payoff line — size:0 hides the
 						// marker's shape glyph so only the text renders.
-						topIntersectionSeries.setMarkers(rows.map(r => ({
+						highResistanceSeries.setMarkers(rows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
 							color: '#2e7d32',
 							shape: 'circle',
 							size: 0,
-							text: r.top_intersection_positive ? '+' : '-',
+							text: r.high_resistance_positive ? '+' : '-',
 						})));
-						bottomIntersectionSeries.setMarkers(rows.map(r => ({
+						lowSupportSeries.setMarkers(rows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
 							color: '#c62828',
 							shape: 'circle',
 							size: 0,
-							text: r.bottom_intersection_positive ? '+' : '-',
+							text: r.low_support_positive ? '+' : '-',
 						})));
 					}
 
@@ -1047,12 +1031,12 @@
 						belowBoxSeries.setData([]);
 						aboveBoxBottomLine.setData([]);
 						belowBoxBottomLine.setData([]);
-						smlmBoxSeries.setData([]);
-						smlmBoxBottomLine.setData([]);
+						smpBmlBoxSeries.setData([]);
+						smpBmlBoxBottomLine.setData([]);
 					}
 
 					async function refreshZonesBoxes() {
-						if (MINIMAL_CHART) return;
+						if (MINIMAL_CHART || !SHOW_ZONES_BOXES) return;
 						// Live lookup — computed fresh by the server on every call (see
 						// dankbit.zones.extrema.get_box), not read from stored history.
 						// Persisted (feeding the Zones Extrema lines' history) unless
@@ -1078,11 +1062,11 @@
 						const belowBottom = Math.min(data.short_zero_below_price, data.long_zero_below_price);
 						setBoxData(belowBoxSeries, belowBoxBottomLine, belowTop, belowBottom, fromTime, toTime);
 
-						// Short Max / Long Min box — same fromTime/toTime as the yellow box
+						// Seller Max Profit / Buyer Max Loss box — same fromTime/toTime as the yellow box
 						// above, since both come from this same nearest-expiry get_box() call.
-						const smlmTop    = Math.max(data.short_max_price, data.long_min_price);
-						const smlmBottom = Math.min(data.short_max_price, data.long_min_price);
-						setBoxData(smlmBoxSeries, smlmBoxBottomLine, smlmTop, smlmBottom, fromTime, toTime);
+						const smpBmlTop    = Math.max(data.seller_max_profit, data.buyer_max_loss);
+						const smpBmlBottom = Math.min(data.seller_max_profit, data.buyer_max_loss);
+						setBoxData(smpBmlBoxSeries, smpBmlBoxBottomLine, smpBmlTop, smpBmlBottom, fromTime, toTime);
 					}
 
 					async function refreshZonesExtremaExtended() {
@@ -1091,7 +1075,7 @@
 						// expiry_index 1 through 2 just keep their dankbit.zones.extrema
 						// rows fresh while the chart is open (see get_box_n), the same way
 						// refreshZonesBoxes() does for 0, so refreshZonesExtrema()'s next
-						// poll picks up fresher Top/Bottom Intersection and Gamma Band
+						// poll picks up fresher High/Resistance, Low/Support, and Gamma Band
 						// points for them — no box is rendered from this call's
 						// response, so there's nothing to do with it beyond triggering the
 						// server-side computation.
@@ -1100,12 +1084,34 @@
 						}
 					}
 
-					// "Zones Extrema" checkbox (Delta Chart only, next to "Lines") —
-					// controls only the Top/Bottom Intersection + Gamma Band lines
+					// "Zones" checkbox (Delta Chart only, right after "Lines") —
+					// controls the yellow High Zone/Low Zone boxes and the teal
+					// Middle Zone (Seller Max Profit/Buyer Max Loss) box, i.e.
+					// everything refreshZonesBoxes()/clearZonesBoxes() draw.
+					// Checked by default (SHOW_ZONES_BOXES starts true, matching
+					// the checkbox's own default-checked state), since these boxes
+					// were always shown before this checkbox existed. Stops
+					// refreshZonesBoxes() from calling the server at all while off
+					// (see SHOW_ZONES_BOXES above) — including its side effect of
+					// persisting the nearest expiry's dankbit.zones.extrema row —
+					// not just hiding the result; the 4-hourly compute_snapshot()
+					// cron is untouched either way. Clears the boxes immediately
+					// when switched off and re-fetches immediately when switched
+					// back on.
+					function onToggleZonesBoxes() {
+						SHOW_ZONES_BOXES = document.getElementById('zones-boxes-toggle').checked;
+						if (SHOW_ZONES_BOXES) {
+							refreshZonesBoxes();
+						} else {
+							clearZonesBoxes();
+						}
+					}
+
+					// "Zones Extrema" checkbox (Delta Chart only, next to "Zones") —
+					// controls only the High/Resistance + Low/Support + Gamma Band lines
 					// (green/red/dashed violet), NOT the yellow/teal zones boxes,
-					// which have their own separate show/hide control (not added
-					// yet — see refreshZonesBoxes(), left ungated by this flag on
-					// purpose). Stops refreshZonesExtrema()/refreshZonesExtremaExtended()
+					// which have their own separate "Zones" checkbox instead
+					// (SHOW_ZONES_BOXES/onToggleZonesBoxes() above). Stops refreshZonesExtrema()/refreshZonesExtremaExtended()
 					// from calling the server at all while off (see
 					// SHOW_ZONES_EXTREMA above), not just hiding the result — the
 					// cron is untouched, this only stops this browser's own
@@ -1123,55 +1129,40 @@
 						}
 					}
 
-					function clearForecastLines() {
-						forecastSeries.setData([]);
-					}
-
-					function clearForecast2Lines() {
-						forecast2Series.setData([]);
-					}
-
 					function clearForecast3Lines() {
 						forecast3Series.setData([]);
 					}
 
-					// The Forecast candles are 4h resolution (see
-					// forecast.simulate_path's step_hours default) and only
+					// The Thales Forecast candles are 4h resolution and only
 					// make visual sense lined up against real 4h-spaced
 					// candles, so both the checkbox and the series itself
 					// are restricted to the 4h timeframe — shown/hidden by
 					// updateForecastVisibility() on every timeframe switch
 					// (both Delta and Gamma Chart, since both share setTf()).
-					// Forecast 2 shares the same 4h-only restriction and toggle
-					// wrapper visibility, same reasoning.
 					function updateForecastVisibility() {
 						const visible = INTERVAL === '4h';
-						document.getElementById('forecast-toggle-wrap').style.display = visible ? '' : 'none';
-						document.getElementById('forecast2-toggle-wrap').style.display = visible ? '' : 'none';
 						document.getElementById('forecast3-toggle-wrap').style.display = visible ? '' : 'none';
-						refreshForecast();
-						refreshForecast2();
 						refreshForecast3();
 					}
 
-					// "Forecast" checkbox (both Delta and Gamma Chart) — fetches
-					// /api/forecast/<asset> and draws the forecast candles (see
-					// FORECAST_URL, forecastSeries above). Stops fetching
-					// entirely while off, or while not on the 4h timeframe
-					// (see updateForecastVisibility above), same server-load-
-					// reducing pattern as every other optional indicator here.
-					// Display time is NOT taken from the server's `t` (an
-					// arbitrary now-relative timestamp) — it's recomputed
-					// here, anchored to the same grid futureAxisSeries uses
-					// for its own future ticks (realCandles[last].time,
-					// stepped by intervalSec). Lightweight Charts builds one
-					// shared logical time axis from the union of every
-					// series' timestamps; server-relative "now" timestamps
-					// almost never land on that grid, so forecastSeries'
-					// points ended up alternating with futureAxisSeries'
-					// ticks in the same stretch — each series only getting
-					// every other logical slot, which rendered as every
-					// other forecast candle missing.
+					// "Thales Forecast" checkbox (both Delta and Gamma Chart) —
+					// fetches /api/forecast3/<asset> and draws the forecast
+					// candles (see FORECAST3_URL, forecast3Series above). Stops
+					// fetching entirely while off, or while not on the 4h
+					// timeframe (see updateForecastVisibility above), same
+					// server-load-reducing pattern as every other optional
+					// indicator here. Display time is NOT taken from the
+					// server's `t` (an arbitrary now-relative timestamp) — it's
+					// recomputed here, anchored to the same grid
+					// futureAxisSeries uses for its own future ticks
+					// (realCandles[last].time, stepped by intervalSec).
+					// Lightweight Charts builds one shared logical time axis
+					// from the union of every series' timestamps; server-
+					// relative "now" timestamps almost never land on that grid,
+					// so forecast3Series' points ended up alternating with
+					// futureAxisSeries' ticks in the same stretch — each series
+					// only getting every other logical slot, which rendered as
+					// every other forecast candle missing.
 					//
 					// The anchor walks forward from realCandles[last].time
 					// (a whole number of intervalSec steps at a time, so it
@@ -1184,61 +1175,6 @@
 					// forecast candle is always the next 4h candle after
 					// now, on the correct grid, regardless of which one
 					// realCandles[last] actually is.
-					async function refreshForecast() {
-						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
-						const data = await (await fetch(FORECAST_URL)).json();
-						const points = data.points || [];
-						if (!points.length) { clearForecastLines(); return; }
-						const intervalSec = INTERVAL_SECONDS[INTERVAL];
-						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
-						let firstTime = realCandles[realCandles.length - 1].time;
-						while (firstTime <= nowShifted) firstTime += intervalSec;
-						forecastSeries.setData(points.map((p, i) => ({
-							time: firstTime + i * intervalSec,
-							open: p.open, high: p.high, low: p.low, close: p.close,
-						})));
-					}
-
-					function onToggleForecast() {
-						SHOW_FORECAST = document.getElementById('forecast-toggle').checked;
-						if (SHOW_FORECAST) {
-							refreshForecast();
-						} else {
-							clearForecastLines();
-						}
-					}
-
-					// "Forecast 2" — same anchoring/grid logic as refreshForecast()
-					// (see its own comment above for why display time is
-					// recomputed client-side rather than using the server's `t`),
-					// just against forecast2Series/FORECAST2_URL.
-					async function refreshForecast2() {
-						if (!SHOW_FORECAST2 || INTERVAL !== '4h' || !realCandles.length) { clearForecast2Lines(); return; }
-						const data = await (await fetch(FORECAST2_URL)).json();
-						const points = data.points || [];
-						if (!points.length) { clearForecast2Lines(); return; }
-						const intervalSec = INTERVAL_SECONDS[INTERVAL];
-						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
-						let firstTime = realCandles[realCandles.length - 1].time;
-						while (firstTime <= nowShifted) firstTime += intervalSec;
-						forecast2Series.setData(points.map((p, i) => ({
-							time: firstTime + i * intervalSec,
-							open: p.open, high: p.high, low: p.low, close: p.close,
-						})));
-					}
-
-					function onToggleForecast2() {
-						SHOW_FORECAST2 = document.getElementById('forecast2-toggle').checked;
-						if (SHOW_FORECAST2) {
-							refreshForecast2();
-						} else {
-							clearForecast2Lines();
-						}
-					}
-
-					// "Forecast 3" — same anchoring/grid logic as refreshForecast()
-					// (see its own comment above), just against
-					// forecast3Series/FORECAST3_URL.
 					async function refreshForecast3() {
 						if (!SHOW_FORECAST3 || INTERVAL !== '4h' || !realCandles.length) { clearForecast3Lines(); return; }
 						const data = await (await fetch(FORECAST3_URL)).json();
@@ -1345,8 +1281,6 @@
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesExtremaExtended, REFRESH);
 					setInterval(refreshGammaPointLines, REFRESH);
-					setInterval(refreshForecast, REFRESH);
-					setInterval(refreshForecast2, REFRESH);
 					setInterval(refreshForecast3, REFRESH);
 				//]]></script>
 			</body>

@@ -10,9 +10,6 @@ from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
-from . import theta
-from . import vega
-from . import forecast
 from . import forecast3
 
 
@@ -241,155 +238,65 @@ class ChartController(http.Controller):
         buf.seek(0)
         image_b64 = base64.b64encode(buf.read()).decode("ascii")
 
-        # Short Max/Long Min/box info used to be drawn inside the PNG itself
-        # (matplotlib ax.text) — now rendered as page HTML (top-left overlay,
-        # see dankbit_page template) instead, off the same summary dankbit.
-        # zones.extrema uses, so the two can never disagree.
+        # Seller Max Profit/Buyer Max Loss/zone info used to be drawn inside
+        # the PNG itself (matplotlib ax.text) — now rendered as page HTML
+        # (top-left overlay, see dankbit_page template) instead, off the
+        # same summary dankbit.zones.extrema uses, so the two can never
+        # disagree.
         summary = options.zone_summary(longs_obj.STs, longs_obj.payoffs, shorts_obj.payoffs)
 
-        def _format_box(box):
-            # box is None (no crossing at all), or a (low, high) pair that
+        def _format_zone(zone):
+            # zone is None (no crossing at all), or a (low, high) pair that
             # collapses to a single price when only one curve contributed a
             # crossing — shown as one number rather than a zero-width range.
-            if box is None:
+            if zone is None:
                 return "n/a"
-            low, high = box
+            low, high = zone
             if low == high:
                 return "${:,.0f}".format(low)
             return "${:,.0f} - ${:,.0f}".format(low, high)
 
-        top_box = _format_box(summary["top_box"])
-        bottom_box = _format_box(summary["bottom_box"])
-        top_intersection = "n/a" if summary["top_intersection"] is None else "${:,.0f}".format(summary["top_intersection"])
-        bottom_intersection = "n/a" if summary["bottom_intersection"] is None else "${:,.0f}".format(summary["bottom_intersection"])
+        high_zone = _format_zone(summary["high_zone"])
+        low_zone = _format_zone(summary["low_zone"])
+        middle_zone = _format_zone(summary["middle_zone"])
+        high_resistance = "n/a" if summary["high_resistance"] is None else "${:,.0f}".format(summary["high_resistance"])
+        low_support = "n/a" if summary["low_support"] is None else "${:,.0f}".format(summary["low_support"])
 
-        # Long call trades since 00:00 UTC, restricted to the single nearest
-        # (soonest-to-expire) expiry among `trades` — same "next expiry only"
-        # restriction dankbit.zones.extrema uses, in case `instrument` isn't
-        # already a single fully-qualified expiry. Price where dollar gamma
-        # peaks over the same zoomed price grid the zones curves use.
+        # Restrict to the single nearest (soonest-to-expire) expiry among
+        # `trades` — same "next expiry only" restriction dankbit.zones.extrema
+        # uses, in case `instrument` isn't already a single fully-qualified
+        # expiry — then delegate the actual per-leg gamma/delta/theta/vega
+        # extrema computation to options.per_leg_greeks(), the single source
+        # of truth also used by dankbit.zones.extrema's gamma_band/delta_band
+        # and forecast3.per_leg_greeks(), so this page can never disagree
+        # with either on these numbers. r=0.0 throughout (per_leg_greeks'
+        # own default) to match every other Greek computed on this page —
+        # zones deliberately doesn't use the r=0.05 the combined-portfolio
+        # routes use.
         next_expiration = min(trades.mapped("expiration")) if trades else None
-        long_calls = trades.filtered(
-            lambda t: t.direction == "buy" and t.option_type == "call" and t.expiration == next_expiration
-        )
-        long_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_calls)
-        long_call_gamma_peak_index = int(np.argmax(long_call_gamma_curve))
-        long_call_gamma_peak_price = float(longs_obj.STs[long_call_gamma_peak_index])
-        long_call_gamma_peak_value = float(long_call_gamma_curve[long_call_gamma_peak_index])
+        next_expiration_trades = trades.filtered(lambda t: t.expiration == next_expiration)
+        legs = options.per_leg_greeks(longs_obj.STs, next_expiration_trades)
+        lc, lp, sc, sp = legs["long_call"], legs["long_put"], legs["short_call"], legs["short_put"]
 
-        long_puts = trades.filtered(
-            lambda t: t.direction == "buy" and t.option_type == "put" and t.expiration == next_expiration
-        )
-        long_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, long_puts)
-        long_put_gamma_peak_index = int(np.argmax(long_put_gamma_curve))
-        long_put_gamma_peak_price = float(longs_obj.STs[long_put_gamma_peak_index])
-        long_put_gamma_peak_value = float(long_put_gamma_curve[long_put_gamma_peak_index])
+        bcg_price, bcg_value = lc["gamma_price"], lc["gamma_value"]
+        bpg_price, bpg_value = lp["gamma_price"], lp["gamma_value"]
+        scg_price, scg_value = sc["gamma_price"], sc["gamma_value"]
+        spg_price, spg_value = sp["gamma_price"], sp["gamma_value"]
 
-        # Short positions carry negative gamma (portfolio_gamma's sign for
-        # "sell" is -1), so the relevant extremum is where the curve bottoms
-        # out (argmin), not peaks.
-        short_calls = trades.filtered(
-            lambda t: t.direction == "sell" and t.option_type == "call" and t.expiration == next_expiration
-        )
-        short_call_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_calls)
-        short_call_gamma_bottom_index = int(np.argmin(short_call_gamma_curve))
-        short_call_gamma_bottom_price = float(longs_obj.STs[short_call_gamma_bottom_index])
-        short_call_gamma_bottom_value = float(short_call_gamma_curve[short_call_gamma_bottom_index])
+        bcd_price, bcd_value = lc["delta_price"], lc["delta_value"]
+        bpd_price, bpd_value = lp["delta_price"], lp["delta_value"]
+        scd_price, scd_value = sc["delta_price"], sc["delta_value"]
+        spd_price, spd_value = sp["delta_price"], sp["delta_value"]
 
-        short_puts = trades.filtered(
-            lambda t: t.direction == "sell" and t.option_type == "put" and t.expiration == next_expiration
-        )
-        short_put_gamma_curve = gamma.portfolio_gamma(longs_obj.STs, short_puts)
-        short_put_gamma_bottom_index = int(np.argmin(short_put_gamma_curve))
-        short_put_gamma_bottom_price = float(longs_obj.STs[short_put_gamma_bottom_index])
-        short_put_gamma_bottom_value = float(short_put_gamma_curve[short_put_gamma_bottom_index])
+        bct_price, bct_value = lc["theta_price"], lc["theta_value"]
+        bpt_price, bpt_value = lp["theta_price"], lp["theta_value"]
+        sct_price, sct_value = sc["theta_price"], sc["theta_value"]
+        spt_price, spt_value = sp["theta_price"], sp["theta_value"]
 
-        # Delta-saturation asset prices - same options.delta_saturation_price()
-        # dankbit.zones.extrema's own delta_band uses, against this same
-        # next-expiry-only long_calls/long_puts/short_calls/short_puts, so
-        # this page can never disagree with delta_band on these 4 points.
-        # Calls saturate ITM at high S ('max' edge), puts at low S ('min'
-        # edge), independent of long/short.
-        long_call_delta_price = options.delta_saturation_price(
-            longs_obj.STs, long_calls, self.DELTA_SATURATION_FRACTION, "max")
-        long_put_delta_price = options.delta_saturation_price(
-            longs_obj.STs, long_puts, self.DELTA_SATURATION_FRACTION, "min")
-        short_call_delta_price = options.delta_saturation_price(
-            longs_obj.STs, short_calls, self.DELTA_SATURATION_FRACTION, "max")
-        short_put_delta_price = options.delta_saturation_price(
-            longs_obj.STs, short_puts, self.DELTA_SATURATION_FRACTION, "min")
-
-        # Portfolio-delta value at each saturation price above — interpolated
-        # off the same curve delta_saturation_price() searches (rather than
-        # just DELTA_SATURATION_FRACTION * the curve's own edge value), so
-        # the fallback case (curve never reaches the 90% threshold in this
-        # window, saturation price falls back to the STs edge) still reports
-        # the real value at that price instead of a threshold never reached.
-        long_call_delta_value = float(np.interp(
-            long_call_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, long_calls)))
-        long_put_delta_value = float(np.interp(
-            long_put_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, long_puts)))
-        short_call_delta_value = float(np.interp(
-            short_call_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, short_calls)))
-        short_put_delta_value = float(np.interp(
-            short_put_delta_price, longs_obj.STs, delta.portfolio_delta(longs_obj.STs, short_puts)))
-
-        # Price where each leg's portfolio theta is most extreme over the
-        # same zoomed price grid gamma/delta use — mirroring gamma's
-        # peak/bottom pattern, but sign-flipped: long positions carry
-        # negative theta (decay cost), so their extremum is the trough
-        # (argmin, worst decay); short positions carry positive theta
-        # (decay gain), so theirs is the peak (argmax, best decay). r=0.0
-        # to match every other Greek computed on this page (see delta/gamma
-        # above — zones deliberately doesn't use the r=0.05 the
-        # combined-portfolio routes use).
-        long_call_theta_curve = theta.portfolio_theta(longs_obj.STs, long_calls)
-        long_call_theta_index = int(np.argmin(long_call_theta_curve))
-        long_call_theta_price = float(longs_obj.STs[long_call_theta_index])
-        long_call_theta_value = float(long_call_theta_curve[long_call_theta_index])
-
-        long_put_theta_curve = theta.portfolio_theta(longs_obj.STs, long_puts)
-        long_put_theta_index = int(np.argmin(long_put_theta_curve))
-        long_put_theta_price = float(longs_obj.STs[long_put_theta_index])
-        long_put_theta_value = float(long_put_theta_curve[long_put_theta_index])
-
-        short_call_theta_curve = theta.portfolio_theta(longs_obj.STs, short_calls)
-        short_call_theta_index = int(np.argmax(short_call_theta_curve))
-        short_call_theta_price = float(longs_obj.STs[short_call_theta_index])
-        short_call_theta_value = float(short_call_theta_curve[short_call_theta_index])
-
-        short_put_theta_curve = theta.portfolio_theta(longs_obj.STs, short_puts)
-        short_put_theta_index = int(np.argmax(short_put_theta_curve))
-        short_put_theta_price = float(longs_obj.STs[short_put_theta_index])
-        short_put_theta_value = float(short_put_theta_curve[short_put_theta_index])
-
-        # Price where each leg's portfolio vega is most extreme, same
-        # peak/bottom split as gamma (not theta's flipped one): vega has no
-        # call/put distinction and is always positive for a long option,
-        # always negative for a short one (see vega.py), so long legs peak
-        # (argmax) and short legs bottom out (argmax) — mirroring gamma's
-        # sign convention exactly. Same next-expiry-only long_calls/
-        # long_puts/short_calls/short_puts and r=0.0 as gamma/delta/theta
-        # above.
-        long_call_vega_curve = vega.portfolio_vega(longs_obj.STs, long_calls)
-        long_call_vega_index = int(np.argmax(long_call_vega_curve))
-        long_call_vega_price = float(longs_obj.STs[long_call_vega_index])
-        long_call_vega_value = float(long_call_vega_curve[long_call_vega_index])
-
-        long_put_vega_curve = vega.portfolio_vega(longs_obj.STs, long_puts)
-        long_put_vega_index = int(np.argmax(long_put_vega_curve))
-        long_put_vega_price = float(longs_obj.STs[long_put_vega_index])
-        long_put_vega_value = float(long_put_vega_curve[long_put_vega_index])
-
-        short_call_vega_curve = vega.portfolio_vega(longs_obj.STs, short_calls)
-        short_call_vega_index = int(np.argmin(short_call_vega_curve))
-        short_call_vega_price = float(longs_obj.STs[short_call_vega_index])
-        short_call_vega_value = float(short_call_vega_curve[short_call_vega_index])
-
-        short_put_vega_curve = vega.portfolio_vega(longs_obj.STs, short_puts)
-        short_put_vega_index = int(np.argmin(short_put_vega_curve))
-        short_put_vega_price = float(longs_obj.STs[short_put_vega_index])
-        short_put_vega_value = float(short_put_vega_curve[short_put_vega_index])
+        bcv_price, bcv_value = lc["vega_price"], lc["vega_value"]
+        bpv_price, bpv_value = lp["vega_price"], lp["vega_value"]
+        scv_price, scv_value = sc["vega_price"], sc["vega_value"]
+        spv_price, spv_value = sp["vega_price"], sp["vega_value"]
 
         # Each line is {text, color} — color is None for the default
         # (black) styling every line used before per-line colors were
@@ -398,36 +305,37 @@ class ChartController(http.Controller):
             return {"text": text, "color": color}
 
         zone_info_lines = [
-            _line("Short Max: ${:,.0f}".format(summary["short_max_price"])),
-            _line("Long Min: ${:,.0f}".format(summary["long_min_price"])),
+            _line("Seller Max Profit (SMP): ${:,.0f}".format(summary["seller_max_profit"])),
+            _line("Buyer Max Loss (BML): ${:,.0f}".format(summary["buyer_max_loss"])),
             _line(" "),  # blank spacer line — a truly empty div collapses to zero height
-            _line(f"Top Box: {top_box}"),
-            _line(f"Bottom Box: {bottom_box}"),
+            _line(f"High Zone: {high_zone}"),
+            _line(f"Low Zone: {low_zone}"),
+            _line(f"Middle Zone: {middle_zone}"),
             _line(" "),
-            _line(f"Top Intersection: {top_intersection}"),
-            _line(f"Bottom Intersection: {bottom_intersection}"),
+            _line(f"High/Resistance: {high_resistance}"),
+            _line(f"Low/Support: {low_support}"),
             _line(" "),
             _line("Gamma", color="violet"),
-            _line("Long Call Gamma Peak: ${:,.0f}".format(long_call_gamma_peak_price)),
-            _line("Long Put Gamma Peak: ${:,.0f}".format(long_put_gamma_peak_price)),
-            _line("Short Call Gamma Bottom: ${:,.0f}".format(short_call_gamma_bottom_price)),
-            _line("Short Put Gamma Bottom: ${:,.0f}".format(short_put_gamma_bottom_price)),
+            _line("Buyer Call Gamma (BCG): ${:,.0f}".format(bcg_price)),
+            _line("Buyer Put Gamma (BPG): ${:,.0f}".format(bpg_price)),
+            _line("Seller Call Gamma (SCG): ${:,.0f}".format(scg_price)),
+            _line("Seller Put Gamma (SPG): ${:,.0f}".format(spg_price)),
             _line(" "),
-            _line("Long Call Gamma Peak Value: {:,.0f}".format(abs(long_call_gamma_peak_value) / 1_000_000)),
-            _line("Long Put Gamma Peak Value: {:,.0f}".format(abs(long_put_gamma_peak_value) / 1_000_000)),
-            _line("Short Call Gamma Bottom Value: {:,.0f}".format(abs(short_call_gamma_bottom_value) / 1_000_000)),
-            _line("Short Put Gamma Bottom Value: {:,.0f}".format(abs(short_put_gamma_bottom_value) / 1_000_000)),
+            _line("BCG Abs.: {:,.0f}".format(abs(bcg_value) / 1_000_000)),
+            _line("BPG Abs.: {:,.0f}".format(abs(bpg_value) / 1_000_000)),
+            _line("SCG Abs.: {:,.0f}".format(abs(scg_value) / 1_000_000)),
+            _line("SPG Abs.: {:,.0f}".format(abs(spg_value) / 1_000_000)),
             _line(" "),
             _line("Delta", color="green"),
-            _line("Long Call Delta: ${:,.0f}".format(long_call_delta_price)),
-            _line("Long Put Delta: ${:,.0f}".format(long_put_delta_price)),
-            _line("Short Call Delta: ${:,.0f}".format(short_call_delta_price)),
-            _line("Short Put Delta: ${:,.0f}".format(short_put_delta_price)),
+            _line("Buyer Call Delta (BCD): ${:,.0f}".format(bcd_price)),
+            _line("Buyer Put Delta (BPD): ${:,.0f}".format(bpd_price)),
+            _line("Seller Call Delta (SCD): ${:,.0f}".format(scd_price)),
+            _line("Seller Put Delta (SPD): ${:,.0f}".format(spd_price)),
             _line(" "),
-            _line("Long Call Delta Value: {:,.0f}".format(abs(long_call_delta_value) / 10)),
-            _line("Long Put Delta Value: {:,.0f}".format(abs(long_put_delta_value) / 10)),
-            _line("Short Call Delta Value: {:,.0f}".format(abs(short_call_delta_value) / 10)),
-            _line("Short Put Delta Value: {:,.0f}".format(abs(short_put_delta_value) / 10)),
+            _line("BCD Abs.: {:,.0f}".format(abs(bcd_value) / 10)),
+            _line("BPD Abs.: {:,.0f}".format(abs(bpd_value) / 10)),
+            _line("SCD Abs.: {:,.0f}".format(abs(scd_value) / 10)),
+            _line("SPD Abs.: {:,.0f}".format(abs(spd_value) / 10)),
         ]
 
         # Theta and Vega get their own top-right overlay (see
@@ -435,31 +343,31 @@ class ChartController(http.Controller):
         # top-left zone_info_lines column with everything else.
         right_info_lines = [
             _line("Theta", color="orange"),
-            _line("Long Call Theta: ${:,.0f}".format(long_call_theta_price)),
-            _line("Long Put Theta: ${:,.0f}".format(long_put_theta_price)),
-            _line("Short Call Theta: ${:,.0f}".format(short_call_theta_price)),
-            _line("Short Put Theta: ${:,.0f}".format(short_put_theta_price)),
+            _line("Buyer Call Theta (BCT): ${:,.0f}".format(bct_price)),
+            _line("Buyer Put Theta (BPT): ${:,.0f}".format(bpt_price)),
+            _line("Seller Call Theta (SCT): ${:,.0f}".format(sct_price)),
+            _line("Seller Put Theta (SPT): ${:,.0f}".format(spt_price)),
             _line(" "),
-            _line("Long Call Theta Value: {:,.0f}".format(abs(long_call_theta_value) / 10_000)),
-            _line("Long Put Theta Value: {:,.0f}".format(abs(long_put_theta_value) / 10_000)),
-            _line("Short Call Theta Value: {:,.0f}".format(abs(short_call_theta_value) / 10_000)),
-            _line("Short Put Theta Value: {:,.0f}".format(abs(short_put_theta_value) / 10_000)),
+            _line("BCT Abs.: {:,.0f}".format(abs(bct_value) / 10_000)),
+            _line("BPT Abs.: {:,.0f}".format(abs(bpt_value) / 10_000)),
+            _line("SCT Abs.: {:,.0f}".format(abs(sct_value) / 10_000)),
+            _line("SPT Abs.: {:,.0f}".format(abs(spt_value) / 10_000)),
             _line(" "),
             _line("Vega", color="blue"),
-            _line("Long Call Vega: ${:,.0f}".format(long_call_vega_price)),
-            _line("Long Put Vega: ${:,.0f}".format(long_put_vega_price)),
-            _line("Short Call Vega: ${:,.0f}".format(short_call_vega_price)),
-            _line("Short Put Vega: ${:,.0f}".format(short_put_vega_price)),
+            _line("Buyer Call Vega (BCV): ${:,.0f}".format(bcv_price)),
+            _line("Buyer Put Vega (BPV): ${:,.0f}".format(bpv_price)),
+            _line("Seller Call Vega (SCV): ${:,.0f}".format(scv_price)),
+            _line("Seller Put Vega (SPV): ${:,.0f}".format(spv_price)),
             _line(" "),
             # Raw portfolio-vega values sit in the low thousands here — an
             # order of magnitude below theta's ten-thousands and well above
             # delta's tens — so /100 keeps these in the same easy-to-copy
             # 2-3 digit range as the other Value lines (see gamma's /1e6,
             # theta's /1e4, delta's /10 above).
-            _line("Long Call Vega Value: {:,.0f}".format(abs(long_call_vega_value) / 100)),
-            _line("Long Put Vega Value: {:,.0f}".format(abs(long_put_vega_value) / 100)),
-            _line("Short Call Vega Value: {:,.0f}".format(abs(short_call_vega_value) / 100)),
-            _line("Short Put Vega Value: {:,.0f}".format(abs(short_put_vega_value) / 100)),
+            _line("BCV Abs.: {:,.0f}".format(abs(bcv_value) / 100)),
+            _line("BPV Abs.: {:,.0f}".format(abs(bpv_value) / 100)),
+            _line("SCV Abs.: {:,.0f}".format(abs(scv_value) / 100)),
+            _line("SPV Abs.: {:,.0f}".format(abs(spv_value) / 100)),
         ]
 
         return request.render(
@@ -482,7 +390,7 @@ class ChartController(http.Controller):
     # own delta_band) that locates the green marker line: calls saturate ITM
     # at high S, puts at low S, independent of long/short — each leg's own
     # sign is inherited automatically from its curve's value at that edge.
-    DELTA_SATURATION_FRACTION = 0.9
+    DELTA_SATURATION_FRACTION = options.DELTA_SATURATION_FRACTION
     _LEG_ROUTES = {
         "lp": {"direction": "buy", "option_type": "put", "method": "long_put", "label": "Long Puts",
                "saturation_fraction": DELTA_SATURATION_FRACTION, "saturation_side": "min"},
@@ -1373,8 +1281,7 @@ class ChartController(http.Controller):
         (expiration >= NOW() only, no cutoff), optionally restricted to the
         trailing `hours` hours of trades — the shared computation behind
         gamma_levels_all_json (Gamma Chart's "Universal"/"Universal 24h"
-        lines) and forecast_json's gamma-level steering (Forecast 1).
-        Returns (peaks, bottoms, trade_count), each peak/bottom a
+        lines). Returns (peaks, bottoms, trade_count), each peak/bottom a
         {"price", "delta_positive"} dict, or (None, None, 0) for an unknown
         asset."""
         icp = request.env["ir.config_parameter"].sudo()
@@ -1484,8 +1391,8 @@ class ChartController(http.Controller):
 
         cr = request.env.cr
         cr.execute("""
-            SELECT instrument, index_price, top_intersection, bottom_intersection,
-                   top_intersection_positive, bottom_intersection_positive, gamma_band, delta_band
+            SELECT instrument, index_price, high_resistance, low_support,
+                   high_resistance_positive, low_support_positive, gamma_band, delta_band
             FROM dankbit_zones_extrema
             WHERE asset = %s
         """, (asset,))
@@ -1504,8 +1411,8 @@ class ChartController(http.Controller):
 
         series = []
         for (
-            instrument, index_price, top_intersection, bottom_intersection,
-            top_intersection_positive, bottom_intersection_positive, gamma_band, delta_band,
+            instrument, index_price, high_resistance, low_support,
+            high_resistance_positive, low_support_positive, gamma_band, delta_band,
         ) in rows:
             expiration = expiry_by_instrument.get(instrument)
             if not expiration:
@@ -1516,13 +1423,13 @@ class ChartController(http.Controller):
             series.append({
                 "t": int(ts.timestamp() * 1000),
                 "index_price": float(index_price or 0.0),
-                "top_intersection": float(top_intersection or 0.0),
-                "bottom_intersection": float(bottom_intersection or 0.0),
+                "high_resistance": float(high_resistance or 0.0),
+                "low_support": float(low_support or 0.0),
                 # Whether the payoff at that intersection sits above/below
                 # the zero line — drives the +/- marker on the chart, not
                 # the point's own price/position.
-                "top_intersection_positive": bool(top_intersection_positive),
-                "bottom_intersection_positive": bool(bottom_intersection_positive),
+                "high_resistance_positive": bool(high_resistance_positive),
+                "low_support_positive": bool(low_support_positive),
                 "gamma_band": float(gamma_band or 0.0),
                 "delta_band": float(delta_band or 0.0),
             })
@@ -1545,8 +1452,8 @@ class ChartController(http.Controller):
         not read from stored history: nothing reads box-boundary history,
         only the latest value is ever drawn, so those 4 fields are never
         persisted. As a side effect, get_box() does upsert that instrument's
-        zones-extrema record (index_price/top_intersection/
-        bottom_intersection) on every call — piggybacking the per-expiry
+        zones-extrema record (index_price/high_resistance/
+        low_support) on every call — piggybacking the per-expiry
         history this endpoint's own polling interval instead of a separate
         cron (see dankbit.zones.extrema._persist_extrema) — UNLESS an
         explicit `?hours=` override is given, in which case get_box()
@@ -1581,8 +1488,8 @@ class ChartController(http.Controller):
                 "long_zero_above_price": float(data["long_zero_above_price"]),
                 "short_zero_below_price": float(data["short_zero_below_price"]),
                 "long_zero_below_price": float(data["long_zero_below_price"]),
-                "short_max_price": float(data["short_max_price"]),
-                "long_min_price": float(data["long_min_price"]),
+                "seller_max_profit": float(data["seller_max_profit"]),
+                "buyer_max_loss": float(data["buyer_max_loss"]),
             }
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
         return request.make_response(
@@ -1716,166 +1623,6 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/forecast/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def forecast_json(self, asset, **kw):
-        """2-day-ahead price forecast — one simulated GBM price path (see
-        forecast.simulate_path) seeded by the trailing-24h amount-weighted
-        average IV across `asset`'s trades, computed the same way
-        gamma_levels_json aggregates IV (SUM(iv*amount)/NULLIF(SUM(amount),0)).
-        The path carries no assumed drift beyond mean-reversion toward the
-        nearest gamma peak/bottom (see below) — it isn't a directional call,
-        just one randomly sampled realization consistent with the market's
-        own implied volatility. `seed` is derived from the current UTC hour
-        (not true randomness) so the path stays stable between polls within
-        the same hour rather than jittering on every REFRESH tick, and only
-        moves on to a new realization once new IV data rolls in. Candles are
-        4h by default (see simulate_path — matches the TradingView chart's
-        4h timeframe, the only one that fetches/draws this; the endpoint
-        itself doesn't know or care which timeframe the caller is on).
-        `points` is empty when there's no index price or no trades in the
-        trailing 24h to estimate a volatility from.
-
-        Steered by `_gamma_peaks_bottoms_all(asset, hours=24)` — the same
-        trailing-24h, all-expiries gamma peaks/bottoms the Gamma Chart's
-        "Universal 24h" line draws — via `forecast.simulate_path_with_levels`
-        with no barriers, just a reversion center: the single nearest level
-        to `index_price` among peaks above it (resistance) and bottoms below
-        it (support). Falls back to the plain unguided `simulate_path` when
-        no such level exists (e.g. every peak is already below price and
-        every bottom already above it, or there's no trailing-24h trade at
-        all to compute a curve from)."""
-        asset = asset.upper()
-        if asset not in ("BTC", "ETH"):
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        index_price = request.env["dankbit.trade"].get_index_price(asset)
-
-        cr = request.env.cr
-        cr.execute("""
-            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND deribit_ts >= NOW() - INTERVAL '24 hours'
-        """, (f"{asset}-%",))
-        avg_iv, trade_count = cr.fetchone()
-        sigma_annual = float(avg_iv) / 100.0 if avg_iv else None
-
-        gamma_level = None
-        if index_price:
-            peaks, bottoms, _ = self._gamma_peaks_bottoms_all(asset, hours=24)
-            candidates = [p["price"] for p in (peaks or []) if p["price"] > index_price]
-            candidates += [b["price"] for b in (bottoms or []) if b["price"] < index_price]
-            if candidates:
-                gamma_level = min(candidates, key=lambda px: abs(px - index_price))
-
-        points = []
-        if index_price and sigma_annual:
-            now = datetime.now(timezone.utc)
-            now_ms = int(now.timestamp() * 1000)
-            seed = int(now.timestamp() // 3600) + (0 if asset == "BTC" else 1)
-            if gamma_level:
-                path = forecast.simulate_path_with_levels(
-                    index_price, sigma_annual, None, None, gamma_level, seed=seed,
-                )
-            else:
-                path = forecast.simulate_path(index_price, sigma_annual, seed=seed)
-            for p in path:
-                points.append({
-                    "t": now_ms + int(p["hours"] * 3600 * 1000),
-                    "open": p["open"],
-                    "high": p["high"],
-                    "low": p["low"],
-                    "close": p["close"],
-                })
-
-        payload = {
-            "asset": asset,
-            "index_price": index_price,
-            "sigma_annual": sigma_annual,
-            "trade_count": int(trade_count or 0),
-            "gamma_level": gamma_level,
-            "points": points,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
-    @http.route("/api/forecast2/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def forecast2_json(self, asset, **kw):
-        """"Forecast 2" — same GBM path as forecast_json, but additionally
-        steered by the Zones Extrema levels the plain forecast ignores:
-        pulled toward gamma_band and softly reflected off
-        top_intersection/bottom_intersection (see
-        forecast.simulate_path_with_levels), using
-        dankbit.zones.extrema.get_levels() for asset's nearest tracked
-        instrument — the same numbers currently drawn as the Top/Bottom
-        Intersection and Gamma Band lines. Shares forecast_json's index
-        price, IV, and hour-seed (so the two paths use the exact same
-        random draws and differ only in the added mean-reversion/barrier
-        terms, making them directly comparable). `points` is empty when
-        there's no index price, no trailing-24h trades to estimate
-        volatility from, or no persisted levels yet for this asset's
-        nearest instrument."""
-        asset = asset.upper()
-        if asset not in ("BTC", "ETH"):
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        index_price = request.env["dankbit.trade"].get_index_price(asset)
-
-        cr = request.env.cr
-        cr.execute("""
-            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND deribit_ts >= NOW() - INTERVAL '24 hours'
-        """, (f"{asset}-%",))
-        avg_iv, trade_count = cr.fetchone()
-        sigma_annual = float(avg_iv) / 100.0 if avg_iv else None
-
-        levels = request.env["dankbit.zones.extrema"].get_levels(asset)
-
-        points = []
-        if index_price and sigma_annual and levels and levels["gamma_band"]:
-            now = datetime.now(timezone.utc)
-            now_ms = int(now.timestamp() * 1000)
-            seed = int(now.timestamp() // 3600) + (0 if asset == "BTC" else 1)
-            top = levels["top_intersection"] or None
-            bottom = levels["bottom_intersection"] or None
-            for p in forecast.simulate_path_with_levels(
-                index_price, sigma_annual, top, bottom, levels["gamma_band"], seed=seed,
-            ):
-                points.append({
-                    "t": now_ms + int(p["hours"] * 3600 * 1000),
-                    "open": p["open"],
-                    "high": p["high"],
-                    "low": p["low"],
-                    "close": p["close"],
-                })
-
-        payload = {
-            "asset": asset,
-            "index_price": index_price,
-            "sigma_annual": sigma_annual,
-            "trade_count": int(trade_count or 0),
-            "top_intersection": levels["top_intersection"] if levels else None,
-            "bottom_intersection": levels["bottom_intersection"] if levels else None,
-            "gamma_band": levels["gamma_band"] if levels else None,
-            "points": points,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
     _FORECAST3_SNAPSHOT_FIELDS = [
         "top", "low", "bml", "smp",
         "bcg_price", "bpg_price", "scg_price", "spg_price",
@@ -1886,7 +1633,6 @@ class ChartController(http.Controller):
         "bct_abs", "bpt_abs", "sct_abs", "spt_abs",
         "bcv_price", "bpv_price", "scv_price", "spv_price",
         "bcv_abs", "bpv_abs", "scv_abs", "spv_abs",
-        "lower_liq_price", "lower_liq_m", "upper_liq_price", "upper_liq_m",
     ]
 
     def _snapshot_to_dict(self, record):
@@ -1897,6 +1643,101 @@ class ChartController(http.Controller):
         data = {f: getattr(record, f) for f in self._FORECAST3_SNAPSHOT_FIELDS}
         data["bucket_epoch"] = record.bucket_start.replace(tzinfo=timezone.utc).timestamp()
         return data
+
+    def _forecast3_cfg(self):
+        """Reads res.config.settings' "Thales Forecast" section into a cfg
+        dict + a dict of horizon kwargs, for forecast3.simulate_forecast3.
+        Falls back to that function's own hardcoded defaults (repeated here
+        verbatim) for any setting left unset — same default-in-the-reading-
+        code convention every other dankbit.* config_parameter uses in this
+        addon (see res_config_settings.py)."""
+        icp = request.env["ir.config_parameter"].sudo()
+
+        def f(key, default):
+            return float(icp.get_param(f"dankbit.{key}", default))
+
+        cfg = {}
+        cfg["GAMMA_CENTER_WEIGHT"] = f("forecast3_gamma_center_weight", 0.70)
+        cfg["CURVE_CENTER_WEIGHT"] = f("forecast3_curve_center_weight", 0.20)
+        cfg["THETA_CENTER_WEIGHT"] = f("forecast3_theta_center_weight", 0.10)
+        cfg["FORECAST_PULL_FACTOR"] = f("forecast3_pull_factor", 0.55)
+        cfg["FORECAST_SLOPE_FACTOR"] = f("forecast3_slope_factor", 0.35)
+        cfg["FORECAST_BODY_FACTOR"] = f("forecast3_body_factor", 0.3)
+        cfg["FORECAST_CURVE_EXTREME_BODY_WEIGHT"] = f("forecast3_curve_extreme_body_weight", 0.26)
+        cfg["FORECAST_WICK_FACTOR"] = f("forecast3_wick_factor", 0.35)
+        cfg["FORECAST_ATR_FACTOR"] = f("forecast3_atr_factor", 0.3)
+        cfg["FORECAST_CURVE_WICK_WEIGHT"] = f("forecast3_curve_wick_weight", 0.42)
+        cfg["GAMMA_BAND_OPPOSITE_WICK_COMPRESSION"] = f("forecast3_gb_opposite_wick_compression", 0.18)
+        cfg["GAMMA_BAND_CONFIRMED_TARGET_BOOST"] = f("forecast3_gb_confirmed_target_boost", 0.55)
+        cfg["GAMMA_BAND_CONFIDENCE_BOOST"] = f("forecast3_gb_confidence_boost", 0.2)
+        cfg["GAMMA_BAND_CONFLICT_BODY_DAMPING"] = f("forecast3_gb_conflict_body_damping", 0.3)
+        cfg["GAMMA_BAND_CONFLICT_WICK_EXPANSION"] = f("forecast3_gb_conflict_wick_expansion", 0.25)
+        cfg["GAMMA_BAND_OPPOSING_MAGNET_DAMPING"] = f("forecast3_gb_opposing_magnet_damping", 0.6)
+        cfg["GAMMA_BAND_TREND_LOCK_STRENGTH"] = f("forecast3_gb_trend_lock_strength", 0.55)
+        cfg["GAMMA_BAND_COUNTER_BODY_DAMPING"] = f("forecast3_gb_counter_body_damping", 0.18)
+        cfg["GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE"] = f("forecast3_gb_counter_max_opp_impulse", 0.03)
+        cfg["GAMMA_BAND_COUNTER_ESCAPE_ATR"] = f("forecast3_gb_counter_escape_atr", 0.95)
+        cfg["GAMMA_CONFIRM_BUFFER_PCT"] = f("forecast3_gamma_confirm_buffer_pct", 0.06)
+        cfg["CLUSTER_ALIGNMENT_THRESHOLD"] = f("forecast3_cluster_alignment_threshold", 0.6)
+        cfg["CLUSTER_BODY_CONFIDENCE_FLOOR"] = f("forecast3_cluster_body_confidence_floor", 0.58)
+        cfg["CLUSTER_COMPRESSED_THRESHOLD"] = f("forecast3_cluster_compressed_threshold", 0.18)
+        cfg["CLUSTER_COMPRESSION_BODY_DAMPING"] = f("forecast3_cluster_compression_body_damping", 0.15)
+        cfg["CLUSTER_COMPRESSION_WICK_COMPRESSION"] = f("forecast3_cluster_compression_wick_compression", 0.3)
+        cfg["CLUSTER_EXPANSION_THRESHOLD"] = f("forecast3_cluster_expansion_threshold", 0.025)
+        cfg["LIQUIDITY_ALIGNED_WICK_COMPRESSION"] = f("forecast3_liquidity_aligned_wick_compression", 0.25)
+        cfg["LIQUIDITY_BODY_CONFIDENCE_FLOOR"] = f("forecast3_liquidity_body_confidence_floor", 0.6)
+        cfg["LIQUIDITY_OPPOSITE_WICK_COMPRESSION"] = f("forecast3_liquidity_opposite_wick_compression", 0.35)
+        cfg["LIQUIDITY_SWEEP_WICK_COMPRESSION"] = f("forecast3_liquidity_sweep_wick_compression", 0.7)
+        cfg["MOMENTUM_BODY_CONFIDENCE_FLOOR"] = f("forecast3_momentum_body_confidence_floor", 0.62)
+        cfg["MOMENTUM_WICK_COMPRESSION"] = f("forecast3_momentum_wick_compression", 0.75)
+        cfg["NEAR_GAMMA_BODY_DAMPING"] = f("forecast3_near_gamma_body_damping", 0.4)
+        cfg["NEAR_GAMMA_WICK_EXPANSION"] = f("forecast3_near_gamma_wick_expansion", 0.25)
+        cfg["HIGH_VOL_PULL_FACTOR"] = f("forecast3_high_vol_pull_factor", 1.05)
+        cfg["LOW_VOL_PULL_FACTOR"] = f("forecast3_low_vol_pull_factor", 0.75)
+        cfg["WEEKDAY_PULL_FACTOR"] = f("forecast3_weekday_pull_factor", 1.0)
+        cfg["HIGH_VOL_SHOCK_FACTOR"] = f("forecast3_high_vol_shock_factor", 1.1)
+        cfg["LOW_VOL_SHOCK_FACTOR"] = f("forecast3_low_vol_shock_factor", 0.7)
+        cfg["WEEKDAY_SHOCK_FACTOR"] = f("forecast3_weekday_shock_factor", 1.0)
+        cfg["WEEKEND_ATR_FACTOR"] = f("forecast3_weekend_atr_factor", 0.75)
+        cfg["WEEKEND_BODY_FACTOR"] = f("forecast3_weekend_body_factor", 0.65)
+        cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast3_weekend_shock_factor", 0.75)
+        cfg["BUCKET_HOURS_FALLBACK"] = f("forecast3_bucket_hours_fallback", 4.0)
+
+        cfg["SESSION_BODY_FACTOR"] = {
+            "Asia": f("session_body_asia", 0.7),
+            "London": f("session_body_london", 0.9),
+            "Overlap": f("session_body_overlap", 1.05),
+            "NY": f("session_body_ny", 0.95),
+            "PostNY": f("session_body_postny", 0.7),
+        }
+        cfg["SESSION_ATR_FACTOR"] = {
+            "Asia": f("session_atr_asia", 0.75),
+            "London": f("session_atr_london", 0.95),
+            "Overlap": f("session_atr_overlap", 1.1),
+            "NY": f("session_atr_ny", 1.0),
+            "PostNY": f("session_atr_postny", 0.75),
+        }
+        cfg["SESSION_SHOCK_FACTOR"] = {
+            "Asia": f("session_shock_asia", 0.65),
+            "London": f("session_shock_london", 0.95),
+            "Overlap": f("session_shock_overlap", 1.1),
+            "NY": f("session_shock_ny", 1.0),
+            "PostNY": f("session_shock_postny", 0.65),
+        }
+        cfg["SESSION_FIRST_MOVE_ATR"] = {
+            "Asia": f("session_firstmove_asia", 0.35),
+            "London": f("session_firstmove_london", 0.55),
+            "Overlap": f("session_firstmove_overlap", 0.75),
+            "NY": f("session_firstmove_ny", 0.6),
+            "PostNY": f("session_firstmove_postny", 0.35),
+        }
+
+        horizon = {
+            "hours_ahead": int(icp.get_param("dankbit.forecast3_hours_ahead", 72)),
+            "step_hours": int(icp.get_param("dankbit.forecast3_step_hours", 4)),
+            "start_offset_hours": int(icp.get_param("dankbit.forecast3_start_offset_hours", 4)),
+        }
+        return cfg, horizon
 
     @http.route("/api/forecast3/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def forecast3_json(self, asset, **kw):
@@ -1946,7 +1787,8 @@ class ChartController(http.Controller):
 
             now = datetime.now(timezone.utc)
             now_ms = int(now.timestamp() * 1000)
-            for p in forecast3.simulate_forecast3(index_price, sigma_annual, current, history, candles):
+            cfg, horizon = self._forecast3_cfg()
+            for p in forecast3.simulate_forecast3(index_price, sigma_annual, current, history, candles, cfg=cfg, **horizon):
                 points.append({
                     "t": now_ms + int(p["hours"] * 3600 * 1000),
                     "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
@@ -1989,6 +1831,14 @@ class ChartController(http.Controller):
         show_weekly_lines = "true" if icp.get_param("dankbit.show_weekly_lines", default="True") == "True" else "false"
         show_monthly_lines = "true" if icp.get_param("dankbit.show_monthly_lines", default="True") == "True" else "false"
 
+        # Thales Forecast candle colors — rendering-only, read here (not
+        # _forecast3_cfg) since they only affect the client-side
+        # forecast3Series, not simulate_forecast3()'s own math.
+        forecast3_up_color = icp.get_param("dankbit.forecast3_up_color", default="#a5d6a7")
+        forecast3_down_color = icp.get_param("dankbit.forecast3_down_color", default="#ef9a9a")
+        forecast3_wick_up_color = icp.get_param("dankbit.forecast3_wick_up_color", default="#66bb6a")
+        forecast3_wick_down_color = icp.get_param("dankbit.forecast3_wick_down_color", default="#e57373")
+
         if asset.startswith("ETH"):
             weekly_param = "dankbit.eth_weekly_expiry"
             monthly_param = "dankbit.eth_monthly_expiry"
@@ -2021,6 +1871,10 @@ class ChartController(http.Controller):
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,
             "show_gamma_point": "false",
+            "forecast3_up_color": forecast3_up_color,
+            "forecast3_down_color": forecast3_down_color,
+            "forecast3_wick_up_color": forecast3_wick_up_color,
+            "forecast3_wick_down_color": forecast3_wick_down_color,
         }, None
 
     @http.route("/chart/<string:asset>", type="http", auth="public", website=True)

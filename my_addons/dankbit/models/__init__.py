@@ -2,7 +2,6 @@
 
 from . import trade
 from . import zones_extrema
-from . import liquidity_snapshot
 from . import forecast3_snapshot
 from . import res_config_settings
 from . import http_log

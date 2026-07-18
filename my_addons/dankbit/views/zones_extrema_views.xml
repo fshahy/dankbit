@@ -8,17 +8,66 @@
             <form string="Zones Extrema">
                 <sheet>
                     <group>
+                        <field name="computed_at" />
                         <field name="asset" />
                         <field name="instrument" />
                         <field name="index_price" />
-                        <field name="top_intersection" />
-                        <field name="top_intersection_positive" />
-                        <field name="bottom_intersection" />
-                        <field name="bottom_intersection_positive" />
+                        <field name="high_resistance" />
+                        <field name="high_resistance_positive" />
+                        <field name="low_support" />
+                        <field name="low_support_positive" />
                         <field name="gamma_band" />
                         <field name="delta_band" />
-                        <field name="short_max_price" />
-                        <field name="long_min_price" />
+                        <field name="seller_max_profit" />
+                        <field name="buyer_max_loss" />
+                    </group>
+                    <group string="Zones">
+                        <field name="high_zone_min" />
+                        <field name="high_zone_max" />
+                        <field name="low_zone_min" />
+                        <field name="low_zone_max" />
+                        <field name="middle_zone_min" />
+                        <field name="middle_zone_max" />
+                    </group>
+                    <group string="Gamma">
+                        <field name="bcg_price" />
+                        <field name="bcg_abs" />
+                        <field name="bpg_price" />
+                        <field name="bpg_abs" />
+                        <field name="scg_price" />
+                        <field name="scg_abs" />
+                        <field name="spg_price" />
+                        <field name="spg_abs" />
+                    </group>
+                    <group string="Delta">
+                        <field name="bcd_price" />
+                        <field name="bcd_abs" />
+                        <field name="bpd_price" />
+                        <field name="bpd_abs" />
+                        <field name="scd_price" />
+                        <field name="scd_abs" />
+                        <field name="spd_price" />
+                        <field name="spd_abs" />
+                    </group>
+                    <group string="Theta">
+                        <field name="bct_price" />
+                        <field name="bct_abs" />
+                        <field name="bpt_price" />
+                        <field name="bpt_abs" />
+                        <field name="sct_price" />
+                        <field name="sct_abs" />
+                        <field name="spt_price" />
+                        <field name="spt_abs" />
+                    </group>
+                    <group string="Vega">
+                        <field name="bcv_price" />
+                        <field name="bcv_abs" />
+                        <field name="bpv_price" />
+                        <field name="bpv_abs" />
+                        <field name="scv_price" />
+                        <field name="scv_abs" />
+                        <field name="spv_price" />
+                        <field name="spv_abs" />
                     </group>
                 </sheet>
             </form>
@@ -30,17 +79,58 @@
         <field name="model">dankbit.zones.extrema</field>
         <field name="arch" type="xml">
             <list string="Zones Extrema">
+                <field name="computed_at" />
                 <field name="asset" />
                 <field name="instrument" />
                 <field name="index_price" />
-                <field name="top_intersection" />
-                <field name="top_intersection_positive" />
-                <field name="bottom_intersection" />
-                <field name="bottom_intersection_positive" />
+                <field name="high_resistance" />
+                <field name="high_resistance_positive" />
+                <field name="low_support" />
+                <field name="low_support_positive" />
                 <field name="gamma_band" />
                 <field name="delta_band" />
-                <field name="short_max_price" />
-                <field name="long_min_price" />
+                <field name="seller_max_profit" />
+                <field name="buyer_max_loss" />
+                <!-- Hidden by default (too many columns to show all at once) —
+                     available via the list view's column-picker dropdown. -->
+                <field name="high_zone_min" optional="hide" />
+                <field name="high_zone_max" optional="hide" />
+                <field name="low_zone_min" optional="hide" />
+                <field name="low_zone_max" optional="hide" />
+                <field name="middle_zone_min" optional="hide" />
+                <field name="middle_zone_max" optional="hide" />
+                <field name="bcg_price" optional="hide" />
+                <field name="bcg_abs" optional="hide" />
+                <field name="bpg_price" optional="hide" />
+                <field name="bpg_abs" optional="hide" />
+                <field name="scg_price" optional="hide" />
+                <field name="scg_abs" optional="hide" />
+                <field name="spg_price" optional="hide" />
+                <field name="spg_abs" optional="hide" />
+                <field name="bcd_price" optional="hide" />
+                <field name="bcd_abs" optional="hide" />
+                <field name="bpd_price" optional="hide" />
+                <field name="bpd_abs" optional="hide" />
+                <field name="scd_price" optional="hide" />
+                <field name="scd_abs" optional="hide" />
+                <field name="spd_price" optional="hide" />
+                <field name="spd_abs" optional="hide" />
+                <field name="bct_price" optional="hide" />
+                <field name="bct_abs" optional="hide" />
+                <field name="bpt_price" optional="hide" />
+                <field name="bpt_abs" optional="hide" />
+                <field name="sct_price" optional="hide" />
+                <field name="sct_abs" optional="hide" />
+                <field name="spt_price" optional="hide" />
+                <field name="spt_abs" optional="hide" />
+                <field name="bcv_price" optional="hide" />
+                <field name="bcv_abs" optional="hide" />
+                <field name="bpv_price" optional="hide" />
+                <field name="bpv_abs" optional="hide" />
+                <field name="scv_price" optional="hide" />
+                <field name="scv_abs" optional="hide" />
+                <field name="spv_price" optional="hide" />
+                <field name="spv_abs" optional="hide" />
             </list>
         </field>
     </record>

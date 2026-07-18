@@ -11,6 +11,15 @@ from matplotlib.ticker import MultipleLocator
 import matplotlib.patheffects as path_effects
 
 from . import delta as delta_lib
+from . import gamma as gamma_lib
+from . import theta as theta_lib
+from . import vega as vega_lib
+
+# The fraction of a leg's own curve extreme delta_saturation_price() (below)
+# looks for — 90% of the way from ATM to fully saturated ITM. Single source
+# of truth: main.py's ChartController and forecast3.py both used to keep
+# their own separate copy of this same 0.9 value.
+DELTA_SATURATION_FRACTION = 0.9
 
 
 class OptionStrat:
@@ -310,34 +319,108 @@ def delta_saturation_price(STs, trades, fraction, stop_at):
     return float(STs[-1]) if stop_at == "max" else float(STs[0])
 
 
+# Which numpy extremum-finder each leg uses per Greek — long positions carry
+# positive gamma/vega (peak, argmax) and negative theta (decay cost, trough,
+# argmin); short positions carry negative gamma/vega (trough, argmin) and
+# positive theta (decay gain, peak, argmax). Delta has no argmax/argmin
+# split — delta_saturation_price() finds an interpolated price instead, at
+# the 'max' (high-S) edge for calls, 'min' (low-S) edge for puts, independent
+# of long/short (see that function's own docstring).
+_GAMMA_VEGA_ARGFN = {"long_call": np.argmax, "long_put": np.argmax, "short_call": np.argmin, "short_put": np.argmin}
+_THETA_ARGFN = {"long_call": np.argmin, "long_put": np.argmin, "short_call": np.argmax, "short_put": np.argmax}
+_DELTA_STOP_AT = {"long_call": "max", "long_put": "min", "short_call": "max", "short_put": "min"}
+
+
+def per_leg_greeks(STs, trades, r=0.0):
+    """For each of the 4 legs filtered from `trades` (long_call, long_put,
+    short_call, short_put — buy/sell x call/put), finds where that leg's own
+    portfolio gamma/theta/vega curve peaks or bottoms out, and the price
+    where its portfolio delta first saturates to DELTA_SATURATION_FRACTION
+    of its own extreme (see delta_saturation_price). Returns
+    {leg_name: {"trades": recordset, "gamma_price", "gamma_value",
+    "delta_price", "delta_value", "theta_price", "theta_value",
+    "vega_price", "vega_value"}} — raw (unscaled) prices and values; each
+    caller applies its own display scaling (e.g. the /<instrument>/zones
+    page's Value lines divide gamma/delta/theta/vega by 1e6/10/1e4/100,
+    forecast3.per_leg_greeks() does the same for its own *_abs fields).
+
+    Single source of truth for this computation — shared by chart_png_zones
+    (main.py), dankbit.zones.extrema's gamma_band/delta_band
+    (models/zones_extrema.py), and forecast3.per_leg_greeks()
+    (controllers/forecast3.py), so the three can never quietly compute
+    different numbers for the same trades. `trades` should already be
+    filtered to whichever expiry/time-window the caller cares about — this
+    function only splits by direction/option_type, nothing else."""
+    legs = {
+        "long_call": trades.filtered(lambda t: t.direction == "buy" and t.option_type == "call"),
+        "long_put": trades.filtered(lambda t: t.direction == "buy" and t.option_type == "put"),
+        "short_call": trades.filtered(lambda t: t.direction == "sell" and t.option_type == "call"),
+        "short_put": trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put"),
+    }
+
+    result = {}
+    for leg_name, leg_trades in legs.items():
+        gamma_curve = gamma_lib.portfolio_gamma(STs, leg_trades, r=r)
+        gamma_idx = int(_GAMMA_VEGA_ARGFN[leg_name](gamma_curve))
+        gamma_price, gamma_value = float(STs[gamma_idx]), float(gamma_curve[gamma_idx])
+
+        theta_curve = theta_lib.portfolio_theta(STs, leg_trades, r=r)
+        theta_idx = int(_THETA_ARGFN[leg_name](theta_curve))
+        theta_price, theta_value = float(STs[theta_idx]), float(theta_curve[theta_idx])
+
+        vega_curve = vega_lib.portfolio_vega(STs, leg_trades, r=r)
+        vega_idx = int(_GAMMA_VEGA_ARGFN[leg_name](vega_curve))
+        vega_price, vega_value = float(STs[vega_idx]), float(vega_curve[vega_idx])
+
+        delta_price = delta_saturation_price(STs, leg_trades, DELTA_SATURATION_FRACTION, _DELTA_STOP_AT[leg_name])
+        delta_value = float(np.interp(delta_price, STs, delta_lib.portfolio_delta(STs, leg_trades, r=r)))
+
+        result[leg_name] = {
+            "trades": leg_trades,
+            "gamma_price": gamma_price, "gamma_value": gamma_value,
+            "delta_price": delta_price, "delta_value": delta_value,
+            "theta_price": theta_price, "theta_value": theta_value,
+            "vega_price": vega_price, "vega_value": vega_value,
+        }
+    return result
+
+
 def zone_summary(STs, longs_curve, shorts_curve):
     """Same extrema/box-boundary definitions used by dankbit.zones.extrema
-    and the TradingView zones boxes: Shorts curve peak ("short_max_price"),
-    Longs curve bottom ("long_min_price"), and each curve's own highest/
-    lowest zero-crossing, giving a "top box" (the two curves' highest
-    crossings) and a "bottom box" (their lowest).
+    and the TradingView zones boxes: Shorts curve peak ("seller_max_profit"),
+    Longs curve bottom ("buyer_max_loss"), and each curve's own highest/
+    lowest zero-crossing, giving a "high zone" (the two curves' highest
+    crossings) and a "low zone" (their lowest).
 
     Current price is deliberately not a factor anywhere in this function —
-    same principle as top_intersection/bottom_intersection below: a box or
+    same principle as high_resistance/low_support below: a zone or
     intersection is a property of where the curves themselves cross zero
     (or each other), not of where the index price happens to sit relative
-    to them. `top_box`/`bottom_box` used to require a crossing on each
-    curve on the correct side of index_price, and silently returned None
-    otherwise — but "no crossing above/below current price" and "no
-    crossing at all" are different situations; the former discarded real
-    data. Now: any curve that has at least one crossing contributes its
-    max (to top_box) and min (to bottom_box), so a box can still form from
-    a single curve's data alone (a degenerate (price, price) pair) if the
-    other curve has none. Only truly empty (neither curve ever crosses
-    zero) yields None.
+    to them. `high_zone`/`low_zone` (renamed from top_box/bottom_box) used
+    to require a crossing on each curve on the correct side of index_price,
+    and silently returned None otherwise — but "no crossing above/below
+    current price" and "no crossing at all" are different situations; the
+    former discarded real data. Now: any curve that has at least one
+    crossing contributes its max (to high_zone) and min (to low_zone), so a
+    zone can still form from a single curve's data alone (a degenerate
+    (price, price) pair) if the other curve has none. Only truly empty
+    (neither curve ever crosses zero) yields None.
 
-    "top_intersection"/"bottom_intersection" are the highest/lowest price
+    "middle_zone" is the zone bounded by seller_max_profit and
+    buyer_max_loss (min/max of the two, since either can sit above the
+    other depending on the trades) — unlike high_zone/low_zone, always
+    defined, since seller_max_profit/buyer_max_loss are argmax/argmin
+    over the full curve and don't depend on a zero-crossing existing.
+
+    "high_resistance"/"low_support" (renamed from top_intersection/
+    bottom_intersection to match Thales's own Resistance/Support
+    terminology for this reference band) are the highest/lowest price
     where the Longs and Shorts curves cross each other (`longs_curve -
     shorts_curve` sign changes — the same crossings build_zone_curves()
     finds internally for its ±$2000 auto-zoom). Returns a dict; any of
     these is None if there's no crossing at all."""
-    short_max_price = float(STs[int(np.argmax(shorts_curve))])
-    long_min_price = float(STs[int(np.argmin(longs_curve))])
+    seller_max_profit = float(STs[int(np.argmax(shorts_curve))])
+    buyer_max_loss = float(STs[int(np.argmin(longs_curve))])
 
     short_crossings = find_zero_crossings(STs, shorts_curve)
     long_crossings = find_zero_crossings(STs, longs_curve)
@@ -349,12 +432,13 @@ def zone_summary(STs, longs_curve, shorts_curve):
     lvs_crossings = find_zero_crossings(STs, diff)
 
     return {
-        "short_max_price": short_max_price,
-        "long_min_price": long_min_price,
-        "top_box": (min(top_prices), max(top_prices)) if top_prices else None,
-        "bottom_box": (min(bottom_prices), max(bottom_prices)) if bottom_prices else None,
-        "top_intersection": max(lvs_crossings) if lvs_crossings else None,
-        "bottom_intersection": min(lvs_crossings) if lvs_crossings else None,
+        "seller_max_profit": seller_max_profit,
+        "buyer_max_loss": buyer_max_loss,
+        "high_zone": (min(top_prices), max(top_prices)) if top_prices else None,
+        "low_zone": (min(bottom_prices), max(bottom_prices)) if bottom_prices else None,
+        "middle_zone": (min(seller_max_profit, buyer_max_loss), max(seller_max_profit, buyer_max_loss)),
+        "high_resistance": max(lvs_crossings) if lvs_crossings else None,
+        "low_support": min(lvs_crossings) if lvs_crossings else None,
     }
 
 

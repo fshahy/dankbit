@@ -7,8 +7,8 @@ import numpy as np
 
 from odoo import fields, models
 
-from ..controllers import gamma as gamma_lib
 from ..controllers import options as options_lib
+from ..controllers import forecast3 as forecast3_lib
 
 _logger = logging.getLogger(__name__)
 
@@ -18,37 +18,121 @@ class ZonesExtrema(models.Model):
     _order = "instrument"
 
     # One record per instrument (e.g. "BTC-10JUL26"), not per snapshot — see
-    # _persist_extrema(). There is deliberately no computed_at/timestamp
-    # field: the record's position on the TradingView chart is that
-    # instrument's own expiration time (looked up from dankbit_trade.expiration
-    # when the API serves this data), not when a row was last written.
+    # _persist_extrema(). The record's position on the TradingView chart is
+    # still that instrument's own expiration time (looked up from
+    # dankbit_trade.expiration when the API serves this data), never this
+    # field — computed_at is for backend visibility only (e.g. "how stale is
+    # this row"), refreshed to the moment _compute_asset() ran on every
+    # _persist_extrema() upsert, not just when the row was first created.
+    computed_at = fields.Datetime(string="Computed At", default=fields.Datetime.now)
     asset = fields.Char(required=True, index=True)
     instrument = fields.Char(required=True, index=True)
     index_price = fields.Float(digits=(16, 4))
-    top_intersection = fields.Float(digits=(16, 4))
-    bottom_intersection = fields.Float(digits=(16, 4))
-    # Whether the payoff value at top_intersection/bottom_intersection (where
-    # the Longs and Shorts curves cross each other) is above (True) or below
+    # High/Resistance and Low/Support — the highest/lowest price where the
+    # Longs-vs-Shorts payoff curves cross each other (not where either
+    # crosses zero) — renamed from top_intersection/bottom_intersection to
+    # match Thales's own "high"/"low" (Resistance/Support) terminology for
+    # this reference band, since that's the concept these stand in for.
+    high_resistance = fields.Float(string="High/Resistance", digits=(16, 4))
+    low_support = fields.Float(string="Low/Support", digits=(16, 4))
+    # Whether the payoff value at high_resistance/low_support (where the
+    # Longs and Shorts curves cross each other) is above (True) or below
     # (False) the zero-payoff line — the crossing's x-position doesn't say
     # anything about its y-value, see _compute_asset(). Drives the +/- marker
-    # drawn above each point on the TradingView chart's Zones Extrema lines.
-    top_intersection_positive = fields.Boolean()
-    bottom_intersection_positive = fields.Boolean()
+    # drawn above each point on the TradingView chart's High/Resistance and
+    # Low/Support lines.
+    high_resistance_positive = fields.Boolean(string="High/Resistance Positive")
+    low_support_positive = fields.Boolean(string="Low/Support Positive")
     gamma_band = fields.Float(digits=(16, 4))
     delta_band = fields.Float(digits=(16, 4))
-    # Where the Shorts payoff curve peaks and where the Longs curve bottoms
-    # out — this model's original two fields (see git history: 8c59981),
-    # repurposed into top_intersection/bottom_intersection in 8da5a1a and
-    # since reintroduced as their own fields alongside those, computed by
-    # the same _compute_asset()/_persist_extrema() path as gamma_band/
-    # delta_band (not the old standalone 4h snapshot cron). Same values
-    # options.zone_summary()'s short_max_price/long_min_price show on the
+    # High Zone / Low Zone / Middle Zone — same definitions as
+    # options.zone_summary()'s high_zone/low_zone/middle_zone (see the
+    # /<instrument>/zones PNG page's info overlay): high_zone/low_zone are
+    # each curve's own highest/lowest zero-crossing (min/max of the two
+    # curves' contributions, a degenerate equal pair when only one curve
+    # crosses); middle_zone is min/max of seller_max_profit/buyer_max_loss,
+    # always defined. Each stored as a _min/_max pair (a Float can't hold a
+    # range) — 0.0 on both sides of high_zone/low_zone means neither curve
+    # ever crossed zero, same "0.0 = absent" convention this model already
+    # uses for high_resistance/low_support.
+    high_zone_min = fields.Float(string="High Zone Min", digits=(16, 4))
+    high_zone_max = fields.Float(string="High Zone Max", digits=(16, 4))
+    low_zone_min = fields.Float(string="Low Zone Min", digits=(16, 4))
+    low_zone_max = fields.Float(string="Low Zone Max", digits=(16, 4))
+    middle_zone_min = fields.Float(string="Middle Zone Min", digits=(16, 4))
+    middle_zone_max = fields.Float(string="Middle Zone Max", digits=(16, 4))
+    # Per-leg gamma/delta/theta/vega prices + Abs strength values — same
+    # forecast3.per_leg_greeks() computation (a thin Pine-naming layer over
+    # options.per_leg_greeks()) already used by dankbit.forecast3.snapshot,
+    # so this model's per-leg numbers can never quietly disagree with the
+    # Thales Forecast engine's or the /<instrument>/zones PNG page's own
+    # info overlay for the same trades. *_price is the raw extremum price;
+    # *_abs is abs(value)/scale (1e6 gamma, 10 delta, 1e4 theta, 100 vega —
+    # same scaling the PNG page's own Abs. lines use), not rounded further.
+    bcg_price = fields.Float(string="Buyer Call Gamma (BCG)", digits=(16, 4))
+    bcg_abs = fields.Float(string="BCG Abs.", digits=(16, 4))
+    bpg_price = fields.Float(string="Buyer Put Gamma (BPG)", digits=(16, 4))
+    bpg_abs = fields.Float(string="BPG Abs.", digits=(16, 4))
+    scg_price = fields.Float(string="Seller Call Gamma (SCG)", digits=(16, 4))
+    scg_abs = fields.Float(string="SCG Abs.", digits=(16, 4))
+    spg_price = fields.Float(string="Seller Put Gamma (SPG)", digits=(16, 4))
+    spg_abs = fields.Float(string="SPG Abs.", digits=(16, 4))
+    bcd_price = fields.Float(string="Buyer Call Delta (BCD)", digits=(16, 4))
+    bcd_abs = fields.Float(string="BCD Abs.", digits=(16, 4))
+    bpd_price = fields.Float(string="Buyer Put Delta (BPD)", digits=(16, 4))
+    bpd_abs = fields.Float(string="BPD Abs.", digits=(16, 4))
+    scd_price = fields.Float(string="Seller Call Delta (SCD)", digits=(16, 4))
+    scd_abs = fields.Float(string="SCD Abs.", digits=(16, 4))
+    spd_price = fields.Float(string="Seller Put Delta (SPD)", digits=(16, 4))
+    spd_abs = fields.Float(string="SPD Abs.", digits=(16, 4))
+    bct_price = fields.Float(string="Buyer Call Theta (BCT)", digits=(16, 4))
+    bct_abs = fields.Float(string="BCT Abs.", digits=(16, 4))
+    bpt_price = fields.Float(string="Buyer Put Theta (BPT)", digits=(16, 4))
+    bpt_abs = fields.Float(string="BPT Abs.", digits=(16, 4))
+    sct_price = fields.Float(string="Seller Call Theta (SCT)", digits=(16, 4))
+    sct_abs = fields.Float(string="SCT Abs.", digits=(16, 4))
+    spt_price = fields.Float(string="Seller Put Theta (SPT)", digits=(16, 4))
+    spt_abs = fields.Float(string="SPT Abs.", digits=(16, 4))
+    bcv_price = fields.Float(string="Buyer Call Vega (BCV)", digits=(16, 4))
+    bcv_abs = fields.Float(string="BCV Abs.", digits=(16, 4))
+    bpv_price = fields.Float(string="Buyer Put Vega (BPV)", digits=(16, 4))
+    bpv_abs = fields.Float(string="BPV Abs.", digits=(16, 4))
+    scv_price = fields.Float(string="Seller Call Vega (SCV)", digits=(16, 4))
+    scv_abs = fields.Float(string="SCV Abs.", digits=(16, 4))
+    spv_price = fields.Float(string="Seller Put Vega (SPV)", digits=(16, 4))
+    spv_abs = fields.Float(string="SPV Abs.", digits=(16, 4))
+    # Seller Max Profit / Buyer Max Loss — where the Shorts payoff curve
+    # peaks and where the Longs curve bottoms out (renamed from
+    # short_max_price/long_min_price to match Thales's own SMP/BML
+    # terminology, see dankbit.forecast3.snapshot's bml/smp fields) — this
+    # model's original two fields (see git history: 8c59981), repurposed
+    # into top_intersection/bottom_intersection in 8da5a1a and since
+    # reintroduced as their own fields alongside those, computed by the
+    # same _compute_asset()/_persist_extrema() path as gamma_band/delta_band
+    # (not the old standalone 4h snapshot cron). Same values
+    # options.zone_summary()'s seller_max_profit/buyer_max_loss show on the
     # /<instrument>/zones PNG page's info overlay.
-    short_max_price = fields.Float(digits=(16, 4))
-    long_min_price = fields.Float(digits=(16, 4))
+    seller_max_profit = fields.Float(string="Seller Max Profit (SMP)", digits=(16, 4))
+    buyer_max_loss = fields.Float(string="Buyer Max Loss (BML)", digits=(16, 4))
 
     _sql_constraints = [
         ("instrument_uniq", "unique (instrument)", "Only one zones-extrema record is kept per instrument."),
+    ]
+
+    # The 32 per-leg gamma/delta/theta/vega price + Abs field names —
+    # exactly forecast3_lib.per_leg_greeks()'s own dict keys, which this
+    # model's fields are named to match 1:1 (see _compute_asset/
+    # _persist_extrema). Listed once here rather than by hand in both
+    # places.
+    _PER_LEG_GREEK_FIELDS = [
+        "bcg_price", "bcg_abs", "bpg_price", "bpg_abs",
+        "scg_price", "scg_abs", "spg_price", "spg_abs",
+        "bcd_price", "bcd_abs", "bpd_price", "bpd_abs",
+        "scd_price", "scd_abs", "spd_price", "spd_abs",
+        "bct_price", "bct_abs", "bpt_price", "bpt_abs",
+        "sct_price", "sct_abs", "spt_price", "spt_abs",
+        "bcv_price", "bcv_abs", "bpv_price", "bpv_abs",
+        "scv_price", "scv_abs", "spv_price", "spv_abs",
     ]
 
     def _distinct_expirations(self, asset, as_of, limit):
@@ -90,7 +174,7 @@ class ZonesExtrema(models.Model):
 
     def _compute_asset(self, asset, expiry_index=0, hours=None):
         """Compute index_price, the highest/lowest Longs-vs-Shorts curve
-        intersection (top_intersection/bottom_intersection — not relative to
+        intersection (high_resistance/low_support — not relative to
         index_price, see below), gamma_band (average of
         the 4 gamma extrema — see below), plus the 4 zero-crossing box
         boundaries for `asset` as of now, for one specific active expiry
@@ -171,13 +255,13 @@ class ZonesExtrema(models.Model):
         STs = longs_obj.STs
 
         # Where the Shorts curve peaks and the Longs curve bottoms out — same
-        # computation as options.zone_summary()'s short_max_price/
-        # long_min_price, against this same longs_obj/shorts_obj.
-        short_max_price = float(STs[int(np.argmax(shorts_obj.payoffs))])
-        long_min_price = float(STs[int(np.argmin(longs_obj.payoffs))])
+        # computation as options.zone_summary()'s seller_max_profit/
+        # buyer_max_loss, against this same longs_obj/shorts_obj.
+        seller_max_profit = float(STs[int(np.argmax(shorts_obj.payoffs))])
+        buyer_max_loss = float(STs[int(np.argmin(longs_obj.payoffs))])
 
         # Zero-crossings of each curve. Current price is deliberately not a
-        # factor here (same principle as top_intersection/bottom_intersection
+        # factor here (same principle as high_resistance/low_support
         # below): a box boundary is a property of where a curve crosses zero,
         # not of where the index price happens to sit relative to it. Each
         # curve's own highest crossing feeds the "above" box side, its lowest
@@ -193,17 +277,39 @@ class ZonesExtrema(models.Model):
         long_above = [max(long_crossings)] if long_crossings else []
         long_below = [min(long_crossings)] if long_crossings else []
 
+        # High Zone / Low Zone — same "each curve's own highest/lowest
+        # zero-crossing" definition as options.zone_summary()'s
+        # high_zone/low_zone (see the /<instrument>/zones PNG page's info
+        # overlay), built from the same short_crossings/long_crossings
+        # already computed above rather than calling zone_summary() and
+        # re-finding the crossings a second time. 0.0/0.0 means neither
+        # curve ever crossed zero, same convention short_above/etc. use.
+        high_zone_prices = short_above + long_above
+        low_zone_prices = short_below + long_below
+        high_zone_min = min(high_zone_prices) if high_zone_prices else 0.0
+        high_zone_max = max(high_zone_prices) if high_zone_prices else 0.0
+        low_zone_min = min(low_zone_prices) if low_zone_prices else 0.0
+        low_zone_max = max(low_zone_prices) if low_zone_prices else 0.0
+
+        # Middle Zone — bounded by seller_max_profit/buyer_max_loss (min/max
+        # of the two), same as options.zone_summary()'s middle_zone. Always
+        # defined, unlike high_zone/low_zone, since seller_max_profit/
+        # buyer_max_loss are argmax/argmin over the full curve, not
+        # zero-crossings.
+        middle_zone_min = min(seller_max_profit, buyer_max_loss)
+        middle_zone_max = max(seller_max_profit, buyer_max_loss)
+
         # Longs-vs-Shorts intersection (where the two payoff curves cross
         # each other, not where either crosses zero) — same computation as
-        # options.zone_summary()'s top_intersection/bottom_intersection, and
+        # options.zone_summary()'s high_resistance/low_support, and
         # the same sign-change build_zone_curves() finds internally for its
-        # own ±$2000 auto-zoom. top/bottom are simply the highest/lowest of
+        # own ±$2000 auto-zoom. high/low are simply the highest/lowest of
         # *all* crossings found, not relative to index_price: when the
         # curves only cross once, that single crossing can land on either
         # side of the current price by a trivial amount, which used to make
         # the "other" field silently read 0.0 even though the plot clearly
         # showed one real intersection — labels kept, but index_price no
-        # longer factors into which crossing is "top" vs "bottom".
+        # longer factors into which crossing is "high" vs "low".
         diff = longs_obj.payoffs - shorts_obj.payoffs
         lvs_crossings = options_lib.find_zero_crossings(STs, diff)
 
@@ -215,65 +321,45 @@ class ZonesExtrema(models.Model):
         # equal (by definition) at a crossing; interpolated, not read off
         # the nearest grid point, for a value consistent with the
         # interpolated crossing price itself.
-        top_intersection = max(lvs_crossings) if lvs_crossings else 0.0
-        bottom_intersection = min(lvs_crossings) if lvs_crossings else 0.0
-        top_intersection_positive = bool(np.interp(top_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
-        bottom_intersection_positive = bool(np.interp(bottom_intersection, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
+        high_resistance = max(lvs_crossings) if lvs_crossings else 0.0
+        low_support = min(lvs_crossings) if lvs_crossings else 0.0
+        high_resistance_positive = bool(np.interp(high_resistance, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
+        low_support_positive = bool(np.interp(low_support, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
+
+        # Per-leg gamma/delta/theta/vega prices + Abs strength values, via
+        # forecast3.per_leg_greeks() (a thin Pine-naming layer over
+        # options.per_leg_greeks(), the single source of truth for this
+        # computation — chart_png_zones, dankbit.forecast3.snapshot, and
+        # this model can never quietly disagree). `trades` is already this
+        # target expiry's since-midnight set, so no separate "nearest
+        # expiry among trades" re-filtering is needed here unlike
+        # chart_png_zones, which accepts a possibly-multi-expiry `trades`
+        # set. Returns bcg_price/bcg_abs.../spv_price/spv_abs — the exact
+        # field names this model persists, spread directly into the
+        # returned dict below.
+        legs = forecast3_lib.per_leg_greeks(STs, trades)
 
         # Gamma band: average of the 4 gamma extrema the /<instrument>/zones
-        # PNG page's info overlay shows (Long Call/Put Gamma Peak, Short
-        # Call/Put Gamma Bottom) — same computation as chart_png_zones,
-        # against this same `trades`/`STs` (already the single target
-        # expiry's since-midnight trades, so no separate "nearest expiry
-        # among trades" re-filtering is needed here unlike chart_png_zones,
-        # which accepts a possibly-multi-expiry `trades` set). Short
+        # PNG page's info overlay shows (Buyer Call Gamma/Buyer Put Gamma,
+        # Seller Call Gamma/Seller Put Gamma — BCG/BPG/SCG/SPG). Short
         # positions carry negative gamma (portfolio_gamma's sign for "sell"
-        # is -1), so their extremum is a trough (argmin), not a peak.
-        long_calls = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "call")
-        long_call_gamma_peak_price = float(STs[int(np.argmax(gamma_lib.portfolio_gamma(STs, long_calls)))])
-
-        long_puts = trades.filtered(lambda t: t.direction == "buy" and t.option_type == "put")
-        long_put_gamma_peak_price = float(STs[int(np.argmax(gamma_lib.portfolio_gamma(STs, long_puts)))])
-
-        short_calls = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "call")
-        short_call_gamma_bottom_price = float(STs[int(np.argmin(gamma_lib.portfolio_gamma(STs, short_calls)))])
-
-        short_puts = trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put")
-        short_put_gamma_bottom_price = float(STs[int(np.argmin(gamma_lib.portfolio_gamma(STs, short_puts)))])
-
-        gamma_band = (
-            long_call_gamma_peak_price + long_put_gamma_peak_price
-            + short_call_gamma_bottom_price + short_put_gamma_bottom_price
-        ) / 4.0
+        # is -1), so their extremum is a trough, not a peak — already
+        # accounted for by per_leg_greeks().
+        gamma_band = (legs["bcg_price"] + legs["bpg_price"] + legs["scg_price"] + legs["spg_price"]) / 4.0
 
         # Delta band: average of the price where each leg's delta curve
-        # reaches 90% of its own extreme value in this window — deep enough
-        # ITM that the option has stopped behaving like an option and starts
-        # moving ~1:1 with the underlying, i.e. where the sigmoid-shaped
-        # delta curve stops curving and flattens into a straight line.
-        # Relative to the curve's own extreme, not an absolute delta value:
-        # portfolio_delta sums sign*amount*per-contract delta across every
-        # matching trade, so its scale reflects total traded size (can be in
-        # the hundreds), not a single option's [-1, 1] range — see
-        # options.delta_saturation_price(), shared with the
-        # /<instrument>/lp,lc,sp,sc single-leg routes' own green marker
-        # line, so the two can never disagree on where this point is. Calls
-        # saturate ITM at high S; puts saturate ITM at low S — independent
-        # of long/short, so long_calls/short_calls both use the high-S
-        # ("max") edge and long_puts/short_puts both use the low-S ("min")
-        # edge; each leg's own sign is inherited automatically from its
-        # curve's value at that edge, no separate sign needed.
-        DELTA_SATURATION_FRACTION = 0.9
-
-        long_call_saturation_price = options_lib.delta_saturation_price(STs, long_calls, DELTA_SATURATION_FRACTION, "max")
-        long_put_saturation_price = options_lib.delta_saturation_price(STs, long_puts, DELTA_SATURATION_FRACTION, "min")
-        short_call_saturation_price = options_lib.delta_saturation_price(STs, short_calls, DELTA_SATURATION_FRACTION, "max")
-        short_put_saturation_price = options_lib.delta_saturation_price(STs, short_puts, DELTA_SATURATION_FRACTION, "min")
-
-        delta_band = (
-            long_call_saturation_price + long_put_saturation_price
-            + short_call_saturation_price + short_put_saturation_price
-        ) / 4.0
+        # reaches 90% of its own extreme value in this window (see
+        # options.delta_saturation_price/DELTA_SATURATION_FRACTION) — deep
+        # enough ITM that the option has stopped behaving like an option and
+        # starts moving ~1:1 with the underlying, i.e. where the sigmoid-
+        # shaped delta curve stops curving and flattens into a straight
+        # line. Relative to the curve's own extreme, not an absolute delta
+        # value: portfolio_delta sums sign*amount*per-contract delta across
+        # every matching trade, so its scale reflects total traded size (can
+        # be in the hundreds), not a single option's [-1, 1] range — shared
+        # with the /<instrument>/lp,lc,sp,sc single-leg routes' own green
+        # marker line, so the two can never disagree on where this point is.
+        delta_band = (legs["bcd_price"] + legs["bpd_price"] + legs["scd_price"] + legs["spd_price"]) / 4.0
 
         return {
             "asset": asset,
@@ -281,27 +367,43 @@ class ZonesExtrema(models.Model):
             "computed_at": as_of,
             "expiration": target_expiration,
             "index_price": index_price,
-            "top_intersection": top_intersection,
-            "bottom_intersection": bottom_intersection,
-            "top_intersection_positive": top_intersection_positive,
-            "bottom_intersection_positive": bottom_intersection_positive,
+            "high_resistance": high_resistance,
+            "low_support": low_support,
+            "high_resistance_positive": high_resistance_positive,
+            "low_support_positive": low_support_positive,
             "gamma_band": gamma_band,
             "delta_band": delta_band,
-            "short_max_price": short_max_price,
-            "long_min_price": long_min_price,
+            "high_zone_min": high_zone_min,
+            "high_zone_max": high_zone_max,
+            "low_zone_min": low_zone_min,
+            "low_zone_max": low_zone_max,
+            "middle_zone_min": middle_zone_min,
+            "middle_zone_max": middle_zone_max,
+            "seller_max_profit": seller_max_profit,
+            "buyer_max_loss": buyer_max_loss,
             "short_zero_above_price": min(short_above) if short_above else 0.0,
             "long_zero_above_price": min(long_above) if long_above else 0.0,
             "short_zero_below_price": max(short_below) if short_below else 0.0,
             "long_zero_below_price": max(long_below) if long_below else 0.0,
+            # Individual per-leg gamma/delta/theta/vega prices + Abs values
+            # (bcg_price/bcg_abs.../spv_price/spv_abs) behind gamma_band/
+            # delta_band and this model's own per-leg fields — spread
+            # straight from forecast3_lib.per_leg_greeks()'s dict, whose
+            # keys already match this model's field names 1:1.
+            **legs,
         }
 
     def _persist_extrema(self, data):
         """Upsert the one record for `data['instrument']` — only the
-        historical-line fields (index_price/top_intersection/
-        bottom_intersection/gamma_band/delta_band/short_max_price/
-        long_min_price); the 4 box-boundary fields in `data` are never
-        persisted, only ever read live off the return value (see get_box),
-        since nothing reads box-boundary history.
+        historical-line fields (computed_at/index_price/high_resistance/
+        low_support/gamma_band/delta_band/high_zone/low_zone/middle_zone/
+        seller_max_profit/buyer_max_loss, plus the 32 per-leg gamma/delta/
+        theta/vega price+Abs fields — see _PER_LEG_GREEK_FIELDS);
+        computed_at is refreshed to `data['computed_at']` (the moment
+        _compute_asset() ran) on every upsert, not just set once at
+        creation. The 4 box-boundary fields in `data` are never persisted, only ever read
+        live off the return value (see get_box), since nothing reads
+        box-boundary history.
 
         Called from get_box() (nearest expiry, expiry_index 0) and, for
         expiry_index 1 upward, get_box_n() via /api/zones-extrema-refresh —
@@ -311,7 +413,7 @@ class ZonesExtrema(models.Model):
         becomes nearest, this means its row starts accumulating (and getting
         refined) even before get_box() ever touches it. compute_snapshot()
         (below) additionally calls get_box_n() for every tracked expiry_index
-        on a 15-minute cron as a fallback for when nobody's actually viewing
+        on a 4-hour cron as a fallback for when nobody's actually viewing
         the chart — without it, an instrument that was never tracked while
         anyone happened to be watching would never get a row at all.
 
@@ -333,17 +435,25 @@ class ZonesExtrema(models.Model):
         ir.config_parameter.sudo())."""
         self = self.sudo()
         vals = {
+            "computed_at": data["computed_at"],
             "asset": data["asset"],
             "instrument": data["instrument"],
             "index_price": data["index_price"],
-            "top_intersection": data["top_intersection"],
-            "bottom_intersection": data["bottom_intersection"],
-            "top_intersection_positive": data["top_intersection_positive"],
-            "bottom_intersection_positive": data["bottom_intersection_positive"],
+            "high_resistance": data["high_resistance"],
+            "low_support": data["low_support"],
+            "high_resistance_positive": data["high_resistance_positive"],
+            "low_support_positive": data["low_support_positive"],
             "gamma_band": data["gamma_band"],
             "delta_band": data["delta_band"],
-            "short_max_price": data["short_max_price"],
-            "long_min_price": data["long_min_price"],
+            "high_zone_min": data["high_zone_min"],
+            "high_zone_max": data["high_zone_max"],
+            "low_zone_min": data["low_zone_min"],
+            "low_zone_max": data["low_zone_max"],
+            "middle_zone_min": data["middle_zone_min"],
+            "middle_zone_max": data["middle_zone_max"],
+            "seller_max_profit": data["seller_max_profit"],
+            "buyer_max_loss": data["buyer_max_loss"],
+            **{f: data[f] for f in self._PER_LEG_GREEK_FIELDS},
         }
         record = self.search([("instrument", "=", data["instrument"])], limit=1)
         if record:
@@ -354,10 +464,10 @@ class ZonesExtrema(models.Model):
     # How many active expiries (soonest-first, 0 = nearest) get a persisted
     # zones-extrema row at all — the TradingView chart only draws an actual
     # box for expiry_index 0 (yellow), but every index up to this bound still
-    # feeds the Top/Bottom Intersection and Gamma Band term-structure lines
-    # (see get_box_n/refreshZonesExtrema), which render
-    # whatever rows exist for the asset regardless of whether a box was ever
-    # drawn for them.
+    # feeds the High/Resistance, Low/Support, and Gamma Band term-structure
+    # lines (see get_box_n/refreshZonesExtrema), which render whatever rows
+    # exist for the asset regardless of whether a box was ever drawn for
+    # them.
     TRACKED_EXPIRY_COUNT = 3
 
     def get_box_n(self, asset, expiry_index):
@@ -369,11 +479,11 @@ class ZonesExtrema(models.Model):
         chart). Called directly for expiry_index 1 upward by
         /api/zones-extrema-refresh/<asset>/<expiry_index> — those don't draw
         a box (only the nearest expiry, index 0, gets the yellow box), only
-        feed the Top/Bottom Intersection and Gamma Band lines,
+        feed the High/Resistance, Low/Support, and Gamma Band lines,
         which read every persisted row for the asset regardless of
         expiry_index. The 4 box-boundary fields themselves are still never
         persisted, only the computed_at moment's index_price/
-        top_intersection/bottom_intersection/gamma_band/delta_band (see
+        high_resistance/low_support/gamma_band/delta_band (see
         _persist_extrema)."""
         data = self._compute_asset(asset, expiry_index=expiry_index)
         if data:
@@ -396,35 +506,8 @@ class ZonesExtrema(models.Model):
             return self._compute_asset(asset, expiry_index=0, hours=hours)
         return self.get_box_n(asset, 0)
 
-    def get_levels(self, asset):
-        """Top/bottom intersection + gamma band from `asset`'s nearest
-        tracked instrument's persisted row — the exact same numbers the
-        TradingView chart's Zones Extrema lines currently draw for their
-        latest point (see /api/zones-extrema/<asset>), used by
-        forecast2_json to steer the "Forecast 2" path. Deliberately reads
-        the persisted row rather than recomputing live (get_box_n()):
-        those lines are only ever refreshed by the chart's own polling, so
-        reusing that stored value keeps Forecast 2 consistent with what's
-        actually drawn instead of doing a second, independent (and
-        expensive) curve rebuild on every forecast poll. self.sudo() since
-        this is reached from an auth="public" route with no public grant
-        on this model (see ir.model.access.csv). Returns None if there's no
-        active expiry, or nothing persisted for it yet."""
-        instrument = self.nearest_expiry(asset)
-        if not instrument:
-            return None
-        record = self.sudo().search([("instrument", "=", instrument)], limit=1)
-        if not record:
-            return None
-        return {
-            "instrument": instrument,
-            "top_intersection": record.top_intersection,
-            "bottom_intersection": record.bottom_intersection,
-            "gamma_band": record.gamma_band,
-        }
-
     def compute_snapshot(self):
-        """Cron entry point (every 15 minutes — see data/ir_cron.xml) — a
+        """Cron entry point (every 4 hours — see data/ir_cron.xml) — a
         fallback so instrument rows keep updating even when nobody's
         actually viewing /chart/BTC or /chart/ETH. get_box_n() normally only
         ever runs as a side effect of that page's live polling (zones-box for

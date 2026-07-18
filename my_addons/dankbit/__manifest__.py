@@ -16,7 +16,6 @@
         "views/res_config_settings_views.xml",
         "views/trade_views.xml",
         "views/zones_extrema_views.xml",
-        "views/liquidity_snapshot_views.xml",
         "views/http_log_views.xml",
         "views/dankbit_templates.xml",
         "wizard/plot_wizard_view.xml",
