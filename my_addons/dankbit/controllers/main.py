@@ -1368,18 +1368,15 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/gamma-levels-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def gamma_levels_all_json(self, asset):
-        """Same peaks/bottoms computation as gamma_levels_json, but with no
-        expiration cutoff at all (expiration >= NOW() only, same domain
-        delta_zero_all_json uses) — every currently active expiry's trades
-        combined into one portfolio gamma curve, rather than one named
-        instrument or one configured weekly/monthly cutoff. Feeds the Gamma
-        Chart's "Universal" checkbox (see TradingView Chart Notes). Optional
-        ?hours= restricts to the trailing `hours` hours of trades on top of
-        that (same trailing-hours-override pattern gamma_levels_json's own
-        ?hours= uses) — feeds the violet "Universal 24h" line set."""
-        asset = asset.upper()
+    def _gamma_peaks_bottoms_all(self, asset, hours=None):
+        """Gamma peaks/bottoms across every currently active expiry
+        (expiration >= NOW() only, no cutoff), optionally restricted to the
+        trailing `hours` hours of trades — the shared computation behind
+        gamma_levels_all_json (Gamma Chart's "Universal"/"Universal 24h"
+        lines) and forecast_json's gamma-level steering (Forecast 1).
+        Returns (peaks, bottoms, trade_count), each peak/bottom a
+        {"price", "delta_positive"} dict, or (None, None, 0) for an unknown
+        asset."""
         icp = request.env["ir.config_parameter"].sudo()
         if asset.startswith("BTC"):
             from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -1390,17 +1387,13 @@ class ChartController(http.Controller):
             to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             steps = int(icp.get_param("dankbit.eth_steps", default=50))
         else:
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
+            return None, None, 0
 
-        hours_param = request.httprequest.args.get("hours")
         query_params = [f'%{asset}%']
         time_filter_sql = ""
-        if hours_param:
+        if hours:
             time_filter_sql = "AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')"
-            query_params.append(float(hours_param))
+            query_params.append(float(hours))
 
         cr = request.env.cr
         cr.execute(f"""
@@ -1432,6 +1425,29 @@ class ChartController(http.Controller):
                    for px, _ in self.find_gamma_peaks(STs, g_arr)]
         bottoms = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
                    for px, _ in self.find_gamma_bottoms(STs, g_arr)]
+        return peaks, bottoms, trade_count
+
+    @http.route("/api/gamma-levels-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def gamma_levels_all_json(self, asset):
+        """Same peaks/bottoms computation as gamma_levels_json, but with no
+        expiration cutoff at all (expiration >= NOW() only, same domain
+        delta_zero_all_json uses) — every currently active expiry's trades
+        combined into one portfolio gamma curve, rather than one named
+        instrument or one configured weekly/monthly cutoff. Feeds the Gamma
+        Chart's "Universal" checkbox (see TradingView Chart Notes). Optional
+        ?hours= restricts to the trailing `hours` hours of trades on top of
+        that (same trailing-hours-override pattern gamma_levels_json's own
+        ?hours= uses) — feeds the violet "Universal 24h" line set."""
+        asset = asset.upper()
+        hours_param = request.httprequest.args.get("hours")
+        peaks, bottoms, trade_count = self._gamma_peaks_bottoms_all(
+            asset, hours=float(hours_param) if hours_param else None,
+        )
+        if peaks is None:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
 
         payload = {
             "asset": asset,
@@ -1706,18 +1722,28 @@ class ChartController(http.Controller):
         forecast.simulate_path) seeded by the trailing-24h amount-weighted
         average IV across `asset`'s trades, computed the same way
         gamma_levels_json aggregates IV (SUM(iv*amount)/NULLIF(SUM(amount),0)).
-        The path carries no assumed drift (same r=0.0 convention this
-        addon's other Greeks use) — it isn't a directional call, just one
-        randomly sampled realization consistent with the market's own
-        implied volatility. `seed` is derived from the current UTC hour (not
-        true randomness) so the path stays stable between polls within the
-        same hour rather than jittering on every REFRESH tick, and only
+        The path carries no assumed drift beyond mean-reversion toward the
+        nearest gamma peak/bottom (see below) — it isn't a directional call,
+        just one randomly sampled realization consistent with the market's
+        own implied volatility. `seed` is derived from the current UTC hour
+        (not true randomness) so the path stays stable between polls within
+        the same hour rather than jittering on every REFRESH tick, and only
         moves on to a new realization once new IV data rolls in. Candles are
         4h by default (see simulate_path — matches the TradingView chart's
         4h timeframe, the only one that fetches/draws this; the endpoint
         itself doesn't know or care which timeframe the caller is on).
         `points` is empty when there's no index price or no trades in the
-        trailing 24h to estimate a volatility from."""
+        trailing 24h to estimate a volatility from.
+
+        Steered by `_gamma_peaks_bottoms_all(asset, hours=24)` — the same
+        trailing-24h, all-expiries gamma peaks/bottoms the Gamma Chart's
+        "Universal 24h" line draws — via `forecast.simulate_path_with_levels`
+        with no barriers, just a reversion center: the single nearest level
+        to `index_price` among peaks above it (resistance) and bottoms below
+        it (support). Falls back to the plain unguided `simulate_path` when
+        no such level exists (e.g. every peak is already below price and
+        every bottom already above it, or there's no trailing-24h trade at
+        all to compute a curve from)."""
         asset = asset.upper()
         if asset not in ("BTC", "ETH"):
             return request.make_response(
@@ -1737,12 +1763,26 @@ class ChartController(http.Controller):
         avg_iv, trade_count = cr.fetchone()
         sigma_annual = float(avg_iv) / 100.0 if avg_iv else None
 
+        gamma_level = None
+        if index_price:
+            peaks, bottoms, _ = self._gamma_peaks_bottoms_all(asset, hours=24)
+            candidates = [p["price"] for p in (peaks or []) if p["price"] > index_price]
+            candidates += [b["price"] for b in (bottoms or []) if b["price"] < index_price]
+            if candidates:
+                gamma_level = min(candidates, key=lambda px: abs(px - index_price))
+
         points = []
         if index_price and sigma_annual:
             now = datetime.now(timezone.utc)
             now_ms = int(now.timestamp() * 1000)
             seed = int(now.timestamp() // 3600) + (0 if asset == "BTC" else 1)
-            for p in forecast.simulate_path(index_price, sigma_annual, seed=seed):
+            if gamma_level:
+                path = forecast.simulate_path_with_levels(
+                    index_price, sigma_annual, None, None, gamma_level, seed=seed,
+                )
+            else:
+                path = forecast.simulate_path(index_price, sigma_annual, seed=seed)
+            for p in path:
                 points.append({
                     "t": now_ms + int(p["hours"] * 3600 * 1000),
                     "open": p["open"],
@@ -1756,6 +1796,7 @@ class ChartController(http.Controller):
             "index_price": index_price,
             "sigma_annual": sigma_annual,
             "trade_count": int(trade_count or 0),
+            "gamma_level": gamma_level,
             "points": points,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
