@@ -276,6 +276,18 @@
 							<input type="checkbox" id="universal-scope-toggle" onchange="onToggleGammaScope('universal')"/>
 							Universal
 						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="strike-gamma-toggle" onchange="onToggleStrikeGamma()"/>
+							Strike Gamma
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="strike-gamma-weekly-toggle" onchange="onToggleStrikeGammaWeekly()"/>
+							Strike Gamma Weekly
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="strike-gamma-monthly-toggle" onchange="onToggleStrikeGammaMonthly()"/>
+							Strike Gamma Monthly
+						</label>
 						<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
 							Thales Forecast
@@ -411,6 +423,29 @@
 					let GAMMA_SCOPE_WEEKLY = false;
 					let GAMMA_SCOPE_MONTHLY = false;
 					let GAMMA_SCOPE_UNIVERSAL = false;
+					// "Strike Gamma" checkbox (Gamma Chart only) — gray lines,
+					// one per distinct strike that has ever traded, across
+					// every active expiry (see gamma_by_strike_json), each
+					// labeled with the combined
+					// portfolio dollar-gamma at that exact strike (not a
+					// peak/bottom search over a synthetic grid, unlike every
+					// other gamma-point line set on this page). Independent
+					// of GAMMA_SCOPE_UNIVERSAL — its own checkbox, unchecked
+					// by default.
+					let SHOW_STRIKE_GAMMA = false;
+					// "Strike Gamma Weekly" / "Strike Gamma Monthly" checkboxes
+					// (Gamma Chart only) — same per-strike gamma_by_strike
+					// computation as "Strike Gamma", restricted to every
+					// active expiry through the configured weekly/monthly
+					// expiry respectively (INSTRUMENT/MONTHLY_INST — same
+					// cutoffs the black "Weekly"/"Monthly" gamma-point lines
+					// use), each with its own light-gray-to-black gradient
+					// (drawStrikeGammaLines — no fixed color per checkbox
+					// any more). Independent of "Strike Gamma" and of each
+					// other — all 3 can be shown together. Both unchecked by
+					// default.
+					let SHOW_STRIKE_GAMMA_WEEKLY = false;
+					let SHOW_STRIKE_GAMMA_MONTHLY = false;
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
@@ -424,6 +459,9 @@
 					// instrument or one configured weekly/monthly cutoff.
 					const GL_ALL_URL       = '/api/gamma-levels-all/' + ASSET;
 					const GL_M_URL         = MONTHLY_INST ? '/api/gamma-levels/' + MONTHLY_INST : '';
+					const SG_URL           = '/api/gamma-by-strike/' + ASSET;
+					const SGW_URL          = '/api/gamma-by-strike-until/' + INSTRUMENT;
+					const SGM_URL          = MONTHLY_INST ? '/api/gamma-by-strike-until/' + MONTHLY_INST : '';
 					const ZE_URL           = '/api/zones-extrema/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
@@ -674,6 +712,86 @@
 						drawGammaLines(data, monthly24hGammaPointLines, 1, 'Monthly 24h', 'violet', 'violet');
 					}
 
+					// "Strike Gamma" lines (light-gray-to-black by magnitude,
+					// see drawStrikeGammaLines) — combined portfolio dollar-
+					// gamma evaluated at each distinct strike that has ever
+					// traded, across every active expiry (gamma_by_strike_json;
+					// every trade through expiry, no ?hours= restriction
+					// unlike the other line sets above). Gated by its own
+					// SHOW_STRIKE_GAMMA flag, not
+					// GAMMA_SCOPE_UNIVERSAL.
+					async function refreshStrikeGamma() {
+						if (!SHOW_GAMMA_POINT || !SHOW_STRIKE_GAMMA) {
+							drawStrikeGammaLines({ strikes: [] }, strikeGammaLines);
+							return;
+						}
+						const data = await (await fetch(SG_URL)).json();
+						drawStrikeGammaLines(data, strikeGammaLines);
+					}
+
+					// "Strike Gamma" checkbox (Gamma Chart only) — independent
+					// of the Nearest/Weekly/Monthly/Universal scope
+					// checkboxes; flips SHOW_STRIKE_GAMMA and re-fetches (or
+					// clears, if just turned off).
+					function onToggleStrikeGamma() {
+						SHOW_STRIKE_GAMMA = document.getElementById('strike-gamma-toggle').checked;
+						refreshStrikeGamma();
+					}
+
+					// "Strike Gamma Weekly" lines (same light-gray-to-black
+					// magnitude gradient as "Strike Gamma", scaled to its
+					// own dataset's own max — see drawStrikeGammaLines) —
+					// same per-strike computation as "Strike Gamma" above,
+					// restricted to every active expiry through the
+					// configured weekly expiry (gamma_by_strike_until_json,
+					// same cutoff the black "Weekly" gamma-point line's
+					// GL_W_URL uses). Gated by its own
+					// SHOW_STRIKE_GAMMA_WEEKLY flag, independent of both
+					// SHOW_STRIKE_GAMMA and GAMMA_SCOPE_WEEKLY — can be
+					// shown alongside either.
+					async function refreshStrikeGammaWeekly() {
+						if (!SHOW_GAMMA_POINT || !SHOW_STRIKE_GAMMA_WEEKLY) {
+							drawStrikeGammaLines({ strikes: [] }, strikeGammaWeeklyLines);
+							return;
+						}
+						const data = await (await fetch(SGW_URL)).json();
+						drawStrikeGammaLines(data, strikeGammaWeeklyLines);
+					}
+
+					// "Strike Gamma Weekly" checkbox (Gamma Chart only) —
+					// independent of every other checkbox on this page;
+					// flips SHOW_STRIKE_GAMMA_WEEKLY and re-fetches (or
+					// clears, if just turned off).
+					function onToggleStrikeGammaWeekly() {
+						SHOW_STRIKE_GAMMA_WEEKLY = document.getElementById('strike-gamma-weekly-toggle').checked;
+						refreshStrikeGammaWeekly();
+					}
+
+					// "Strike Gamma Monthly" lines — same mechanism as
+					// "Strike Gamma Weekly" above, restricted to the
+					// configured monthly expiry instead (SGM_URL/
+					// MONTHLY_INST, same cutoff the black "Monthly"
+					// gamma-point line's GL_M_URL uses), same empty-URL
+					// guard as refreshGammaPointMonthly() for an
+					// unconfigured monthly expiry.
+					async function refreshStrikeGammaMonthly() {
+						if (!SHOW_GAMMA_POINT || !SHOW_STRIKE_GAMMA_MONTHLY || !SGM_URL) {
+							drawStrikeGammaLines({ strikes: [] }, strikeGammaMonthlyLines);
+							return;
+						}
+						const data = await (await fetch(SGM_URL)).json();
+						drawStrikeGammaLines(data, strikeGammaMonthlyLines);
+					}
+
+					// "Strike Gamma Monthly" checkbox (Gamma Chart only) —
+					// independent of every other checkbox on this page;
+					// flips SHOW_STRIKE_GAMMA_MONTHLY and re-fetches (or
+					// clears, if just turned off).
+					function onToggleStrikeGammaMonthly() {
+						SHOW_STRIKE_GAMMA_MONTHLY = document.getElementById('strike-gamma-monthly-toggle').checked;
+						refreshStrikeGammaMonthly();
+					}
+
 					async function refreshGammaPointLines() {
 						if (!SHOW_GAMMA_POINT) return;
 						await refreshGammaPointNearest();
@@ -684,6 +802,9 @@
 						await refreshGammaPointMonthly24h();
 						await refreshGammaPointUniversal();
 						await refreshGammaPointUniversal24h();
+						await refreshStrikeGamma();
+						await refreshStrikeGammaWeekly();
+						await refreshStrikeGammaMonthly();
 					}
 
 					// "Nearest" / "Weekly" / "Monthly" / "Universal" checkboxes
@@ -734,6 +855,9 @@
 					let monthly24hGammaPointLines = [];
 					let universalGammaPointLines = [];
 					let universal24hGammaPointLines = [];
+					let strikeGammaLines = [];
+					let strikeGammaWeeklyLines = [];
+					let strikeGammaMonthlyLines = [];
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -929,6 +1053,53 @@
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, axisLabelColor,
 								title: prefix + ' ∨ ' + (item.delta_positive ? 'Short Put' : 'Short Call'),
+							}));
+						});
+					}
+
+					// "Strike Gamma" lines — one gray price line per distinct
+					// strike returned by gamma_by_strike_json, titled with
+					// that strike's own combined portfolio dollar-gamma
+					// (abs value / 1,000,000, rounded — same scaling
+					// convention the /<instrument>/zones page's Abs. lines
+					// use, since these raw dollar-gamma numbers run into the
+					// hundreds of millions), prefixed with its sign — '+'
+					// when net buy-side (taker) flow dominates that strike,
+					// '-' when net sell-side dominates, same raw buy/sell
+					// convention every other Buyer/Seller-labeled line in
+					// this app uses (not flipped to imply the maker/dealer
+					// side's own position, which is the mirror image of
+					// this). Unlike drawGammaLines() above, there's no
+					// peak/bottom split or Long/Short titling — every
+					// strike gets exactly one line.
+					//
+					// Color is a light-gray-to-black gradient by |gamma|
+					// magnitude, relative to the largest |gamma| in this
+					// same response — not a fixed color per checkbox: the
+					// strike with the biggest exposure in the current
+					// dataset is always pure black, the smallest is light
+					// gray, and everything else interpolates between.
+					// Shared by both "Strike Gamma" (all active expiries)
+					// and "Strike Gamma Weekly" (through the configured
+					// weekly expiry) — each call's own gradient is scaled
+					// to its own dataset's own max, so the two aren't
+					// comparable to each other by shade alone if both are
+					// shown at once (only within one checkbox's own lines).
+					function drawStrikeGammaLines(data, lineStore) {
+						lineStore.forEach(l => series.removePriceLine(l));
+						lineStore.length = 0;
+						const strikes = data.strikes || [];
+						const maxAbsGamma = strikes.reduce((m, item) => Math.max(m, Math.abs(item.gamma)), 0);
+						strikes.forEach(item => {
+							const sign = item.gamma >= 0 ? '+' : '-';
+							const intensity = maxAbsGamma > 0 ? Math.abs(item.gamma) / maxAbsGamma : 0;
+							const shade = Math.round(220 - intensity * 220);
+							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+							lineStore.push(series.createPriceLine({
+								price: item.price, color, lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: color,
+								title: 'Γ ' + sign + Math.round(Math.abs(item.gamma) / 1e6),
 							}));
 						});
 					}

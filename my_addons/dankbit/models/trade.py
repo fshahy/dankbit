@@ -180,6 +180,52 @@ class Trade(models.Model):
             _logger.exception("get_index_price failed and no cache available")
             return 0.0
 
+    def get_open_interest_by_currency(self, asset):
+        """Current open interest (contracts outstanding) for every option
+        instrument on `asset`, from Deribit's public get_book_summary_by_currency
+        — one bulk call per currency, no auth needed, unlike per-instrument
+        ticker lookups. Used by ChartController._gamma_by_strike to cap the
+        net position it derives from cumulative signed trade flow, so
+        historical round-tripped volume at a strike can't imply a larger
+        position than what's actually outstanding right now. Cached the
+        same way get_index_price is (_DERIBIT_CACHE, dankbit.deribit_cache_ttl),
+        keyed by currency. Returns {instrument_name: open_interest} — empty
+        dict for an unknown asset or on total failure with no cache."""
+        currency = "BTC" if asset.upper().startswith("BTC") else "ETH" if asset.upper().startswith("ETH") else None
+        if not currency:
+            return {}
+
+        URL = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
+        params = {"currency": currency, "kind": "option"}
+
+        timeout = 5.0
+        cache_ttl = 30.0
+        try:
+            icp = self.env["ir.config_parameter"]
+            timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
+            cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=30.0))
+        except Exception:
+            pass
+
+        cache_key = f"open_interest_{currency}"
+        now_ts = time_module.time()
+        cached = _DERIBIT_CACHE.get(cache_key, {})
+        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < cache_ttl):
+            return cached.get("value")
+
+        data = _safe_deribit_request(URL, params=params, timeout=timeout)
+        if data and isinstance(data, dict):
+            result = data.get("result", []) or []
+            val = {row["instrument_name"]: float(row.get("open_interest") or 0.0) for row in result}
+            _DERIBIT_CACHE[cache_key] = {"ts": now_ts, "value": val}
+            return val
+        else:
+            if cached and cached.get("value") is not None:
+                _logger.warning("get_open_interest_by_currency: using stale cached value")
+                return cached.get("value")
+            _logger.exception("get_open_interest_by_currency failed and no cache available")
+            return {}
+
     def _get_latest_trade_ts_for_instrument(self, instrument_name: str):
         return self.with_context(active_test=False).search(
             [("name", "=", instrument_name)], order="deribit_ts desc", limit=1

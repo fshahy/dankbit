@@ -1368,6 +1368,179 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    def _gamma_by_strike(self, asset, expiry_cutoff=None):
+        """Combined portfolio dollar-gamma evaluated at each distinct strike
+        that has ever traded, across every active expiry up to and
+        including `expiry_cutoff` if given, or every active expiry at all
+        (no cutoff — same "Universal" scope _gamma_peaks_bottoms_all uses)
+        if not — no trailing-hours restriction either way, unlike every
+        other gamma-point line set on this page — every trade through
+        expiry. Unlike _gamma_peaks_bottoms_all (which finds curve
+        peaks/bottoms over a synthetic price grid), this evaluates
+        gamma.portfolio_gamma() directly at each real strike price, one
+        combined value per strike (not split into long/short call/put
+        legs) — feeds the Gamma Chart's "Strike Gamma" (no cutoff),
+        "Strike Gamma Weekly", and "Strike Gamma Monthly" (expiry_cutoff =
+        configured weekly/monthly expiry respectively) per-strike gamma
+        lines, see gamma_by_strike_json/gamma_by_strike_until_json. Same
+        r=0.05 convention
+        _gamma_peaks_bottoms_all uses for this same all-active-expiries
+        scope. Returns (strikes, trade_count), strikes a price-sorted list
+        of {"price", "gamma"} dicts (raw/unscaled — display scaling is the
+        caller's job), or (None, 0) for an unknown asset.
+
+        Net position, capped by real open interest. Per instrument, buy
+        volume minus sell volume (not raw cumulative volume) is what
+        approximates current market positioning — a trader who bought 10
+        then later sold 10 to close nets to 0, same as it should — but
+        summed since the instrument's creation with no time bound, that
+        net can in principle still exceed what's actually outstanding
+        right now (e.g. from data gaps). Each instrument's net is clamped
+        to dankbit.trade.get_open_interest_by_currency()'s real
+        open_interest for that instrument (Deribit's own live count,
+        fetched fresh — a single cached bulk call per asset, not
+        per-instrument) whenever that instrument appears in the response;
+        left unclamped if Deribit's response doesn't include it (treated
+        as "unknown", not "zero", so a transient gap in that one response
+        can't zero out a real position here)."""
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return None, 0
+
+        cr = request.env.cr
+        query_params = [f'%{asset}%']
+        cutoff_sql = ""
+        if expiry_cutoff:
+            cutoff_sql = "AND expiration <= %s"
+            query_params.append(expiry_cutoff)
+        cr.execute(f"""
+            SELECT name, strike, option_type, direction, expiration,
+                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
+            FROM dankbit_trade
+            WHERE name ILIKE %s
+              AND expiration >= NOW()
+              AND active = TRUE
+              {cutoff_sql}
+            GROUP BY name, strike, option_type, direction, expiration
+        """, query_params)
+        rows = cr.fetchall()
+        trade_count = sum(int(row[7]) for row in rows)
+
+        by_instrument = {}
+        for name, strike, option_type, direction, expiration, amount, avg_iv, _count in rows:
+            amount = float(amount)
+            entry = by_instrument.setdefault(name, {
+                "strike": strike, "option_type": option_type, "expiration": expiration,
+                "buy_amount": 0.0, "sell_amount": 0.0, "iv_numerator": 0.0,
+            })
+            if direction == "buy":
+                entry["buy_amount"] += amount
+            else:
+                entry["sell_amount"] += amount
+            entry["iv_numerator"] += float(avg_iv or 0.01) * amount
+
+        oi_map = request.env["dankbit.trade"].get_open_interest_by_currency(asset)
+
+        agg_trades = []
+        for name, e in by_instrument.items():
+            net = e["buy_amount"] - e["sell_amount"]
+            cap = oi_map.get(name)
+            if cap is not None and abs(net) > cap:
+                net = cap if net > 0 else -cap
+            if net == 0:
+                continue
+            total_amount = e["buy_amount"] + e["sell_amount"]
+            agg_trades.append(_AggTrade(
+                strike=e["strike"], option_type=e["option_type"],
+                direction="buy" if net > 0 else "sell",
+                expiration=e["expiration"], amount=abs(net),
+                iv=(e["iv_numerator"] / total_amount) if total_amount else 0.01,
+            ))
+
+        strikes = [
+            {"price": float(k), "gamma": float(gamma.portfolio_gamma(np.array([float(k)]), agg_trades, 0.05)[0])}
+            for k in sorted({t.strike for t in agg_trades})
+        ]
+        return strikes, trade_count
+
+    @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def gamma_by_strike_json(self, asset):
+        """Per-strike combined portfolio dollar-gamma, every trade through
+        expiry, all active expiries — feeds the Gamma Chart's gray
+        per-strike gamma lines (see TradingView Chart Notes). See
+        _gamma_by_strike()."""
+        asset = asset.upper()
+        strikes, trade_count = self._gamma_by_strike(asset)
+        if strikes is None:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        payload = {
+            "asset": asset,
+            "strikes": strikes,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/gamma-by-strike-until/<string:instrument>", type="http", auth="public", website=False, csrf=False)
+    def gamma_by_strike_until_json(self, instrument):
+        """Same per-strike computation as gamma_by_strike_json, but
+        restricted to every active expiry up to and including `instrument`'s
+        own day-suffix — same expiration >= NOW() AND expiration <= <that
+        expiry> cutoff convention gamma_levels_json uses for the Gamma
+        Chart's black "Weekly"/"Monthly" lines, same day-suffix parsing,
+        same generic-route-reused-for-both-scopes shape (gamma_levels_json
+        itself is reused for both Weekly (INSTRUMENT) and Monthly
+        (MONTHLY_INST) by the caller passing a different instrument, not
+        two separate routes — this route mirrors that rather than having
+        its own near-duplicate "-weekly"/"-monthly" routes). Feeds the
+        Gamma Chart's "Strike Gamma Weekly" (instrument=INSTRUMENT) and
+        "Strike Gamma Monthly" (instrument=MONTHLY_INST) line sets — two
+        separate checkboxes from the all-active-expiries "Strike Gamma"
+        one, so any combination of the three can be shown together; each
+        gets its own light-gray-to-black gradient scaled to its own
+        dataset's own max (see drawStrikeGammaLines). See
+        _gamma_by_strike()."""
+        parts = instrument.upper().split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                json.dumps({"error": "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        asset, expiry_str = parts
+        try:
+            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
+        except ValueError:
+            return request.make_response(
+                json.dumps({"error": "Invalid expiry format — expected DDMMMYY e.g. 4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        strikes, trade_count = self._gamma_by_strike(asset, expiry_cutoff=expiry_dt)
+        if strikes is None:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        payload = {
+            "asset": asset,
+            "expiry": expiry_str,
+            "strikes": strikes,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_extrema_json(self, asset):
         """One point per instrument stored in dankbit.zones.extrema (each
