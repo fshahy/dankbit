@@ -2063,11 +2063,18 @@ class ChartController(http.Controller):
 
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
 
-    @http.route("/my/<string:asset>", type="http", auth="public", website=True)
+    @http.route("/my/<string:asset>", type="http", auth="user", website=True)
     def my_chart_tv(self, asset):
         """Same page as /chart/<asset> (identical template/context), plus the
         gamma point line (see gamma_point_json) — /chart/<asset> itself is
-        unaffected, it always passes show_gamma_point=false."""
+        unaffected, it always passes show_gamma_point=false. auth="user"
+        (unlike every other route in this file, all auth="public") — a
+        logged-out request is redirected to the login page instead of
+        rendering; the JSON APIs this page's own JS calls client-side
+        (gamma-levels, gamma-by-strike, zones-extrema, etc.) stay
+        auth="public" and untouched, since the browser's session cookie is
+        sent automatically on those same-origin fetches once the user is
+        logged in to view this page at all."""
         asset = asset.upper()
 
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
