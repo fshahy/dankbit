@@ -1184,208 +1184,22 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/gamma-levels/<string:instrument>", type="http", auth="public", website=False, csrf=False)
-    def gamma_levels_json(self, instrument):
-        """Optional ?hours= query param restricts trades to the trailing
-        `hours` hours (deribit_ts >= NOW() - hours) on top of the usual
-        expiration >= NOW() AND expiration <= <instrument's expiry> window —
-        same trailing-hours-override pattern get_box()'s own ?hours= param
-        uses. Omitted (the default) means every trade through that expiry,
-        as before. Used by the Gamma Chart's orange "Nearest 24h" line.
-        """
-        parts = instrument.upper().split("-", 1)
-        if len(parts) != 2:
-            return request.make_response(
-                json.dumps({"error": "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-4JUL26"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        asset, expiry_str = parts
-        try:
-            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
-        except ValueError:
-            return request.make_response(
-                json.dumps({"error": "Invalid expiry format — expected DDMMMYY e.g. 4JUL26"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        icp = request.env["ir.config_parameter"].sudo()
-        if asset.startswith("BTC"):
-            from_price = float(icp.get_param("dankbit.from_price", default=100000))
-            to_price = float(icp.get_param("dankbit.to_price", default=150000))
-            steps = int(icp.get_param("dankbit.steps", default=100))
-        elif asset.startswith("ETH"):
-            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=50))
-        else:
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        hours_param = request.httprequest.args.get("hours")
-        query_params = [f'%{asset}%', expiry_dt]
-        time_filter_sql = ""
-        if hours_param:
-            time_filter_sql = "AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')"
-            query_params.append(float(hours_param))
-
-        cr = request.env.cr
-        cr.execute(f"""
-            SELECT strike, option_type, direction, expiration,
-                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND expiration >= NOW()
-              AND expiration <= %s
-              AND active = TRUE
-              {time_filter_sql}
-            GROUP BY strike, option_type, direction, expiration
-        """, query_params)
-        rows = cr.fetchall()
-
-        agg_trades = [
-            _AggTrade(
-                strike=row[0], option_type=row[1], direction=row[2],
-                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
-            )
-            for row in rows
-        ]
-        trade_count = sum(int(row[6]) for row in rows)
-
-        STs = np.arange(from_price, to_price, steps)
-        g_arr = gamma.portfolio_gamma(STs, agg_trades, 0.05)
-        d_arr = delta.portfolio_delta(STs, agg_trades, 0.05)
-
-        peaks   = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
-                   for px, _ in self.find_gamma_peaks(STs, g_arr)]
-        bottoms = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
-                   for px, _ in self.find_gamma_bottoms(STs, g_arr)]
-
-        payload = {
-            "asset": asset,
-            "expiry": expiry_str,
-            "peaks": peaks,
-            "bottoms": bottoms,
-            "trade_count": trade_count,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
-    def _gamma_peaks_bottoms_all(self, asset, hours=None):
-        """Gamma peaks/bottoms across every currently active expiry
-        (expiration >= NOW() only, no cutoff), optionally restricted to the
-        trailing `hours` hours of trades — the shared computation behind
-        gamma_levels_all_json (Gamma Chart's "Universal"/"Universal 24h"
-        lines). Returns (peaks, bottoms, trade_count), each peak/bottom a
-        {"price", "delta_positive"} dict, or (None, None, 0) for an unknown
-        asset."""
-        icp = request.env["ir.config_parameter"].sudo()
-        if asset.startswith("BTC"):
-            from_price = float(icp.get_param("dankbit.from_price", default=100000))
-            to_price = float(icp.get_param("dankbit.to_price", default=150000))
-            steps = int(icp.get_param("dankbit.steps", default=100))
-        elif asset.startswith("ETH"):
-            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
-            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
-            steps = int(icp.get_param("dankbit.eth_steps", default=50))
-        else:
-            return None, None, 0
-
-        query_params = [f'%{asset}%']
-        time_filter_sql = ""
-        if hours:
-            time_filter_sql = "AND deribit_ts >= NOW() - (%s * INTERVAL '1 hour')"
-            query_params.append(float(hours))
-
-        cr = request.env.cr
-        cr.execute(f"""
-            SELECT strike, option_type, direction, expiration,
-                   SUM(amount), SUM(iv * amount) / NULLIF(SUM(amount), 0), COUNT(*)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND expiration >= NOW()
-              AND active = TRUE
-              {time_filter_sql}
-            GROUP BY strike, option_type, direction, expiration
-        """, query_params)
-        rows = cr.fetchall()
-
-        agg_trades = [
-            _AggTrade(
-                strike=row[0], option_type=row[1], direction=row[2],
-                expiration=row[3], amount=float(row[4]), iv=float(row[5] or 0.01),
-            )
-            for row in rows
-        ]
-        trade_count = sum(int(row[6]) for row in rows)
-
-        STs = np.arange(from_price, to_price, steps)
-        g_arr = gamma.portfolio_gamma(STs, agg_trades, 0.05)
-        d_arr = delta.portfolio_delta(STs, agg_trades, 0.05)
-
-        peaks   = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
-                   for px, _ in self.find_gamma_peaks(STs, g_arr)]
-        bottoms = [{"price": px, "delta_positive": bool(np.interp(px, STs, d_arr) > 0)}
-                   for px, _ in self.find_gamma_bottoms(STs, g_arr)]
-        return peaks, bottoms, trade_count
-
-    @http.route("/api/gamma-levels-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def gamma_levels_all_json(self, asset):
-        """Same peaks/bottoms computation as gamma_levels_json, but with no
-        expiration cutoff at all (expiration >= NOW() only, same domain
-        delta_zero_all_json uses) — every currently active expiry's trades
-        combined into one portfolio gamma curve, rather than one named
-        instrument or one configured weekly/monthly cutoff. Feeds the Gamma
-        Chart's "Universal" checkbox (see TradingView Chart Notes). Optional
-        ?hours= restricts to the trailing `hours` hours of trades on top of
-        that (same trailing-hours-override pattern gamma_levels_json's own
-        ?hours= uses) — feeds the violet "Universal 24h" line set."""
-        asset = asset.upper()
-        hours_param = request.httprequest.args.get("hours")
-        peaks, bottoms, trade_count = self._gamma_peaks_bottoms_all(
-            asset, hours=float(hours_param) if hours_param else None,
-        )
-        if peaks is None:
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        payload = {
-            "asset": asset,
-            "peaks": peaks,
-            "bottoms": bottoms,
-            "trade_count": trade_count,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
     def _gamma_by_strike(self, asset, expiry_cutoff=None):
         """Combined portfolio dollar-gamma evaluated at each distinct strike
         that has ever traded, across every active expiry up to and
         including `expiry_cutoff` if given, or every active expiry at all
-        (no cutoff — same "Universal" scope _gamma_peaks_bottoms_all uses)
-        if not — no trailing-hours restriction either way, unlike every
-        other gamma-point line set on this page — every trade through
-        expiry. Unlike _gamma_peaks_bottoms_all (which finds curve
-        peaks/bottoms over a synthetic price grid), this evaluates
+        if not — no trailing-hours restriction either way. Unlike a
+        peak/bottom search over a synthetic price grid, this evaluates
         gamma.portfolio_gamma() directly at each real strike price, one
         combined value per strike (not split into long/short call/put
-        legs) — feeds the Gamma Chart's "Strike Gamma" (no cutoff),
-        "Strike Gamma Weekly", and "Strike Gamma Monthly" (expiry_cutoff =
-        configured weekly/monthly expiry respectively) per-strike gamma
-        lines, see gamma_by_strike_json/gamma_by_strike_until_json. Same
-        r=0.05 convention
-        _gamma_peaks_bottoms_all uses for this same all-active-expiries
-        scope. Returns (strikes, trade_count), strikes a price-sorted list
+        legs) — feeds the Gamma Chart's "Gamma Tops" checkbox, which fetches
+        this via gamma_by_strike_json (no cutoff — "All") and
+        gamma_by_strike_until_json 3 more times (expiry_cutoff = that
+        asset's own nearest active expiry / configured weekly expiry /
+        configured monthly expiry, for "Nearest"/"Weekly"/"Monthly"
+        respectively) and, from each of those 4 datasets, marks only the
+        single highest-positive-gamma strike rather than drawing every
+        strike. Returns (strikes, trade_count), strikes a price-sorted list
         of {"price", "gamma"} dicts (raw/unscaled — display scaling is the
         caller's job), or (None, 0) for an unknown asset.
 
@@ -1465,8 +1279,8 @@ class ChartController(http.Controller):
     @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def gamma_by_strike_json(self, asset):
         """Per-strike combined portfolio dollar-gamma, every trade through
-        expiry, all active expiries — feeds the Gamma Chart's gray
-        per-strike gamma lines (see TradingView Chart Notes). See
+        expiry, all active expiries — feeds the Gamma Chart's "Gamma Tops"
+        checkbox's "All" scope (see TradingView Chart Notes). See
         _gamma_by_strike()."""
         asset = asset.upper()
         strikes, trade_count = self._gamma_by_strike(asset)
@@ -1491,21 +1305,19 @@ class ChartController(http.Controller):
     def gamma_by_strike_until_json(self, instrument):
         """Same per-strike computation as gamma_by_strike_json, but
         restricted to every active expiry up to and including `instrument`'s
-        own day-suffix — same expiration >= NOW() AND expiration <= <that
-        expiry> cutoff convention gamma_levels_json uses for the Gamma
-        Chart's black "Weekly"/"Monthly" lines, same day-suffix parsing,
-        same generic-route-reused-for-both-scopes shape (gamma_levels_json
-        itself is reused for both Weekly (INSTRUMENT) and Monthly
-        (MONTHLY_INST) by the caller passing a different instrument, not
-        two separate routes — this route mirrors that rather than having
-        its own near-duplicate "-weekly"/"-monthly" routes). Feeds the
-        Gamma Chart's "Strike Gamma Weekly" (instrument=INSTRUMENT) and
-        "Strike Gamma Monthly" (instrument=MONTHLY_INST) line sets — two
-        separate checkboxes from the all-active-expiries "Strike Gamma"
-        one, so any combination of the three can be shown together; each
-        gets its own light-gray-to-black gradient scaled to its own
-        dataset's own max (see drawStrikeGammaLines). See
-        _gamma_by_strike()."""
+        own day-suffix — expiration >= NOW() AND expiration <= <that
+        expiry>, same day-suffix parsing as the rest of this file. One
+        generic route reused for 3 different cutoffs by the caller passing
+        a different instrument, not 3 near-duplicate routes. Feeds the
+        Gamma Chart's "Gamma Tops" checkbox's "Nearest" (instrument=that
+        asset's own nearest active expiry, looked up client-side via
+        /api/nearest-expiry/<asset> and passed in as the cutoff instrument),
+        "Weekly" (instrument=INSTRUMENT), and "Monthly" (instrument=
+        MONTHLY_INST) scopes — one checkbox now fetches this route 3 times
+        (plus gamma_by_strike_json once for "All") and, from each of the 4
+        resulting datasets, marks only the single highest-positive-gamma
+        strike (see drawGammaTopLine in dankbit_templates.xml) rather than
+        drawing every strike. See _gamma_by_strike()."""
         parts = instrument.upper().split("-", 1)
         if len(parts) != 2:
             return request.make_response(
@@ -1988,7 +1800,7 @@ class ChartController(http.Controller):
         """Shared context-building for /chart/<asset> and /my/<asset> — both
         render the same dankbit_tv_chart_until template; /my/<asset> just
         additionally sets show_gamma_point so the template also draws the
-        gamma point line (see gamma_point_json). Returns (context, None) on
+        Gamma Tops indicator. Returns (context, None) on
         success or (None, error_message) if the weekly expiry isn't
         configured/valid for `asset`, so callers can render that as a plain
         text response the same way this route always has."""
@@ -2066,12 +1878,12 @@ class ChartController(http.Controller):
     @http.route("/my/<string:asset>", type="http", auth="user", website=True)
     def my_chart_tv(self, asset):
         """Same page as /chart/<asset> (identical template/context), plus the
-        gamma point line (see gamma_point_json) — /chart/<asset> itself is
+        Gamma Tops indicator — /chart/<asset> itself is
         unaffected, it always passes show_gamma_point=false. auth="user"
         (unlike every other route in this file, all auth="public") — a
         logged-out request is redirected to the login page instead of
         rendering; the JSON APIs this page's own JS calls client-side
-        (gamma-levels, gamma-by-strike, zones-extrema, etc.) stay
+        (gamma-by-strike, gamma-by-strike-until, nearest-expiry, etc.) stay
         auth="public" and untouched, since the browser's session cookie is
         sent automatically on those same-origin fetches once the user is
         logged in to view this page at all."""
