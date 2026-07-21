@@ -58,7 +58,7 @@ def per_leg_greeks(STs, trades):
     A thin Pine-naming translation layer over options.per_leg_greeks() —
     the actual computation (which leg peaks/bottoms via which argmax/argmin,
     delta-saturation side per leg) lives there now, shared with
-    chart_png_zones (main.py) and dankbit.zones.extrema's gamma_band/
+    chart_png_zones (main.py) and dankbit.bands's gamma_band/
     delta_band, so all three can never quietly disagree on these numbers
     for the same trades."""
     legs = options_lib.per_leg_greeks(STs, trades)

@@ -275,8 +275,8 @@
 							Zones
 						</label>
 						<label class="toggle-label">
-							<input type="checkbox" id="zones-toggle" onchange="onToggleZonesExtrema()"/>
-							Zones Extrema
+							<input type="checkbox" id="bands-toggle" onchange="onToggleBands()"/>
+							Bands
 						</label>
 						<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
@@ -347,38 +347,37 @@
 					// existed — unchecking it stops refreshZonesBoxes() from
 					// calling the server at all, which also means this browser's
 					// own polling stops refreshing the nearest expiry's
-					// dankbit.zones.extrema row (expiry_index 0) — same trade-off
-					// "Zones Extrema" below already accepts for expiry_index 1/2;
-					// the 4-hourly compute_snapshot() cron still keeps that row
-					// fresh on its own regardless.
+					// dankbit.bands row (expiry_index 0) — the 4-hourly
+					// compute_snapshot() cron still keeps that row fresh on its own
+					// regardless.
 					let SHOW_ZONES_BOXES = true;
-					// User-toggleable via the "Zones Extrema" checkbox (Delta Chart
+					// User-toggleable via the "Bands" checkbox (Delta Chart
 					// only — this indicator is already suppressed on DG Chart via
 					// MINIMAL_CHART, so this control isn't shown there at all, see the
 					// t-if on its markup). Controls only the High/Resistance + Low/Support +
 					// Gamma Band lines (green/red/dashed violet) — deliberately NOT
 					// the yellow/teal zones boxes, which have their own separate
 					// "Zones" checkbox instead (SHOW_ZONES_BOXES above). Stops
-					// refreshZonesExtrema()/refreshZonesExtremaExtended()
-					// from calling the server at all while off — including the
-					// expiry_index 1/2 background-refresh calls, so this page's own
-					// live polling stops feeding those two expiries' rows in
-					// dankbit.zones.extrema while off; expiry_index 0 (the nearest
-					// expiry, via refreshZonesBoxes()) is governed by SHOW_ZONES_BOXES
-					// instead, not by this flag. The 4-hourly compute_snapshot() cron
-					// is untouched either way and keeps every tracked expiry's row
-					// fresh on its own regardless of any of these flags.
-					let SHOW_ZONES_EXTREMA = false;
+					// refreshBands() from calling the server at all while off.
+					// refreshBands() only ever reads the already-persisted
+					// dankbit.bands rows (/api/bands/<asset>) — it
+					// never triggers a new computation, for any expiry_index. Every
+					// tracked expiry's row (see TRACKED_EXPIRY_COUNT) is computed and
+					// refreshed solely by the 4-hourly compute_snapshot() cron;
+					// nothing this browser does — checking this box, leaving it
+					// checked, or polling while it's open — causes new extrema to be
+					// computed.
+					let SHOW_BANDS = false;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
-					// only, radio toggle next to "Zones Extrema") — 'midnight' is the
+					// only, radio toggle next to "Bands") — 'midnight' is the
 					// original since-00:00-UTC-through-now default; 'hours' switches
 					// to the trailing ZONES_BOX_WINDOW_HOURS hours instead (see
 					// dankbit.zones_box_window_hours setting). Only 'hours' is ever
-					// sent as a query param (see refreshZonesBoxes()) — like the
-					// "Zones Extrema" checkbox, this is a live, non-persisted
-					// override on the server side (see get_box()'s hours param); the
-					// hourly compute_snapshot() cron and every other viewer's default
-					// midnight-based view are completely unaffected either way.
+					// sent as a query param (see refreshZonesBoxes()) — a live,
+					// non-persisted override on the server side (see get_box()'s
+					// hours param); the hourly compute_snapshot() cron and every
+					// other viewer's default midnight-based view are completely
+					// unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
 					// "Gamma Tops" checkbox (Gamma Chart only) — replaces the
 					// old separate "Strike Gamma"/"Strike Gamma Nearest"/
@@ -401,12 +400,12 @@
 					const SG_URL           = '/api/gamma-by-strike/' + ASSET;
 					const SGW_URL          = '/api/gamma-by-strike-until/' + INSTRUMENT;
 					const SGM_URL          = MONTHLY_INST ? '/api/gamma-by-strike-until/' + MONTHLY_INST : '';
-					const ZE_URL           = '/api/zones-extrema/' + ASSET;
+					const BANDS_URL        = '/api/bands/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					const FORECAST3_URL    = '/api/forecast3/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
-					// "Zones Extrema"; the Gamma Chart no longer has this
+					// "Bands"; the Gamma Chart no longer has this
 					// checkbox at all, so SHOW_FORECAST3 simply never gets
 					// set true there) — unchecked by default, same server-
 					// load-reducing pattern as every other optional indicator on
@@ -687,9 +686,8 @@
 						INTERVAL = iv;
 						document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.textContent === iv));
 						await loadCandles();
-						await refreshZonesExtrema();
+						await refreshBands();
 						await refreshZonesBoxes();
-						await refreshZonesExtremaExtended();
 						await updateForecastVisibility();
 					}
 
@@ -810,7 +808,7 @@
 						}
 					}
 
-					function clearZonesExtremaLines() {
+					function clearBandsLines() {
 						highResistanceSeries.setData([]);
 						lowSupportSeries.setData([]);
 						gammaBandSeries.setData([]);
@@ -818,10 +816,10 @@
 						lowSupportSeries.setMarkers([]);
 					}
 
-					async function refreshZonesExtrema() {
-						if (MINIMAL_CHART || !SHOW_ZONES_EXTREMA) return;
-						const data = await (await fetch(ZE_URL)).json();
-						const rows = data.zones_extrema || [];
+					async function refreshBands() {
+						if (MINIMAL_CHART || !SHOW_BANDS) return;
+						const data = await (await fetch(BANDS_URL)).json();
+						const rows = data.bands || [];
 						highResistanceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.high_resistance })));
 						lowSupportSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.low_support })));
 						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
@@ -850,7 +848,7 @@
 
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
 						// 0.0 is the "no crossing at all" sentinel (see
-						// dankbit.zones.extrema) — nothing real to draw on that edge.
+						// dankbit.bands) — nothing real to draw on that edge.
 						if (!top && !bottom) { boxSeries.setData([]); bottomLineSeries.setData([]); return; }
 						if (top && bottom && top !== bottom) {
 							boxSeries.applyOptions({ baseValue: { type: 'price', price: bottom } });
@@ -887,8 +885,8 @@
 					async function refreshZonesBoxes() {
 						if (MINIMAL_CHART || !SHOW_ZONES_BOXES) return;
 						// Live lookup — computed fresh by the server on every call (see
-						// dankbit.zones.extrema.get_box), not read from stored history.
-						// Persisted (feeding the Zones Extrema lines' history) unless
+						// dankbit.bands.get_box), not read from stored history.
+						// Persisted (feeding the Bands lines' history) unless
 						// ZONES_BOX_WINDOW_MODE is 'hours', in which case the ?hours=
 						// override makes the server compute display-only instead — see
 						// ZONES_BOX_WINDOW_MODE above.
@@ -918,21 +916,6 @@
 						setBoxData(smpBmlBoxSeries, smpBmlBoxBottomLine, smpBmlTop, smpBmlBottom, fromTime, toTime);
 					}
 
-					async function refreshZonesExtremaExtended() {
-						if (MINIMAL_CHART || !SHOW_ZONES_EXTREMA) return;
-						// Only the nearest active expiry (expiry_index 0) draws a box —
-						// expiry_index 1 through 2 just keep their dankbit.zones.extrema
-						// rows fresh while the chart is open (see get_box_n), the same way
-						// refreshZonesBoxes() does for 0, so refreshZonesExtrema()'s next
-						// poll picks up fresher High/Resistance, Low/Support, and Gamma Band
-						// points for them — no box is rendered from this call's
-						// response, so there's nothing to do with it beyond triggering the
-						// server-side computation.
-						for (const i of [1, 2]) {
-							try { await fetch('/api/zones-extrema-refresh/' + ASSET + '/' + i); } catch (e) { /* best-effort */ }
-						}
-					}
-
 					// "Zones" checkbox (Delta Chart only, right after "Lines") —
 					// controls the yellow High Zone/Low Zone boxes and the teal
 					// Middle Zone (Seller Max Profit/Buyer Max Loss) box, i.e.
@@ -942,7 +925,7 @@
 					// were always shown before this checkbox existed. Stops
 					// refreshZonesBoxes() from calling the server at all while off
 					// (see SHOW_ZONES_BOXES above) — including its side effect of
-					// persisting the nearest expiry's dankbit.zones.extrema row —
+					// persisting the nearest expiry's dankbit.bands row —
 					// not just hiding the result; the 4-hourly compute_snapshot()
 					// cron is untouched either way. Clears the boxes immediately
 					// when switched off and re-fetches immediately when switched
@@ -956,25 +939,25 @@
 						}
 					}
 
-					// "Zones Extrema" checkbox (Delta Chart only, next to "Zones") —
+					// "Bands" checkbox (Delta Chart only, next to "Zones") —
 					// controls only the High/Resistance + Low/Support + Gamma Band lines
 					// (green/red/dashed violet), NOT the yellow/teal zones boxes,
 					// which have their own separate "Zones" checkbox instead
-					// (SHOW_ZONES_BOXES/onToggleZonesBoxes() above). Stops refreshZonesExtrema()/refreshZonesExtremaExtended()
-					// from calling the server at all while off (see
-					// SHOW_ZONES_EXTREMA above), not just hiding the result — the
-					// cron is untouched, this only stops this browser's own
-					// contribution to keeping dankbit.zones.extrema fresh. Clears
-					// the lines immediately when switched off (refreshZonesExtrema()
-					// returns before clearing when SHOW_ZONES_EXTREMA is false) and
-					// re-fetches immediately when switched back on.
-					function onToggleZonesExtrema() {
-						SHOW_ZONES_EXTREMA = document.getElementById('zones-toggle').checked;
-						if (SHOW_ZONES_EXTREMA) {
-							refreshZonesExtrema();
-							refreshZonesExtremaExtended();
+					// (SHOW_ZONES_BOXES/onToggleZonesBoxes() above). refreshBands()
+					// only ever reads the already-persisted dankbit.bands rows
+					// (/api/bands/<asset>) — it never triggers a new computation.
+					// Those rows are kept fresh solely by the 4-hourly compute_snapshot()
+					// cron; toggling this checkbox, or this browser polling it, has no
+					// effect on when new extrema get computed. Clears the lines
+					// immediately when switched off (refreshBands() returns
+					// before clearing when SHOW_BANDS is false) and re-fetches
+					// immediately when switched back on.
+					function onToggleBands() {
+						SHOW_BANDS = document.getElementById('bands-toggle').checked;
+						if (SHOW_BANDS) {
+							refreshBands();
 						} else {
-							clearZonesExtremaLines();
+							clearBandsLines();
 						}
 					}
 
@@ -1101,7 +1084,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshZonesExtrema(); await refreshZonesBoxes(); await refreshZonesExtremaExtended(); await refreshNearestExpiry(); await refreshGammaTops(); await updateForecastVisibility(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -1130,9 +1113,8 @@
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
-					setInterval(refreshZonesExtrema, REFRESH);
+					setInterval(refreshBands, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
-					setInterval(refreshZonesExtremaExtended, REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshForecast3, REFRESH);
 				//]]></script>

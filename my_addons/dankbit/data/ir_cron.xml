@@ -25,10 +25,10 @@
             <field name="priority">10</field>
         </record>
 
-        <record id="dankbit_compute_zones_extrema_cron" model="ir.cron">
+        <record id="dankbit_compute_bands_cron" model="ir.cron">
             <field name="active">False</field>
-            <field name="name">Dankbit - Compute Zones Extrema Snapshot</field>
-            <field name="model_id" ref="model_dankbit_zones_extrema"/>
+            <field name="name">Dankbit - Compute Bands Snapshot</field>
+            <field name="model_id" ref="model_dankbit_bands"/>
             <field name="interval_number">4</field>
             <field name="interval_type">hours</field>
             <field name="state">code</field>

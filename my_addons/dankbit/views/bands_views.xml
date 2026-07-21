@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 
 <odoo>
-    <record id="dankbit_zones_extrema_view_form" model="ir.ui.view">
-        <field name="name">dankbit_zones_extrema.view.form</field>
-        <field name="model">dankbit.zones.extrema</field>
+    <record id="dankbit_bands_view_form" model="ir.ui.view">
+        <field name="name">dankbit_bands.view.form</field>
+        <field name="model">dankbit.bands</field>
         <field name="arch" type="xml">
-            <form string="Zones Extrema">
+            <form string="Bands">
                 <sheet>
                     <group>
                         <field name="computed_at" />
@@ -74,11 +74,11 @@
         </field>
     </record>
 
-    <record id="dankbit_zones_extrema_view_list" model="ir.ui.view">
-        <field name="name">dankbit_zones_extrema.view.list</field>
-        <field name="model">dankbit.zones.extrema</field>
+    <record id="dankbit_bands_view_list" model="ir.ui.view">
+        <field name="name">dankbit_bands.view.list</field>
+        <field name="model">dankbit.bands</field>
         <field name="arch" type="xml">
-            <list string="Zones Extrema">
+            <list string="Bands">
                 <field name="computed_at" />
                 <field name="asset" />
                 <field name="instrument" />
@@ -135,11 +135,11 @@
         </field>
     </record>
 
-    <record id="dankbit_zones_extrema_view_search" model="ir.ui.view">
-        <field name="name">dankbit.zones.extrema.view.search</field>
-        <field name="model">dankbit.zones.extrema</field>
+    <record id="dankbit_bands_view_search" model="ir.ui.view">
+        <field name="name">dankbit.bands.view.search</field>
+        <field name="model">dankbit.bands</field>
         <field name="arch" type="xml">
-            <search string="Search Zones Extrema">
+            <search string="Search Bands">
                 <field name="asset" string="Asset"/>
 
                 <separator/>
@@ -154,14 +154,14 @@
         </field>
     </record>
 
-    <record id="dankbit_zones_extrema_action" model="ir.actions.act_window">
-        <field name="name">Zones Extrema</field>
-        <field name="res_model">dankbit.zones.extrema</field>
+    <record id="dankbit_bands_action" model="ir.actions.act_window">
+        <field name="name">Bands</field>
+        <field name="res_model">dankbit.bands</field>
         <field name="view_mode">list,form</field>
     </record>
 
-    <menuitem id="dankbit_zones_extrema_menu" name="Zones Extrema"
-        action="dankbit_zones_extrema_action"
+    <menuitem id="dankbit_bands_menu" name="Bands"
+        action="dankbit_bands_action"
         parent="dankbit_root_menu"
         sequence="50"/>
 </odoo>

@@ -13,8 +13,8 @@ from ..controllers import forecast3 as forecast3_lib
 _logger = logging.getLogger(__name__)
 
 
-class ZonesExtrema(models.Model):
-    _name = "dankbit.zones.extrema"
+class Bands(models.Model):
+    _name = "dankbit.bands"
     _order = "instrument"
 
     # One record per instrument (e.g. "BTC-10JUL26"), not per snapshot — see
@@ -116,7 +116,7 @@ class ZonesExtrema(models.Model):
     buyer_max_loss = fields.Float(string="Buyer Max Loss (BML)", digits=(16, 4))
 
     _sql_constraints = [
-        ("instrument_uniq", "unique (instrument)", "Only one zones-extrema record is kept per instrument."),
+        ("instrument_uniq", "unique (instrument)", "Only one bands record is kept per instrument."),
     ]
 
     # The 32 per-leg gamma/delta/theta/vega price + Abs field names —
@@ -405,17 +405,20 @@ class ZonesExtrema(models.Model):
         live off the return value (see get_box), since nothing reads
         box-boundary history.
 
-        Called from get_box() (nearest expiry, expiry_index 0) and, for
-        expiry_index 1 upward, get_box_n() via /api/zones-extrema-refresh —
-        i.e. piggybacked on the existing polling that already happens at
-        `dankbit.refresh_interval` on every TradingView chart page. Since an
-        instrument is typically "tracked" (index 1+) for a while before it
-        becomes nearest, this means its row starts accumulating (and getting
-        refined) even before get_box() ever touches it. compute_snapshot()
-        (below) additionally calls get_box_n() for every tracked expiry_index
-        on a 4-hour cron as a fallback for when nobody's actually viewing
-        the chart — without it, an instrument that was never tracked while
-        anyone happened to be watching would never get a row at all.
+        Called only from compute_snapshot()'s 4-hourly cron (see
+        TRACKED_EXPIRY_COUNT below), for every tracked expiry_index
+        including 0 — there is no browser-triggered live path at all,
+        deliberately, for any of them: /api/zones-box/<asset> (the "Zones"
+        checkbox) computes the nearest expiry's box boundaries fresh on
+        every request via get_box() -> _compute_asset() directly, without
+        ever routing through here, and the "Bands" checkbox's
+        refreshBands() only reads already-persisted rows
+        (/api/bands/<asset>). So opening the chart, toggling either
+        checkbox, or switching timeframe can never affect when these rows
+        update. Since an instrument is typically "tracked" (index 1+) for a
+        while before it becomes nearest, its row starts accumulating (and
+        getting refined) via the cron well before it ever becomes the
+        nearest expiry.
 
         Either way, this is still enough to build a connected multi-expiry
         history: while an instrument (e.g. "BTC-10JUL26") is tracked, every
@@ -425,13 +428,19 @@ class ZonesExtrema(models.Model):
         overwriting the old one. The old row is simply never touched again,
         freezing at its last computed value — which is exactly the final
         point the TradingView chart needs for that expiry (see
-        /api/zones-extrema/<asset>).
+        /api/bands/<asset>).
 
-        get_box()/get_box_n() are `auth="public"` routes, so this runs
-        under the anonymous public user by default — which has no access
-        rights at all on dankbit.zones.extrema (only base.group_user does,
-        see ir.model.access.csv). sudo() here mirrors how the rest of this
-        codebase already elevates for public-facing reads/writes (e.g.
+get_box_n() (the only caller of this method) is itself only ever
+        called by compute_snapshot()'s cron, not from any public HTTP
+        route — get_box() (which *is* reached from the public
+        /api/zones-box/<asset> route) deliberately calls _compute_asset()
+        directly instead, bypassing get_box_n()/this method entirely, so
+        that no anonymous request can ever write here. sudo() is kept
+        anyway as a defensive backstop (the cron's own user_id isn't
+        guaranteed to have write access on dankbit.bands, which only
+        grants base.group_user — see ir.model.access.csv) and mirrors how
+        the rest of this codebase already elevates for writes that
+        shouldn't depend on the caller's own permissions (e.g.
         ir.config_parameter.sudo())."""
         self = self.sudo()
         vals = {
@@ -462,26 +471,29 @@ class ZonesExtrema(models.Model):
             self.create(vals)
 
     # How many active expiries (soonest-first, 0 = nearest) get a persisted
-    # zones-extrema row at all — the TradingView chart only draws an actual
+    # bands row at all — the TradingView chart only draws an actual
     # box for expiry_index 0 (yellow), but every index up to this bound still
     # feeds the High/Resistance, Low/Support, and Gamma Band term-structure
-    # lines (see get_box_n/refreshZonesExtrema), which render whatever rows
+    # lines (see get_box_n/refreshBands), which render whatever rows
     # exist for the asset regardless of whether a box was ever drawn for
-    # them.
+    # them. Every tracked expiry_index, including 0, is only ever computed
+    # by the 4-hourly compute_snapshot() cron (see below) — there is no
+    # browser-triggered live path for any of them; the "Zones" checkbox's
+    # own live box rendering goes through get_box() -> _compute_asset()
+    # directly and never persists.
     TRACKED_EXPIRY_COUNT = 3
 
     def get_box_n(self, asset, expiry_index):
-        """Live zones-extrema computation for `asset`'s `expiry_index`-th
-        soonest active expiry, computed fresh on every call and persisted via
-        _persist_extrema — generic version of get_box() (expiry_index 0,
-        which only exists as a named wrapper for backward compatibility with
-        /api/zones-box, the only one that actually renders a box on the
-        chart). Called directly for expiry_index 1 upward by
-        /api/zones-extrema-refresh/<asset>/<expiry_index> — those don't draw
-        a box (only the nearest expiry, index 0, gets the yellow box), only
-        feed the High/Resistance, Low/Support, and Gamma Band lines,
-        which read every persisted row for the asset regardless of
-        expiry_index. The 4 box-boundary fields themselves are still never
+        """Bands computation for `asset`'s `expiry_index`-th soonest
+        active expiry, computed fresh on every call and persisted via
+        _persist_extrema. The *only* caller, for every expiry_index
+        (including 0), is compute_snapshot()'s 4-hourly cron — there is no
+        HTTP route or browser-triggered path that reaches this method at
+        all, by design (see TRACKED_EXPIRY_COUNT). /api/zones-box/<asset>
+        (the one that actually renders the yellow box on the chart) goes
+        through get_box(), which calls _compute_asset() directly instead of
+        this method, precisely so that live page views never persist
+        anything. The 4 box-boundary fields themselves are still never
         persisted, only the computed_at moment's index_price/
         high_resistance/low_support/gamma_band/delta_band (see
         _persist_extrema)."""
@@ -491,36 +503,35 @@ class ZonesExtrema(models.Model):
         return data
 
     def get_box(self, asset, hours=None):
-        """Live zones-box boundaries for `asset`'s nearest active expiry —
-        thin wrapper over get_box_n(asset, 0), kept as its own method since
-        /api/zones-box/<asset> is the one that actually renders the yellow
-        box on the chart. An explicit `hours` overrides the default
+        """Live zones-box boundaries for `asset`'s nearest active expiry,
+        for /api/zones-box/<asset> — the one that actually renders the
+        yellow (and teal) box on the chart. Always computed via
+        _compute_asset() directly, never via get_box_n(), so a live page
+        view can never persist anything into dankbit.bands: the nearest
+        expiry's row (expiry_index 0) is refreshed *only* by
+        compute_snapshot()'s 4-hourly cron, exactly like expiry_index 1/2
+        (see TRACKED_EXPIRY_COUNT) — no browser action, for any expiry_index,
+        ever writes to this model. An explicit `hours` overrides the default
         since-00:00-UTC-through-now trade window with the trailing `hours`
         hours instead — driven by /chart/<asset>'s 00:00-UTC-vs-trailing-
-        hours radio toggle (see dankbit_templates.xml) — and, unlike the
-        default path, is computed via _compute_asset() directly rather than
-        get_box_n(), so it is never persisted via _persist_extrema():
-        display-only, doesn't touch the shared history other viewers/
+        hours radio toggle (see dankbit_templates.xml); either way this is
+        display-only and doesn't touch the shared history other viewers/
         expiries' term-structure lines depend on."""
-        if hours is not None:
-            return self._compute_asset(asset, expiry_index=0, hours=hours)
-        return self.get_box_n(asset, 0)
+        return self._compute_asset(asset, expiry_index=0, hours=hours)
 
     def compute_snapshot(self):
-        """Cron entry point (every 4 hours — see data/ir_cron.xml) — a
-        fallback so instrument rows keep updating even when nobody's
-        actually viewing /chart/BTC or /chart/ETH. get_box_n() normally only
-        ever runs as a side effect of that page's live polling (zones-box for
-        expiry_index 0, zones-extrema-refresh for 1 upward); with no cron at
-        all, an instrument that's never "tracked" while anyone happens to be
-        watching would never get a row — a real
-        gap in the per-expiry history, not just a staler point. Calls the
-        exact same get_box_n() the live endpoints call, for every tracked
-        expiry_index (see TRACKED_EXPIRY_COUNT) and both BTC and ETH, so this
-        cron can never compute or persist anything a live page view wouldn't
-        have. Only touches dankbit.zones.extrema (via _persist_extrema) — the
-        TradingView horizontal price lines (delta=0, gamma peak/bottom) are
-        untouched by this or any cron."""
+        """Cron entry point (every 4 hours — see data/ir_cron.xml) — the
+        *sole* source of truth for every tracked expiry_index, including 0
+        (the nearest expiry): no browser action ever computes or persists
+        into dankbit.bands, for any expiry_index (see TRACKED_EXPIRY_COUNT/
+        get_box_n/get_box). /api/zones-box/<asset>'s own live polling still
+        computes the yellow box's boundaries fresh on every request for
+        instant rendering, but via get_box() -> _compute_asset() directly,
+        never through get_box_n(), so it never writes here — this cron is
+        the only path that keeps dankbit.bands rows updating at all. Only
+        touches dankbit.bands (via _persist_extrema) — the TradingView
+        horizontal price lines (delta=0, gamma peak/bottom) are untouched by
+        this or any cron."""
         for asset in ("BTC", "ETH"):
             for expiry_index in range(self.TRACKED_EXPIRY_COUNT):
                 self.get_box_n(asset, expiry_index)

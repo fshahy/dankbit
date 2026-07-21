@@ -22,7 +22,7 @@ class Forecast3Snapshot(models.Model):
 
     # One row per (asset, bucket_start) — continuously refined while its
     # bucket is "current", then frozen once time moves past it, exactly the
-    # same "continuously-refined-then-frozen" pattern dankbit.zones.extrema
+    # same "continuously-refined-then-frozen" pattern dankbit.bands
     # uses per-instrument (see _persist_extrema there), just keyed by a
     # rolling 4h time bucket instead of an expiry instrument. This is the
     # real historical time series Thales's manually-dated CSV rows provide
@@ -35,7 +35,7 @@ class Forecast3Snapshot(models.Model):
     bucket_start = fields.Datetime(required=True, index=True)
     index_price = fields.Float(digits=(16, 4))
 
-    # Band edges — same values as dankbit.zones.extrema's high_zone_max/
+    # Band edges — same values as dankbit.bands's high_zone_max/
     # low_zone_min (each curve's own highest/lowest zero-crossing, same
     # skip-absent-sides rule options.zone_summary() uses), read straight
     # off that model's _compute_asset() rather than re-derived here,
@@ -91,7 +91,7 @@ class Forecast3Snapshot(models.Model):
 
     # Curve extremes — Thales's BML (Buyer Max Loss = Longs curve bottom)
     # and SMP (Seller Max Profit = Shorts curve peak); same values
-    # dankbit.zones.extrema's buyer_max_loss/seller_max_profit already
+    # dankbit.bands's buyer_max_loss/seller_max_profit already
     # track, read from that model's _compute_asset() (see
     # compute_and_persist) but kept as this model's own columns rather
     # than a relational reference, since this snapshot's whole point is to
@@ -118,7 +118,7 @@ class Forecast3Snapshot(models.Model):
         trades in the window — a real gap, not written as a row of zeroes).
 
         Everything below is read straight off
-        dankbit.zones.extrema._compute_asset(asset, expiry_index=0) — the
+        dankbit.bands._compute_asset(asset, expiry_index=0) — the
         exact same computation that feeds the TradingView chart's yellow
         zones box, and which already returns high_zone_max/low_zone_min
         (identical to this row's own top/low: each curve's own highest/
@@ -133,29 +133,29 @@ class Forecast3Snapshot(models.Model):
         Greeks can never quietly drift from what's actually drawn
         elsewhere in the app, and never do the same query/curve-build
         twice for one asset."""
-        zx_data = self.env["dankbit.zones.extrema"]._compute_asset(asset, expiry_index=0)
-        if not zx_data:
-            _logger.warning("forecast3.compute_and_persist: zones.extrema has nothing computable for %s, skipping", asset)
+        bands_data = self.env["dankbit.bands"]._compute_asset(asset, expiry_index=0)
+        if not bands_data:
+            _logger.warning("forecast3.compute_and_persist: dankbit.bands has nothing computable for %s, skipping", asset)
             return None
 
-        top = zx_data["high_zone_max"]
-        low = zx_data["low_zone_min"]
+        top = bands_data["high_zone_max"]
+        low = bands_data["low_zone_min"]
         if not top or not low:
             _logger.warning("forecast3.compute_and_persist: no band for %s, skipping", asset)
             return None
 
-        as_of = zx_data["computed_at"]
+        as_of = bands_data["computed_at"]
 
         vals = {
             "asset": asset,
             "bucket_start": self._bucket_start_for(as_of),
-            "index_price": zx_data["index_price"],
+            "index_price": bands_data["index_price"],
             "top": top,
             "low": low,
-            "bml": zx_data["buyer_max_loss"],
-            "smp": zx_data["seller_max_profit"],
+            "bml": bands_data["buyer_max_loss"],
+            "smp": bands_data["seller_max_profit"],
         }
-        vals.update({f: zx_data[f] for f in self.env["dankbit.zones.extrema"]._PER_LEG_GREEK_FIELDS})
+        vals.update({f: bands_data[f] for f in self.env["dankbit.bands"]._PER_LEG_GREEK_FIELDS})
 
         record = self.sudo().search([
             ("asset", "=", asset),

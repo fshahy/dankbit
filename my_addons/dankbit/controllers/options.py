@@ -305,7 +305,7 @@ def delta_saturation_price(STs, trades, fraction, stop_at):
     pass sign separately. Falls back to the STs edge on `stop_at` if the
     extreme itself is 0 (e.g. no trades — nothing to take a fraction of) or
     the curve never reaches that fraction within this window. Shared by
-    dankbit.zones.extrema (delta_band) and the /<instrument>/lp,lc,sp,sc
+    dankbit.bands (delta_band) and the /<instrument>/lp,lc,sp,sc
     single-leg routes (green marker line), so the two can never disagree on
     where this point is."""
     curve = np.asarray(delta_lib.portfolio_delta(STs, trades), dtype=float)
@@ -345,8 +345,8 @@ def per_leg_greeks(STs, trades, r=0.0):
     forecast3.per_leg_greeks() does the same for its own *_abs fields).
 
     Single source of truth for this computation — shared by chart_png_zones
-    (main.py), dankbit.zones.extrema's gamma_band/delta_band
-    (models/zones_extrema.py), and forecast3.per_leg_greeks()
+    (main.py), dankbit.bands's gamma_band/delta_band
+    (models/bands.py), and forecast3.per_leg_greeks()
     (controllers/forecast3.py), so the three can never quietly compute
     different numbers for the same trades. `trades` should already be
     filtered to whichever expiry/time-window the caller cares about — this
@@ -386,7 +386,7 @@ def per_leg_greeks(STs, trades, r=0.0):
 
 
 def zone_summary(STs, longs_curve, shorts_curve):
-    """Same extrema/box-boundary definitions used by dankbit.zones.extrema
+    """Same extrema/box-boundary definitions used by dankbit.bands
     and the TradingView zones boxes: Shorts curve peak ("seller_max_profit"),
     Longs curve bottom ("buyer_max_loss"), and each curve's own highest/
     lowest zero-crossing, giving a "high zone" (the two curves' highest
@@ -452,7 +452,7 @@ def build_zone_curves(instrument_name, index_price, trades, from_price, to_price
     if the curves never cross.
 
     Shared by the /<instrument>/zones route (controllers/main.py) and
-    dankbit.zones.extrema's cron (models/zones_extrema.py) so the two can
+    dankbit.bands's cron (models/bands.py) so the two can
     never compute different extrema for the same trades — one implementation,
     not two copies that could quietly drift apart."""
     def build(fp, tp, st):

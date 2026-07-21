@@ -241,7 +241,7 @@ class ChartController(http.Controller):
         # Seller Max Profit/Buyer Max Loss/zone info used to be drawn inside
         # the PNG itself (matplotlib ax.text) — now rendered as page HTML
         # (top-left overlay, see dankbit_page template) instead, off the
-        # same summary dankbit.zones.extrema uses, so the two can never
+        # same summary dankbit.bands uses, so the two can never
         # disagree.
         summary = options.zone_summary(longs_obj.STs, longs_obj.payoffs, shorts_obj.payoffs)
 
@@ -263,11 +263,11 @@ class ChartController(http.Controller):
         low_support = "n/a" if summary["low_support"] is None else "${:,.0f}".format(summary["low_support"])
 
         # Restrict to the single nearest (soonest-to-expire) expiry among
-        # `trades` — same "next expiry only" restriction dankbit.zones.extrema
+        # `trades` — same "next expiry only" restriction dankbit.bands
         # uses, in case `instrument` isn't already a single fully-qualified
         # expiry — then delegate the actual per-leg gamma/delta/theta/vega
         # extrema computation to options.per_leg_greeks(), the single source
-        # of truth also used by dankbit.zones.extrema's gamma_band/delta_band
+        # of truth also used by dankbit.bands's gamma_band/delta_band
         # and forecast3.per_leg_greeks(), so this page can never disagree
         # with either on these numbers. r=0.0 throughout (per_leg_greeks'
         # own default) to match every other Greek computed on this page —
@@ -386,7 +386,7 @@ class ChartController(http.Controller):
     # (/lp, /lc, /sp, /sc) — maps each route's short key to which trades to
     # keep (direction/option_type), which OptionStrat leg method accumulates
     # them, and the delta-saturation fraction/side (see
-    # options.delta_saturation_price, shared with dankbit.zones.extrema's
+    # options.delta_saturation_price, shared with dankbit.bands's
     # own delta_band) that locates the green marker line: calls saturate ITM
     # at high S, puts at low S, independent of long/short — each leg's own
     # sign is inherited automatically from its curve's value at that edge.
@@ -1353,9 +1353,9 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/zones-extrema/<string:asset>", type="http", auth="public", website=False, csrf=False)
-    def zones_extrema_json(self, asset):
-        """One point per instrument stored in dankbit.zones.extrema (each
+    @http.route("/api/bands/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    def bands_json(self, asset):
+        """One point per instrument stored in dankbit.bands (each
         instrument has exactly one, continuously-refined-then-frozen row —
         see that model's _persist_extrema()), positioned on the chart at that
         instrument's own expiration time rather than a stored poll
@@ -1378,7 +1378,7 @@ class ChartController(http.Controller):
         cr.execute("""
             SELECT instrument, index_price, high_resistance, low_support,
                    high_resistance_positive, low_support_positive, gamma_band, delta_band
-            FROM dankbit_zones_extrema
+            FROM dankbit_bands
             WHERE asset = %s
         """, (asset,))
         rows = cr.fetchall()
@@ -1422,7 +1422,7 @@ class ChartController(http.Controller):
 
         payload = {
             "asset": asset,
-            "zones_extrema": series,
+            "bands": series,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         return request.make_response(
@@ -1433,18 +1433,18 @@ class ChartController(http.Controller):
     @http.route("/api/zones-box/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def zones_box_json(self, asset):
         """Live zones-box boundaries for the nearest active expiry —
-        computed fresh on every request via dankbit.zones.extrema.get_box(),
+        computed fresh on every request via dankbit.bands.get_box(),
         not read from stored history: nothing reads box-boundary history,
         only the latest value is ever drawn, so those 4 fields are never
         persisted. As a side effect, get_box() does upsert that instrument's
-        zones-extrema record (index_price/high_resistance/
+        bands record (index_price/high_resistance/
         low_support) on every call — piggybacking the per-expiry
         history this endpoint's own polling interval instead of a separate
-        cron (see dankbit.zones.extrema._persist_extrema) — UNLESS an
+        cron (see dankbit.bands._persist_extrema) — UNLESS an
         explicit `?hours=` override is given, in which case get_box()
         computes against that trailing-hours trade window instead of the
         default since-00:00-UTC-through-now one and skips persistence
-        entirely (display-only — see dankbit.zones.extrema.get_box). Driven
+        entirely (display-only — see dankbit.bands.get_box). Driven
         by /chart/<asset>'s 00:00-UTC-vs-trailing-hours radio toggle (see
         dankbit_templates.xml); omitting it leaves this endpoint's behavior
         exactly as before."""
@@ -1458,7 +1458,7 @@ class ChartController(http.Controller):
         hours_param = request.httprequest.args.get("hours")
         hours = int(hours_param) if hours_param else None
 
-        data = request.env["dankbit.zones.extrema"].get_box(asset, hours=hours)
+        data = request.env["dankbit.bands"].get_box(asset, hours=hours)
         if not data:
             payload = {"asset": asset, "box": None}
         else:
@@ -1482,47 +1482,6 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/zones-extrema-refresh/<string:asset>/<int:expiry_index>", type="http", auth="public", website=False, csrf=False)
-    def zones_extrema_refresh_json(self, asset, expiry_index):
-        """Triggers a live dankbit.zones.extrema.get_box_n(asset, expiry_index)
-        computation for expiry_index 1 upward (0, the nearest expiry, already
-        gets this as a side effect of /api/zones-box, the only one that draws
-        a box) — no box is ever drawn for these, only the Top/Bottom
-        Intersection and Gamma Band term-structure lines, which
-        read every persisted row for the asset via /api/zones-extrema/<asset>
-        regardless of expiry_index. Called by the TradingView chart's
-        periodic refresh purely to keep those rows fresh at
-        dankbit.refresh_interval while the page is open, the same way
-        zones-box polling already does for expiry_index 0 — the 15-minute
-        compute_snapshot() cron is the fallback for when nobody's watching.
-        Returns just enough to confirm what happened, not the 4 box-boundary
-        fields (nothing needs them here since no box is drawn)."""
-        asset = asset.upper()
-        if not (asset.startswith("BTC") or asset.startswith("ETH")):
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        Extrema = request.env["dankbit.zones.extrema"]
-        if not (0 <= expiry_index < Extrema.TRACKED_EXPIRY_COUNT):
-            return request.make_response(
-                json.dumps({"error": "expiry_index out of range"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
-        data = Extrema.get_box_n(asset, expiry_index)
-        payload = {
-            "asset": asset,
-            "expiry_index": expiry_index,
-            "instrument": data["instrument"] if data else None,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        return request.make_response(
-            json.dumps(payload),
-            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
-        )
-
     @http.route("/api/nearest-expiry/<string:asset>", type="http", auth="public", website=False, csrf=False)
     def nearest_expiry_json(self, asset):
         """The single nearest active expiry for `asset`, as a full
@@ -1536,7 +1495,7 @@ class ChartController(http.Controller):
                 json.dumps({"error": "Unknown asset"}),
                 headers=[("Content-Type", "application/json")],
             )
-        expiry = request.env["dankbit.zones.extrema"].nearest_expiry(asset)
+        expiry = request.env["dankbit.bands"].nearest_expiry(asset)
         payload = {
             "asset": asset,
             "expiry": expiry,
