@@ -247,6 +247,18 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+					#context-menu {
+						position: fixed;
+						font-family: monospace; font-size: 11pt;
+						background: #fff; border: 1px solid #ccc; border-radius: 4px;
+						box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+						padding: 4px 0; z-index: 20; display: none;
+						min-width: 160px;
+					}
+					#context-menu .context-menu-item {
+						padding: 6px 14px; color: #333; cursor: pointer; white-space: nowrap;
+					}
+					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 				</style>
 			</head>
 			<body>
@@ -296,6 +308,9 @@
 					</t>
 				</div>
 				<div id="ruler-info"/>
+				<div id="context-menu">
+					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
 				<script>//<![CDATA[
 					const cfg              = document.getElementById('cfg').dataset;
 					const INSTRUMENT       = cfg.instrument;
@@ -663,6 +678,54 @@
 							to:   lastIndex,
 						});
 					}
+
+					// Right-click "Reset chart view" — mirrors original TradingView's
+					// context-menu item: re-autoscales the price axis (undoes any
+					// manual drag-zoom on the price scale) and restores the default
+					// time-scale window for the current timeframe (undoes any
+					// pan/zoom on the time axis), without touching series data or any
+					// indicator toggle state.
+					function resetChartView() {
+						chart.priceScale('right').applyOptions({ autoScale: true });
+						applyVisibleRange();
+					}
+
+					// Custom context menu (Lightweight Charts has no built-in one) —
+					// right-clicking the chart area shows a single "Reset chart view"
+					// item at the cursor, clamped so it never renders off-screen.
+					const contextMenu = document.getElementById('context-menu');
+
+					function hideContextMenu() {
+						contextMenu.style.display = 'none';
+					}
+
+					function showContextMenu(x, y) {
+						contextMenu.style.display = 'block';
+						const maxX = window.innerWidth - contextMenu.offsetWidth - 4;
+						const maxY = window.innerHeight - contextMenu.offsetHeight - 4;
+						contextMenu.style.left = Math.min(x, maxX) + 'px';
+						contextMenu.style.top = Math.min(y, maxY) + 'px';
+					}
+
+					function onResetChartViewClick() {
+						resetChartView();
+						hideContextMenu();
+					}
+
+					const chartContainerEl = document.getElementById('chart-container');
+					chartContainerEl.addEventListener('contextmenu', e => {
+						e.preventDefault();
+						showContextMenu(e.clientX, e.clientY);
+					});
+					// Right-clicking outside the chart area (e.g. the toolbar) falls
+					// through to the browser's own native context menu — hide ours
+					// first so it doesn't linger open underneath it.
+					document.addEventListener('contextmenu', e => {
+						if (!chartContainerEl.contains(e.target)) hideContextMenu();
+					});
+					document.addEventListener('click', hideContextMenu);
+					window.addEventListener('resize', hideContextMenu);
+					window.addEventListener('scroll', hideContextMenu, true);
 
 					function rebuildSeriesData() {
 						series.setData(realCandles);
