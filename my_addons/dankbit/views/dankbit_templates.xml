@@ -204,7 +204,7 @@
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> <t t-esc="expiry"/> — <t t-if="show_gamma_point == 'true'">Gamma Chart</t><t t-else="">Delta Chart</t></title>
+				<title><t t-esc="asset"/> <t t-esc="expiry"/> — <t t-if="show_gamma_point == 'true'">Gamma Chart</t><t t-elif="show_strike_gamma == 'true'">Strike Gamma</t><t t-else="">Delta Chart</t></title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -262,7 +262,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
@@ -277,7 +277,7 @@
 							Gamma Tops
 						</label>
 					</t>
-					<t t-if="show_gamma_point == 'false'">
+					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
 						<label class="toggle-label">
 							<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
 							Lines
@@ -322,9 +322,24 @@
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
-					// Only true on /my/<asset> — /chart/<asset> always passes
-					// show_gamma_point="false" (see _build_tv_chart_context).
+					// Only true on /my/<asset> — /chart/<asset> and
+					// /gamma/<instrument> always pass show_gamma_point="false"
+					// (see _build_tv_chart_context).
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
+					// Only true on /gamma/<instrument> — the restored "Strike
+					// Gamma" indicator (see drawStrikeGammaLines below), one
+					// price line per distinct strike rather than /my/<asset>'s
+					// single top-strike-per-scope "Gamma Tops" line set.
+					const SHOW_STRIKE_GAMMA = cfg.showStrikeGamma === 'true';
+					// The instrument /gamma/<instrument> was requested with
+					// (e.g. "BTC-25JUL26") — unrelated to INSTRUMENT above
+					// (the configured *weekly* expiry), this is whatever
+					// specific expiry the URL named, used as the isolated
+					// cutoff for gamma-by-strike-at (see refreshStrikeGamma) —
+					// that one instrument's own trades only, not cumulative
+					// through it the way Gamma Tops' scopes are.
+					const STRIKE_GAMMA_INSTRUMENT = cfg.strikeGammaInstrument || '';
+					const SGI_URL = STRIKE_GAMMA_INSTRUMENT ? '/api/gamma-by-strike-at/' + STRIKE_GAMMA_INSTRUMENT : '';
 					// Thales Forecast candle colors — user-configurable via
 					// Settings → Dankbit → Thales Forecast (res.config.settings),
 					// defaults are light red/green so forecast candles stay
@@ -333,13 +348,13 @@
 					const FORECAST_DOWN_COLOR = cfg.forecastDownColor || '#ef9a9a';
 					const FORECAST_WICK_UP_COLOR = cfg.forecastWickUpColor || '#66bb6a';
 					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
-					// /my/<asset> is the only minimal page (candles + Gamma Tops
-					// only — no Weekly/Monthly/All/Daily delta=0 lines, no zones
-					// boxes/extrema), and currently the only one with Gamma
-					// Tops, so this reuses that same flag rather than adding a
-					// second backend-driven one; the footer (trade count/nearest
-					// expiry) is untouched either way.
-					const MINIMAL_CHART = SHOW_GAMMA_POINT;
+					// /my/<asset> and /gamma/<instrument> are the minimal pages
+					// (candles + exactly one gamma indicator each — no
+					// Weekly/Monthly/All/Daily delta=0 lines, no zones
+					// boxes/extrema, no Lines/Zones/Bands/Thales Forecast
+					// checkboxes); the footer (trade count/nearest expiry) is
+					// untouched either way.
+					const MINIMAL_CHART = SHOW_GAMMA_POINT || SHOW_STRIKE_GAMMA;
 					// User-toggleable via the "Lines" checkbox next to the Ruler
 					// button (Delta Chart only — the Gamma Chart has its own,
 					// unrelated "Gamma Tops" checkbox instead) — hides every
@@ -418,6 +433,9 @@
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
+					const NEXT_EXPIRY_URL  = '/api/next-expiry/' + ASSET;
+					const NEAREST_PLUS_2_EXPIRY_URL = '/api/nearest-expiry-plus-2/' + ASSET;
+					const NEAREST_PLUS_3_EXPIRY_URL = '/api/nearest-expiry-plus-3/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
@@ -552,15 +570,18 @@
 
 					// "Gamma Tops" lines (only on /my/<asset>, see
 					// SHOW_GAMMA_POINT) — one black, lineWidth-2 price line
-					// per scope (Nearest/Weekly/Monthly/All expiries),
-					// marking that scope's own single highest-positive-
-					// gamma strike. A scope with no strikes at all, or
-					// whose highest gamma is <= 0 (nothing to mark), simply
-					// contributes no line. All 4 scopes reuse the same
-					// _gamma_by_strike()-backed endpoints: All (SG_URL, no
-					// cutoff), Weekly (SGW_URL), Monthly (SGM_URL, skipped
-					// if unconfigured), Nearest (resolved live via
-					// NEAREST_EXPIRY_URL then gamma-by-strike-until).
+					// per scope (Nearest/Nearest+1/Nearest+2/Nearest+3/
+					// Weekly/Monthly/All expiries), marking that scope's own
+					// single highest-positive-gamma strike. A scope with no
+					// strikes at all, or whose highest gamma is <= 0
+					// (nothing to mark), simply contributes no line. All 7
+					// scopes reuse the same _gamma_by_strike()-backed
+					// endpoints: All (SG_URL, no cutoff), Weekly (SGW_URL),
+					// Monthly (SGM_URL, skipped if unconfigured), and
+					// Nearest/Nearest+1/Nearest+2/Nearest+3 each resolved
+					// live via their own *_EXPIRY_URL lookup (skipped if
+					// there's no active expiry at that position) then
+					// gamma-by-strike-until.
 					function gammaTop(data) {
 						const strikes = data.strikes || [];
 						if (!strikes.length) return null;
@@ -584,7 +605,7 @@
 							price: top.price, color: 'black', lineWidth: 2,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black',
-							title: 'Γ Top ' + label + ' +' + Math.round(top.gamma / 1e6) +
+							title: label + ' +' + Math.round(top.gamma / 1e6) +
 								'  LC:' + fmtLegGamma(top.long_call) + ' LP:' + fmtLegGamma(top.long_put) +
 								' SC:' + fmtLegGamma(top.short_call) + ' SP:' + fmtLegGamma(top.short_put),
 						}));
@@ -594,7 +615,7 @@
 					// checkbox replacing the old separate "Strike Gamma"/
 					// "Strike Gamma Nearest"/"Strike Gamma Weekly"/"Strike
 					// Gamma Monthly" checkboxes; flips SHOW_GAMMA_TOPS and
-					// re-fetches all 4 scopes (or clears, if just turned
+					// re-fetches all 7 scopes (or clears, if just turned
 					// off).
 					async function refreshGammaTops() {
 						gammaTopsLines.forEach(l => series.removePriceLine(l));
@@ -617,11 +638,88 @@
 							const nearestData = await (await fetch('/api/gamma-by-strike-until/' + nearest.expiry)).json();
 							drawGammaTopLine(gammaTop(nearestData), 'Nearest');
 						}
+
+						const next = await (await fetch(NEXT_EXPIRY_URL)).json();
+						if (next.expiry) {
+							const nextData = await (await fetch('/api/gamma-by-strike-until/' + next.expiry)).json();
+							drawGammaTopLine(gammaTop(nextData), 'Nearest + 1');
+						}
+
+						const plus2 = await (await fetch(NEAREST_PLUS_2_EXPIRY_URL)).json();
+						if (plus2.expiry) {
+							const plus2Data = await (await fetch('/api/gamma-by-strike-until/' + plus2.expiry)).json();
+							drawGammaTopLine(gammaTop(plus2Data), 'Nearest + 2');
+						}
+
+						const plus3 = await (await fetch(NEAREST_PLUS_3_EXPIRY_URL)).json();
+						if (plus3.expiry) {
+							const plus3Data = await (await fetch('/api/gamma-by-strike-until/' + plus3.expiry)).json();
+							drawGammaTopLine(gammaTop(plus3Data), 'Nearest + 3');
+						}
 					}
 
 					function onToggleGammaTops() {
 						SHOW_GAMMA_TOPS = document.getElementById('gamma-tops-toggle').checked;
 						refreshGammaTops();
+					}
+
+					// "Strike Gamma" lines (/gamma/<instrument> only) — the
+					// restored per-strike indicator: one price line per
+					// distinct strike that has ever traded, isolated to
+					// STRIKE_GAMMA_INSTRUMENT's own expiry alone (see SGI_URL
+					// — gamma-by-strike-at, not the cumulative
+					// gamma-by-strike-until Gamma Tops uses), unlike Gamma
+					// Tops' single top-strike-per-scope line. Color is a
+					// light-gray-to-black gradient by
+					// |gamma| magnitude relative to the largest |gamma| in
+					// this same response — the strike with the biggest
+					// exposure is always pure black, the smallest is light
+					// gray. Title is signed dollar-gamma (abs/1e6, rounded,
+					// '+' for net buy-side/taker-dominant, '-' for net
+					// sell-side, same raw buy/sell convention every other
+					// Buyer/Seller-labeled line in this app uses), followed
+					// by that strike's own dominant leg — whichever of
+					// long_call/long_put/short_call/short_put has the
+					// largest |value| at that strike (same 4-leg split
+					// options.per_leg_greeks()/Gamma Tops use), labeled
+					// LC/LP/SC/SP — so a glance at the line says not just
+					// how much gamma is at this strike but which position
+					// is driving it.
+					let strikeGammaLines = [];
+
+					function dominantLeg(item) {
+						const legs = { LC: item.long_call, LP: item.long_put, SC: item.short_call, SP: item.short_put };
+						return Object.keys(legs).reduce((best, k) => Math.abs(legs[k]) > Math.abs(legs[best]) ? k : best, 'LC');
+					}
+
+					function drawStrikeGammaLines(data) {
+						strikeGammaLines.forEach(l => series.removePriceLine(l));
+						strikeGammaLines.length = 0;
+						const strikes = data.strikes || [];
+						const maxAbsGamma = strikes.reduce((m, item) => Math.max(m, Math.abs(item.gamma)), 0);
+						strikes.forEach(item => {
+							const sign = item.gamma >= 0 ? '+' : '-';
+							const intensity = maxAbsGamma > 0 ? Math.abs(item.gamma) / maxAbsGamma : 0;
+							const shade = Math.round(220 - intensity * 220);
+							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+							strikeGammaLines.push(series.createPriceLine({
+								price: item.price, color, lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: color,
+								title: 'Γ ' + sign + Math.round(Math.abs(item.gamma) / 1e6) + ' ' + dominantLeg(item),
+							}));
+						});
+					}
+
+					// No checkbox — this is /gamma/<instrument>'s sole
+					// purpose, so it's always on (gated only by
+					// SHOW_STRIKE_GAMMA/SGI_URL themselves being set at all,
+					// same as every other minimal-page indicator's
+					// MINIMAL_CHART gating elsewhere on this page).
+					async function refreshStrikeGamma() {
+						if (!SHOW_STRIKE_GAMMA || !SGI_URL) return;
+						const data = await (await fetch(SGI_URL)).json();
+						drawStrikeGammaLines(data);
 					}
 
 					let priceLines    = [];
@@ -1207,7 +1305,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await updateForecastVisibility(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					function saveChart() {
@@ -1222,7 +1320,7 @@
 						canvases.forEach(c => ctx.drawImage(c, 0, 0));
 						const a = document.createElement('a');
 						a.href = out.toDataURL('image/png');
-						a.download = INSTRUMENT + '_delta_' + new Date().toISOString().slice(0,16).replace('T','_') + '.png';
+						a.download = (STRIKE_GAMMA_INSTRUMENT || INSTRUMENT) + '_delta_' + new Date().toISOString().slice(0,16).replace('T','_') + '.png';
 						a.click();
 					}
 
@@ -1239,6 +1337,7 @@
 					setInterval(refreshBands, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
+					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
 				//]]></script>
 			</body>

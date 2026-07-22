@@ -174,6 +174,28 @@ class Bands(models.Model):
         )
         return [row[0] for row in self.env.cr.fetchall()]
 
+    @staticmethod
+    def _format_instrument(asset, exp):
+        """`asset` + a raw expiration datetime -> Deribit-style instrument
+        string (e.g. 'BTC-9JUL26'), the convention every other expiry
+        identifier in this addon uses — shared by nearest_expiry/next_expiry
+        so the two can't drift on formatting."""
+        return f"{asset}-{exp.day}{exp.strftime('%b').upper()}{exp.strftime('%y')}"
+
+    def _nth_active_expiry(self, asset, n):
+        """The (n+1)-th soonest active expiry for `asset` (n=0 nearest, n=1
+        the one after that, etc. — same soonest-first ordering as
+        _compute_asset's own `expiry_index`), as a full Deribit-style
+        instrument string. Shared by nearest_expiry/next_expiry/
+        nearest_expiry_plus_2/nearest_expiry_plus_3 so they can't drift on
+        lookup or formatting. Returns None if there's no active expiry at
+        that position."""
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        expirations = self._distinct_expirations(asset, as_of, n + 1)
+        if len(expirations) <= n:
+            return None
+        return self._format_instrument(asset, expirations[n])
+
     def nearest_expiry(self, asset):
         """The single nearest active expiry for `asset`, as a full
         Deribit-style instrument string (e.g. 'BTC-9JUL26', matching the
@@ -184,12 +206,26 @@ class Bands(models.Model):
         no curve-building) for the TradingView footer, which shows this
         regardless of timeframe unlike the boxes themselves. Returns None if
         there's no active expiry at all."""
-        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-        expirations = self._distinct_expirations(asset, as_of, 1)
-        if not expirations:
-            return None
-        exp = expirations[0]
-        return f"{asset}-{exp.day}{exp.strftime('%b').upper()}{exp.strftime('%y')}"
+        return self._nth_active_expiry(asset, 0)
+
+    def next_expiry(self, asset):
+        """The active expiry immediately after the nearest one for `asset`
+        (expiry_index=1 in _compute_asset's soonest-first ordering), as a
+        full Deribit-style instrument string — same cheap standalone lookup
+        as nearest_expiry, for the Gamma Chart's "Gamma Tops" checkbox's
+        "Nearest + 1" scope. Returns None if there's no such expiry (e.g.
+        only one active expiry left)."""
+        return self._nth_active_expiry(asset, 1)
+
+    def nearest_expiry_plus_2(self, asset):
+        """Same as next_expiry, two expiries out (expiry_index=2) — feeds
+        the Gamma Chart's "Gamma Tops" checkbox's "Nearest + 2" scope."""
+        return self._nth_active_expiry(asset, 2)
+
+    def nearest_expiry_plus_3(self, asset):
+        """Same as next_expiry, three expiries out (expiry_index=3) — feeds
+        the Gamma Chart's "Gamma Tops" checkbox's "Nearest + 3" scope."""
+        return self._nth_active_expiry(asset, 3)
 
     def _compute_asset(self, asset, expiry_index=0, hours=None):
         """Compute index_price, the highest/lowest Longs-vs-Shorts curve

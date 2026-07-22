@@ -1184,21 +1184,30 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    def _gamma_by_strike(self, asset, expiry_cutoff=None):
+    def _gamma_by_strike(self, asset, expiry_cutoff=None, expiry_exact=None):
         """Combined portfolio dollar-gamma evaluated at each distinct strike
-        that has ever traded, across every active expiry up to and
-        including `expiry_cutoff` if given, or every active expiry at all
-        if not — no trailing-hours restriction either way. Unlike a
+        that has ever traded. Three mutually exclusive trade-selection
+        modes: every active expiry up to and including `expiry_cutoff`
+        (cumulative — pass `expiry_cutoff`), every active expiry at all
+        (pass neither), or trades whose expiration exactly matches
+        `expiry_exact` alone (isolated — pass `expiry_exact`; that one
+        instrument's own trades only, not folded in with any sooner
+        expiry's). No trailing-hours restriction in any mode. Unlike a
         peak/bottom search over a synthetic price grid, this evaluates
         gamma.portfolio_gamma() directly at each real strike price —
         feeds the Gamma Chart's "Gamma Tops" checkbox, which fetches
         this via gamma_by_strike_json (no cutoff — "All") and
-        gamma_by_strike_until_json 3 more times (expiry_cutoff = that
-        asset's own nearest active expiry / configured weekly expiry /
-        configured monthly expiry, for "Nearest"/"Weekly"/"Monthly"
-        respectively) and, from each of those 4 datasets, marks only the
-        single highest-positive-gamma strike rather than drawing every
-        strike. Returns (strikes, trade_count), strikes a price-sorted list
+        gamma_by_strike_until_json 6 more times (expiry_cutoff = that
+        asset's own nearest active expiry / the next 3 expiries after that /
+        configured weekly expiry / configured monthly expiry, for
+        "Nearest"/"Nearest + 1"/"Nearest + 2"/"Nearest + 3"/"Weekly"/
+        "Monthly" respectively) and, from each of those 7 datasets, marks
+        only the single highest-positive-gamma strike rather than drawing
+        every strike; and feeds /gamma/<instrument>'s "Strike Gamma"
+        indicator via gamma_by_strike_at_json (expiry_exact — isolated to
+        that one instrument, unlike Gamma Tops' cumulative scopes above),
+        which draws every strike rather than collapsing to one. Returns
+        (strikes, trade_count), strikes a price-sorted list
         of {"price", "gamma", "long_call", "long_put", "short_call",
         "short_put"} dicts (raw/unscaled — display scaling is the caller's
         job) — the 4 leg fields are that same combined `gamma` value's own
@@ -1227,7 +1236,10 @@ class ChartController(http.Controller):
         cr = request.env.cr
         query_params = [f'%{asset}%']
         cutoff_sql = ""
-        if expiry_cutoff:
+        if expiry_exact:
+            cutoff_sql = "AND expiration = %s"
+            query_params.append(expiry_exact)
+        elif expiry_cutoff:
             cutoff_sql = "AND expiration <= %s"
             query_params.append(expiry_cutoff)
         cr.execute(f"""
@@ -1332,17 +1344,27 @@ class ChartController(http.Controller):
         restricted to every active expiry up to and including `instrument`'s
         own day-suffix — expiration >= NOW() AND expiration <= <that
         expiry>, same day-suffix parsing as the rest of this file. One
-        generic route reused for 3 different cutoffs by the caller passing
-        a different instrument, not 3 near-duplicate routes. Feeds the
+        generic route reused for 6 different cutoffs by the caller passing
+        a different instrument, not 6 near-duplicate routes. Feeds the
         Gamma Chart's "Gamma Tops" checkbox's "Nearest" (instrument=that
         asset's own nearest active expiry, looked up client-side via
         /api/nearest-expiry/<asset> and passed in as the cutoff instrument),
-        "Weekly" (instrument=INSTRUMENT), and "Monthly" (instrument=
-        MONTHLY_INST) scopes — one checkbox now fetches this route 3 times
-        (plus gamma_by_strike_json once for "All") and, from each of the 4
+        "Nearest + 1"/"Nearest + 2"/"Nearest + 3" (instrument=that asset's
+        own 2nd/3rd/4th nearest active expiry, looked up client-side via
+        /api/next-expiry/<asset>, /api/nearest-expiry-plus-2/<asset>,
+        /api/nearest-expiry-plus-3/<asset> respectively), "Weekly"
+        (instrument=INSTRUMENT), and "Monthly" (instrument=MONTHLY_INST)
+        scopes — one checkbox now fetches this route 6 times (plus
+        gamma_by_strike_json once for "All") and, from each of the 7
         resulting datasets, marks only the single highest-positive-gamma
         strike (see drawGammaTopLine in dankbit_templates.xml) rather than
-        drawing every strike. See _gamma_by_strike()."""
+        drawing every strike. Note these cutoffs are cumulative, not
+        isolated to a single expiry — e.g. "Nearest + 2" includes every
+        trade from now through the 3rd-nearest expiry's own settlement
+        (nearest + next + that one combined), same "aggregate everything
+        up to this date" convention the Weekly/Monthly bookmarks and the
+        /i/<expiry> PNG route already use, not "only this one expiry's own
+        trades." See _gamma_by_strike()."""
         parts = instrument.upper().split("-", 1)
         if len(parts) != 2:
             return request.make_response(
@@ -1360,6 +1382,53 @@ class ChartController(http.Controller):
             )
 
         strikes, trade_count = self._gamma_by_strike(asset, expiry_cutoff=expiry_dt)
+        if strikes is None:
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        payload = {
+            "asset": asset,
+            "expiry": expiry_str,
+            "strikes": strikes,
+            "trade_count": trade_count,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/gamma-by-strike-at/<string:instrument>", type="http", auth="user", website=False, csrf=False)
+    def gamma_by_strike_at_json(self, instrument):
+        """Same per-strike computation as gamma_by_strike_json, but
+        isolated to trades whose expiration exactly matches `instrument`'s
+        own day-suffix — expiration = <that expiry> alone, not
+        expiration <= <that expiry> the way gamma_by_strike_until_json
+        works. Feeds /gamma/<instrument>'s "Strike Gamma" indicator
+        (gamma_by_strike_chart) — every strike drawn, restricted to just
+        that one instrument's own trades, not folded in with any sooner
+        expiry's the way every gamma_by_strike_until_json caller (Gamma
+        Tops' Nearest/Nearest+1/+2/+3/Weekly/Monthly scopes) is. See
+        _gamma_by_strike()."""
+        parts = instrument.upper().split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                json.dumps({"error": "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        asset, expiry_str = parts
+        try:
+            expiry_dt = datetime.strptime(expiry_str, "%d%b%y").replace(hour=8, tzinfo=timezone.utc)
+        except ValueError:
+            return request.make_response(
+                json.dumps({"error": "Invalid expiry format — expected DDMMMYY e.g. 4JUL26"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        strikes, trade_count = self._gamma_by_strike(asset, expiry_exact=expiry_dt)
         if strikes is None:
             return request.make_response(
                 json.dumps({"error": "Unknown asset"}),
@@ -1526,6 +1595,71 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
         expiry = request.env["dankbit.bands"].nearest_expiry(asset)
+        payload = {
+            "asset": asset,
+            "expiry": expiry,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/next-expiry/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def next_expiry_json(self, asset):
+        """The active expiry immediately after the nearest one for `asset`,
+        as a full instrument string (e.g. "BTC-16JUL26") — same cheap
+        standalone lookup as nearest_expiry_json, for the Gamma Chart's
+        "Gamma Tops" checkbox's "Nearest + 1" scope."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        expiry = request.env["dankbit.bands"].next_expiry(asset)
+        payload = {
+            "asset": asset,
+            "expiry": expiry,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/nearest-expiry-plus-2/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def nearest_expiry_plus_2_json(self, asset):
+        """Same as next_expiry_json, two expiries out — feeds the Gamma
+        Chart's "Gamma Tops" checkbox's "Nearest + 2" scope."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        expiry = request.env["dankbit.bands"].nearest_expiry_plus_2(asset)
+        payload = {
+            "asset": asset,
+            "expiry": expiry,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/nearest-expiry-plus-3/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def nearest_expiry_plus_3_json(self, asset):
+        """Same as next_expiry_json, three expiries out — feeds the Gamma
+        Chart's "Gamma Tops" checkbox's "Nearest + 3" scope."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        expiry = request.env["dankbit.bands"].nearest_expiry_plus_3(asset)
         payload = {
             "asset": asset,
             "expiry": expiry,
@@ -1787,13 +1921,17 @@ class ChartController(http.Controller):
     # ------------------------------------------------------------------
 
     def _build_tv_chart_context(self, asset):
-        """Shared context-building for /chart/<asset> and /my/<asset> — both
-        render the same dankbit_tv_chart_until template; /my/<asset> just
-        additionally sets show_gamma_point so the template also draws the
-        Gamma Tops indicator. Returns (context, None) on
-        success or (None, error_message) if the weekly expiry isn't
-        configured/valid for `asset`, so callers can render that as a plain
-        text response the same way this route always has."""
+        """Shared context-building for /chart/<asset>, /my/<asset>, and
+        /gamma/<instrument> — all three render the same
+        dankbit_tv_chart_until template; /my/<asset> additionally sets
+        show_gamma_point so the template also draws the Gamma Tops
+        indicator, and /gamma/<instrument> additionally sets
+        show_strike_gamma + strike_gamma_instrument so the template draws
+        the restored per-strike "Strike Gamma" lines instead (see
+        gamma_by_strike_chart). Returns (context, None) on success or
+        (None, error_message) if the weekly expiry isn't configured/valid
+        for `asset`, so callers can render that as a plain text response
+        the same way this route always has."""
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         zones_box_refresh_interval = int(icp.get_param("dankbit.zones_box_refresh_interval", default=3600))
@@ -1846,6 +1984,8 @@ class ChartController(http.Controller):
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,
             "show_gamma_point": "false",
+            "show_strike_gamma": "false",
+            "strike_gamma_instrument": "",
             "forecast_up_color": forecast_up_color,
             "forecast_down_color": forecast_down_color,
             "forecast_wick_up_color": forecast_wick_up_color,
@@ -1882,4 +2022,49 @@ class ChartController(http.Controller):
             return request.make_response(error, headers=[("Content-Type", "text/plain")])
 
         ctx["show_gamma_point"] = "true"
+        return request.render("dankbit.dankbit_tv_chart_until", ctx)
+
+    @http.route("/gamma/<string:instrument>", type="http", auth="user", website=True)
+    def gamma_by_strike_chart(self, instrument):
+        """Minimal TradingView chart (candles only, same template/context as
+        /chart/<asset> and /my/<asset>) plus the restored "Strike Gamma"
+        indicator — one price line per distinct strike that has ever
+        traded, gray-to-black by |gamma| magnitude, signed dollar-gamma
+        title plus dominant-leg suffix (see drawStrikeGammaLines in
+        dankbit_templates.xml). Unlike /my/<asset>'s "Gamma Tops" (one line
+        per scope, top strike only), this draws every strike, isolated to
+        trades whose expiration exactly matches `instrument`'s own expiry —
+        not folded in with any sooner expiry's the way every
+        gamma-by-strike-until scope (Gamma Tops' Nearest/Weekly/Monthly/
+        etc.) is. Client-side fetches /api/gamma-by-strike-at/<instrument>
+        (gamma_by_strike_at_json -> _gamma_by_strike(..., expiry_exact=...)),
+        a sibling of gamma_by_strike_until_json rather than that same route,
+        precisely so this page's isolated scope can't leak into Gamma Tops'
+        intentionally cumulative one. `instrument` is a full Deribit-style
+        string, e.g. BTC-25JUL26 — same ASSET-DDMMMYY parsing
+        gamma_by_strike_until_json uses."""
+        instrument = instrument.upper()
+        parts = instrument.split("-", 1)
+        if len(parts) != 2:
+            return request.make_response(
+                "Invalid instrument — expected ASSET-EXPIRY e.g. BTC-4JUL26",
+                headers=[("Content-Type", "text/plain")],
+            )
+        asset, expiry_str = parts
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+        try:
+            datetime.strptime(expiry_str, "%d%b%y")
+        except ValueError:
+            return request.make_response(
+                "Invalid expiry format — expected DDMMMYY e.g. 4JUL26",
+                headers=[("Content-Type", "text/plain")],
+            )
+
+        ctx, error = self._build_tv_chart_context(asset)
+        if error:
+            return request.make_response(error, headers=[("Content-Type", "text/plain")])
+
+        ctx["show_strike_gamma"] = "true"
+        ctx["strike_gamma_instrument"] = instrument
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
