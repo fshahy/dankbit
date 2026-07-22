@@ -10,7 +10,7 @@ from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
-from . import forecast3
+from . import forecast
 
 
 class _AggTrade:
@@ -268,7 +268,7 @@ class ChartController(http.Controller):
         # expiry — then delegate the actual per-leg gamma/delta/theta/vega
         # extrema computation to options.per_leg_greeks(), the single source
         # of truth also used by dankbit.bands's gamma_band/delta_band
-        # and forecast3.per_leg_greeks(), so this page can never disagree
+        # and forecast.per_leg_greeks(), so this page can never disagree
         # with either on these numbers. r=0.0 throughout (per_leg_greeks'
         # own default) to match every other Greek computed on this page —
         # zones deliberately doesn't use the r=0.05 the combined-portfolio
@@ -1190,9 +1190,8 @@ class ChartController(http.Controller):
         including `expiry_cutoff` if given, or every active expiry at all
         if not — no trailing-hours restriction either way. Unlike a
         peak/bottom search over a synthetic price grid, this evaluates
-        gamma.portfolio_gamma() directly at each real strike price, one
-        combined value per strike (not split into long/short call/put
-        legs) — feeds the Gamma Chart's "Gamma Tops" checkbox, which fetches
+        gamma.portfolio_gamma() directly at each real strike price —
+        feeds the Gamma Chart's "Gamma Tops" checkbox, which fetches
         this via gamma_by_strike_json (no cutoff — "All") and
         gamma_by_strike_until_json 3 more times (expiry_cutoff = that
         asset's own nearest active expiry / configured weekly expiry /
@@ -1200,8 +1199,13 @@ class ChartController(http.Controller):
         respectively) and, from each of those 4 datasets, marks only the
         single highest-positive-gamma strike rather than drawing every
         strike. Returns (strikes, trade_count), strikes a price-sorted list
-        of {"price", "gamma"} dicts (raw/unscaled — display scaling is the
-        caller's job), or (None, 0) for an unknown asset.
+        of {"price", "gamma", "long_call", "long_put", "short_call",
+        "short_put"} dicts (raw/unscaled — display scaling is the caller's
+        job) — the 4 leg fields are that same combined `gamma` value's own
+        breakdown (same long_call/long_put/short_call/short_put split
+        options.per_leg_greeks() uses), not a separate computation: `gamma`
+        is literally their sum, so the split always reconciles exactly. Or
+        (None, 0) for an unknown asset.
 
         Net position, capped by real open interest. Per instrument, buy
         volume minus sell volume (not raw cumulative volume) is what
@@ -1270,10 +1274,31 @@ class ChartController(http.Controller):
                 iv=(e["iv_numerator"] / total_amount) if total_amount else 0.01,
             ))
 
-        strikes = [
-            {"price": float(k), "gamma": float(gamma.portfolio_gamma(np.array([float(k)]), agg_trades, 0.05)[0])}
-            for k in sorted({t.strike for t in agg_trades})
-        ]
+        # Same long_call/long_put/short_call/short_put split
+        # options.per_leg_greeks() uses — each instrument already landed in
+        # exactly one bucket above (one option_type, one net direction), so
+        # this is just not collapsing that split before summing, not a new
+        # computation. `gamma` is the sum of the 4 legs (not a separate
+        # portfolio_gamma() call over all of agg_trades) so the breakdown
+        # always adds up to the combined value exactly, not just
+        # approximately.
+        leg_defs = (
+            ("long_call", "buy", "call"), ("long_put", "buy", "put"),
+            ("short_call", "sell", "call"), ("short_put", "sell", "put"),
+        )
+        legs = {
+            leg_name: [t for t in agg_trades if t.direction == direction and t.option_type == option_type]
+            for leg_name, direction, option_type in leg_defs
+        }
+
+        strikes = []
+        for k in sorted({t.strike for t in agg_trades}):
+            S = np.array([float(k)])
+            entry = {"price": float(k)}
+            for leg_name, leg_trades in legs.items():
+                entry[leg_name] = float(gamma.portfolio_gamma(S, leg_trades, 0.05)[0]) if leg_trades else 0.0
+            entry["gamma"] = entry["long_call"] + entry["long_put"] + entry["short_call"] + entry["short_put"]
+            strikes.append(entry)
         return strikes, trade_count
 
     @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="user", website=False, csrf=False)
@@ -1377,7 +1402,9 @@ class ChartController(http.Controller):
         cr = request.env.cr
         cr.execute("""
             SELECT instrument, index_price, high_resistance, low_support,
-                   high_resistance_positive, low_support_positive, gamma_band, delta_band
+                   high_resistance_positive, low_support_positive, gamma_band, delta_band,
+                   smart_liq_upper_price, smart_liq_lower_price,
+                   smart_liq_upper_strength, smart_liq_lower_strength
             FROM dankbit_bands
             WHERE asset = %s
         """, (asset,))
@@ -1398,6 +1425,8 @@ class ChartController(http.Controller):
         for (
             instrument, index_price, high_resistance, low_support,
             high_resistance_positive, low_support_positive, gamma_band, delta_band,
+            smart_liq_upper_price, smart_liq_lower_price,
+            smart_liq_upper_strength, smart_liq_lower_strength,
         ) in rows:
             expiration = expiry_by_instrument.get(instrument)
             if not expiration:
@@ -1417,6 +1446,10 @@ class ChartController(http.Controller):
                 "low_support_positive": bool(low_support_positive),
                 "gamma_band": float(gamma_band or 0.0),
                 "delta_band": float(delta_band or 0.0),
+                "smart_liq_upper_price": float(smart_liq_upper_price or 0.0),
+                "smart_liq_lower_price": float(smart_liq_lower_price or 0.0),
+                "smart_liq_upper_strength": float(smart_liq_upper_strength or 0.0),
+                "smart_liq_lower_strength": float(smart_liq_lower_strength or 0.0),
             })
         series.sort(key=lambda r: r["t"])
 
@@ -1433,21 +1466,18 @@ class ChartController(http.Controller):
     @http.route("/api/zones-box/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def zones_box_json(self, asset):
         """Live zones-box boundaries for the nearest active expiry —
-        computed fresh on every request via dankbit.bands.get_box(),
-        not read from stored history: nothing reads box-boundary history,
-        only the latest value is ever drawn, so those 4 fields are never
-        persisted. As a side effect, get_box() does upsert that instrument's
-        bands record (index_price/high_resistance/
-        low_support) on every call — piggybacking the per-expiry
-        history this endpoint's own polling interval instead of a separate
-        cron (see dankbit.bands._persist_extrema) — UNLESS an
-        explicit `?hours=` override is given, in which case get_box()
-        computes against that trailing-hours trade window instead of the
-        default since-00:00-UTC-through-now one and skips persistence
-        entirely (display-only — see dankbit.bands.get_box). Driven
-        by /chart/<asset>'s 00:00-UTC-vs-trailing-hours radio toggle (see
-        dankbit_templates.xml); omitting it leaves this endpoint's behavior
-        exactly as before."""
+        computed fresh on every request via dankbit.bands.get_box(), which
+        always calls _compute_asset() directly and never persists, on the
+        default since-00:00-UTC-through-now path or with an explicit
+        `?hours=` override (get_box()'s `hours` param overrides the trade
+        window with the trailing-hours one instead) — neither path ever
+        writes to dankbit.bands; only compute_snapshot()'s cron does (see
+        dankbit.bands.get_box/_persist_extrema). Nothing reads box-boundary
+        history either: only the latest value is ever drawn, so those 4
+        fields are never persisted regardless. Driven by /chart/<asset>'s
+        00:00-UTC-vs-trailing-hours radio toggle (see dankbit_templates.xml);
+        omitting `hours` leaves this endpoint's behavior exactly as
+        before."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1509,8 +1539,8 @@ class ChartController(http.Controller):
     def _fetch_candles(self, asset, interval="4h", limit=500):
         """Real Deribit perpetual-futures candles, oldest-first — shared by
         klines_proxy (below, which reverses to newest-first for the
-        frontend) and forecast3_json (which needs real historical bars for
-        its ATR/momentum/liquidity-sweep detection, see forecast3.py).
+        frontend) and forecast_json (which needs real historical bars for
+        its ATR/momentum/liquidity-sweep detection, see forecast.py).
         Deribit has no native 4h resolution (240 is rejected as "unsupported
         resolution") — fetch 1h candles and aggregate every 4 into one,
         bucketed by timestamp (not position) so buckets stay calendar-
@@ -1567,7 +1597,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    _FORECAST3_SNAPSHOT_FIELDS = [
+    _FORECAST_SNAPSHOT_FIELDS = [
         "top", "low", "bml", "smp",
         "bcg_price", "bpg_price", "scg_price", "spg_price",
         "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
@@ -1580,17 +1610,17 @@ class ChartController(http.Controller):
     ]
 
     def _snapshot_to_dict(self, record):
-        """dankbit.forecast3.snapshot record -> plain dict keyed exactly as
-        forecast3.py's engine expects (see per_leg_greeks/derive_levels),
+        """dankbit.forecast.snapshot record -> plain dict keyed exactly as
+        forecast.py's engine expects (see per_leg_greeks/derive_levels),
         plus bucket_epoch (UTC epoch seconds) for the Gamma-Band
         Consensus/center-slope real-elapsed-time math."""
-        data = {f: getattr(record, f) for f in self._FORECAST3_SNAPSHOT_FIELDS}
+        data = {f: getattr(record, f) for f in self._FORECAST_SNAPSHOT_FIELDS}
         data["bucket_epoch"] = record.bucket_start.replace(tzinfo=timezone.utc).timestamp()
         return data
 
-    def _forecast3_cfg(self):
+    def _forecast_cfg(self):
         """Reads res.config.settings' "Thales Forecast" section into a cfg
-        dict + a dict of horizon kwargs, for forecast3.simulate_forecast3.
+        dict + a dict of horizon kwargs, for forecast.simulate_forecast.
         Falls back to that function's own hardcoded defaults (repeated here
         verbatim) for any setting left unset — same default-in-the-reading-
         code convention every other dankbit.* config_parameter uses in this
@@ -1601,51 +1631,51 @@ class ChartController(http.Controller):
             return float(icp.get_param(f"dankbit.{key}", default))
 
         cfg = {}
-        cfg["GAMMA_CENTER_WEIGHT"] = f("forecast3_gamma_center_weight", 0.70)
-        cfg["CURVE_CENTER_WEIGHT"] = f("forecast3_curve_center_weight", 0.20)
-        cfg["THETA_CENTER_WEIGHT"] = f("forecast3_theta_center_weight", 0.10)
-        cfg["FORECAST_PULL_FACTOR"] = f("forecast3_pull_factor", 0.55)
-        cfg["FORECAST_SLOPE_FACTOR"] = f("forecast3_slope_factor", 0.35)
-        cfg["FORECAST_BODY_FACTOR"] = f("forecast3_body_factor", 0.3)
-        cfg["FORECAST_CURVE_EXTREME_BODY_WEIGHT"] = f("forecast3_curve_extreme_body_weight", 0.26)
-        cfg["FORECAST_WICK_FACTOR"] = f("forecast3_wick_factor", 0.35)
-        cfg["FORECAST_ATR_FACTOR"] = f("forecast3_atr_factor", 0.3)
-        cfg["FORECAST_CURVE_WICK_WEIGHT"] = f("forecast3_curve_wick_weight", 0.42)
-        cfg["GAMMA_BAND_OPPOSITE_WICK_COMPRESSION"] = f("forecast3_gb_opposite_wick_compression", 0.18)
-        cfg["GAMMA_BAND_CONFIRMED_TARGET_BOOST"] = f("forecast3_gb_confirmed_target_boost", 0.55)
-        cfg["GAMMA_BAND_CONFIDENCE_BOOST"] = f("forecast3_gb_confidence_boost", 0.2)
-        cfg["GAMMA_BAND_CONFLICT_BODY_DAMPING"] = f("forecast3_gb_conflict_body_damping", 0.3)
-        cfg["GAMMA_BAND_CONFLICT_WICK_EXPANSION"] = f("forecast3_gb_conflict_wick_expansion", 0.25)
-        cfg["GAMMA_BAND_OPPOSING_MAGNET_DAMPING"] = f("forecast3_gb_opposing_magnet_damping", 0.6)
-        cfg["GAMMA_BAND_TREND_LOCK_STRENGTH"] = f("forecast3_gb_trend_lock_strength", 0.55)
-        cfg["GAMMA_BAND_COUNTER_BODY_DAMPING"] = f("forecast3_gb_counter_body_damping", 0.18)
-        cfg["GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE"] = f("forecast3_gb_counter_max_opp_impulse", 0.03)
-        cfg["GAMMA_BAND_COUNTER_ESCAPE_ATR"] = f("forecast3_gb_counter_escape_atr", 0.95)
-        cfg["GAMMA_CONFIRM_BUFFER_PCT"] = f("forecast3_gamma_confirm_buffer_pct", 0.06)
-        cfg["CLUSTER_ALIGNMENT_THRESHOLD"] = f("forecast3_cluster_alignment_threshold", 0.6)
-        cfg["CLUSTER_BODY_CONFIDENCE_FLOOR"] = f("forecast3_cluster_body_confidence_floor", 0.58)
-        cfg["CLUSTER_COMPRESSED_THRESHOLD"] = f("forecast3_cluster_compressed_threshold", 0.18)
-        cfg["CLUSTER_COMPRESSION_BODY_DAMPING"] = f("forecast3_cluster_compression_body_damping", 0.15)
-        cfg["CLUSTER_COMPRESSION_WICK_COMPRESSION"] = f("forecast3_cluster_compression_wick_compression", 0.3)
-        cfg["CLUSTER_EXPANSION_THRESHOLD"] = f("forecast3_cluster_expansion_threshold", 0.025)
-        cfg["LIQUIDITY_ALIGNED_WICK_COMPRESSION"] = f("forecast3_liquidity_aligned_wick_compression", 0.25)
-        cfg["LIQUIDITY_BODY_CONFIDENCE_FLOOR"] = f("forecast3_liquidity_body_confidence_floor", 0.6)
-        cfg["LIQUIDITY_OPPOSITE_WICK_COMPRESSION"] = f("forecast3_liquidity_opposite_wick_compression", 0.35)
-        cfg["LIQUIDITY_SWEEP_WICK_COMPRESSION"] = f("forecast3_liquidity_sweep_wick_compression", 0.7)
-        cfg["MOMENTUM_BODY_CONFIDENCE_FLOOR"] = f("forecast3_momentum_body_confidence_floor", 0.62)
-        cfg["MOMENTUM_WICK_COMPRESSION"] = f("forecast3_momentum_wick_compression", 0.75)
-        cfg["NEAR_GAMMA_BODY_DAMPING"] = f("forecast3_near_gamma_body_damping", 0.4)
-        cfg["NEAR_GAMMA_WICK_EXPANSION"] = f("forecast3_near_gamma_wick_expansion", 0.25)
-        cfg["HIGH_VOL_PULL_FACTOR"] = f("forecast3_high_vol_pull_factor", 1.05)
-        cfg["LOW_VOL_PULL_FACTOR"] = f("forecast3_low_vol_pull_factor", 0.75)
-        cfg["WEEKDAY_PULL_FACTOR"] = f("forecast3_weekday_pull_factor", 1.0)
-        cfg["HIGH_VOL_SHOCK_FACTOR"] = f("forecast3_high_vol_shock_factor", 1.1)
-        cfg["LOW_VOL_SHOCK_FACTOR"] = f("forecast3_low_vol_shock_factor", 0.7)
-        cfg["WEEKDAY_SHOCK_FACTOR"] = f("forecast3_weekday_shock_factor", 1.0)
-        cfg["WEEKEND_ATR_FACTOR"] = f("forecast3_weekend_atr_factor", 0.75)
-        cfg["WEEKEND_BODY_FACTOR"] = f("forecast3_weekend_body_factor", 0.65)
-        cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast3_weekend_shock_factor", 0.75)
-        cfg["BUCKET_HOURS_FALLBACK"] = f("forecast3_bucket_hours_fallback", 4.0)
+        cfg["GAMMA_CENTER_WEIGHT"] = f("forecast_gamma_center_weight", 0.70)
+        cfg["CURVE_CENTER_WEIGHT"] = f("forecast_curve_center_weight", 0.20)
+        cfg["THETA_CENTER_WEIGHT"] = f("forecast_theta_center_weight", 0.10)
+        cfg["FORECAST_PULL_FACTOR"] = f("forecast_pull_factor", 0.55)
+        cfg["FORECAST_SLOPE_FACTOR"] = f("forecast_slope_factor", 0.35)
+        cfg["FORECAST_BODY_FACTOR"] = f("forecast_body_factor", 0.3)
+        cfg["FORECAST_CURVE_EXTREME_BODY_WEIGHT"] = f("forecast_curve_extreme_body_weight", 0.26)
+        cfg["FORECAST_WICK_FACTOR"] = f("forecast_wick_factor", 0.35)
+        cfg["FORECAST_ATR_FACTOR"] = f("forecast_atr_factor", 0.3)
+        cfg["FORECAST_CURVE_WICK_WEIGHT"] = f("forecast_curve_wick_weight", 0.42)
+        cfg["GAMMA_BAND_OPPOSITE_WICK_COMPRESSION"] = f("forecast_gb_opposite_wick_compression", 0.18)
+        cfg["GAMMA_BAND_CONFIRMED_TARGET_BOOST"] = f("forecast_gb_confirmed_target_boost", 0.55)
+        cfg["GAMMA_BAND_CONFIDENCE_BOOST"] = f("forecast_gb_confidence_boost", 0.2)
+        cfg["GAMMA_BAND_CONFLICT_BODY_DAMPING"] = f("forecast_gb_conflict_body_damping", 0.3)
+        cfg["GAMMA_BAND_CONFLICT_WICK_EXPANSION"] = f("forecast_gb_conflict_wick_expansion", 0.25)
+        cfg["GAMMA_BAND_OPPOSING_MAGNET_DAMPING"] = f("forecast_gb_opposing_magnet_damping", 0.6)
+        cfg["GAMMA_BAND_TREND_LOCK_STRENGTH"] = f("forecast_gb_trend_lock_strength", 0.55)
+        cfg["GAMMA_BAND_COUNTER_BODY_DAMPING"] = f("forecast_gb_counter_body_damping", 0.18)
+        cfg["GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE"] = f("forecast_gb_counter_max_opp_impulse", 0.03)
+        cfg["GAMMA_BAND_COUNTER_ESCAPE_ATR"] = f("forecast_gb_counter_escape_atr", 0.95)
+        cfg["GAMMA_CONFIRM_BUFFER_PCT"] = f("forecast_gamma_confirm_buffer_pct", 0.06)
+        cfg["CLUSTER_ALIGNMENT_THRESHOLD"] = f("forecast_cluster_alignment_threshold", 0.6)
+        cfg["CLUSTER_BODY_CONFIDENCE_FLOOR"] = f("forecast_cluster_body_confidence_floor", 0.58)
+        cfg["CLUSTER_COMPRESSED_THRESHOLD"] = f("forecast_cluster_compressed_threshold", 0.18)
+        cfg["CLUSTER_COMPRESSION_BODY_DAMPING"] = f("forecast_cluster_compression_body_damping", 0.15)
+        cfg["CLUSTER_COMPRESSION_WICK_COMPRESSION"] = f("forecast_cluster_compression_wick_compression", 0.3)
+        cfg["CLUSTER_EXPANSION_THRESHOLD"] = f("forecast_cluster_expansion_threshold", 0.025)
+        cfg["LIQUIDITY_ALIGNED_WICK_COMPRESSION"] = f("forecast_liquidity_aligned_wick_compression", 0.25)
+        cfg["LIQUIDITY_BODY_CONFIDENCE_FLOOR"] = f("forecast_liquidity_body_confidence_floor", 0.6)
+        cfg["LIQUIDITY_OPPOSITE_WICK_COMPRESSION"] = f("forecast_liquidity_opposite_wick_compression", 0.35)
+        cfg["LIQUIDITY_SWEEP_WICK_COMPRESSION"] = f("forecast_liquidity_sweep_wick_compression", 0.7)
+        cfg["MOMENTUM_BODY_CONFIDENCE_FLOOR"] = f("forecast_momentum_body_confidence_floor", 0.62)
+        cfg["MOMENTUM_WICK_COMPRESSION"] = f("forecast_momentum_wick_compression", 0.75)
+        cfg["NEAR_GAMMA_BODY_DAMPING"] = f("forecast_near_gamma_body_damping", 0.4)
+        cfg["NEAR_GAMMA_WICK_EXPANSION"] = f("forecast_near_gamma_wick_expansion", 0.25)
+        cfg["HIGH_VOL_PULL_FACTOR"] = f("forecast_high_vol_pull_factor", 1.05)
+        cfg["LOW_VOL_PULL_FACTOR"] = f("forecast_low_vol_pull_factor", 0.75)
+        cfg["WEEKDAY_PULL_FACTOR"] = f("forecast_weekday_pull_factor", 1.0)
+        cfg["HIGH_VOL_SHOCK_FACTOR"] = f("forecast_high_vol_shock_factor", 1.1)
+        cfg["LOW_VOL_SHOCK_FACTOR"] = f("forecast_low_vol_shock_factor", 0.7)
+        cfg["WEEKDAY_SHOCK_FACTOR"] = f("forecast_weekday_shock_factor", 1.0)
+        cfg["WEEKEND_ATR_FACTOR"] = f("forecast_weekend_atr_factor", 0.75)
+        cfg["WEEKEND_BODY_FACTOR"] = f("forecast_weekend_body_factor", 0.65)
+        cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast_weekend_shock_factor", 0.75)
+        cfg["BUCKET_HOURS_FALLBACK"] = f("forecast_bucket_hours_fallback", 4.0)
 
         cfg["SESSION_BODY_FACTOR"] = {
             "Asia": f("session_body_asia", 0.7),
@@ -1677,27 +1707,28 @@ class ChartController(http.Controller):
         }
 
         horizon = {
-            "hours_ahead": int(icp.get_param("dankbit.forecast3_hours_ahead", 72)),
-            "step_hours": int(icp.get_param("dankbit.forecast3_step_hours", 4)),
-            "start_offset_hours": int(icp.get_param("dankbit.forecast3_start_offset_hours", 4)),
+            "hours_ahead": int(icp.get_param("dankbit.forecast_hours_ahead", 72)),
+            "step_hours": int(icp.get_param("dankbit.forecast_step_hours", 4)),
+            "start_offset_hours": int(icp.get_param("dankbit.forecast_start_offset_hours", 4)),
         }
         return cfg, horizon
 
-    @http.route("/api/forecast3/<string:asset>", type="http", auth="user", website=False, csrf=False)
-    def forecast3_json(self, asset, **kw):
-        """"Forecast 3" — full port of Thales's "Thales Bands" Pine
-        indicator's forecast-candle engine (see forecast3.py) onto
-        Dankbit's own live per-leg gamma/delta/theta/vega Greeks, rather
-        than Thales's manually-typed-in daily CSV rows. Unlike
-        Forecast/Forecast 2, this path is fully deterministic — no GBM/
-        random component anywhere, matching the source script, which has
-        none either; every candle is a direct function of the current
-        Greeks, the last couple of persisted dankbit.forecast3.snapshot
+    @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def forecast_json(self, asset, **kw):
+        """The Thales Forecast candle engine — full port of Thales's
+        "Thales Bands" Pine indicator's forecast-candle engine (see
+        forecast.py) onto Dankbit's own live per-leg gamma/delta/theta/vega
+        Greeks, rather than Thales's manually-typed-in daily CSV rows.
+        Unlike this addon's earlier, now-removed GBM-based forecast
+        engines, this path is fully deterministic — no random component
+        anywhere, matching the source script, which has none either; every
+        candle is a direct function of the current
+        Greeks, the last couple of persisted dankbit.forecast.snapshot
         rows (for the Gamma-Band Consensus slope), and recent real 4h
         candles (for ATR/momentum/liquidity-sweep detection). `points` is
         empty when there's nothing computable yet for this asset (no index
         price, no active expiry, or no trades in the current 00:00-UTC
-        window — see dankbit.forecast3.snapshot.compute_and_persist)."""
+        window — see dankbit.forecast.snapshot.compute_and_persist)."""
         asset = asset.upper()
         if asset not in ("BTC", "ETH"):
             return request.make_response(
@@ -1717,7 +1748,7 @@ class ChartController(http.Controller):
         avg_iv_row = cr.fetchone()
         sigma_annual = float(avg_iv_row[0]) / 100.0 if avg_iv_row and avg_iv_row[0] else None
 
-        Snapshot = request.env["dankbit.forecast3.snapshot"]
+        Snapshot = request.env["dankbit.forecast.snapshot"]
         current_record = Snapshot.compute_and_persist(asset)
 
         points = []
@@ -1731,8 +1762,8 @@ class ChartController(http.Controller):
 
             now = datetime.now(timezone.utc)
             now_ms = int(now.timestamp() * 1000)
-            cfg, horizon = self._forecast3_cfg()
-            for p in forecast3.simulate_forecast3(index_price, sigma_annual, current, history, candles, cfg=cfg, **horizon):
+            cfg, horizon = self._forecast_cfg()
+            for p in forecast.simulate_forecast(index_price, sigma_annual, current, history, candles, cfg=cfg, **horizon):
                 points.append({
                     "t": now_ms + int(p["hours"] * 3600 * 1000),
                     "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
@@ -1776,12 +1807,12 @@ class ChartController(http.Controller):
         show_monthly_lines = "true" if icp.get_param("dankbit.show_monthly_lines", default="True") == "True" else "false"
 
         # Thales Forecast candle colors — rendering-only, read here (not
-        # _forecast3_cfg) since they only affect the client-side
-        # forecast3Series, not simulate_forecast3()'s own math.
-        forecast3_up_color = icp.get_param("dankbit.forecast3_up_color", default="#a5d6a7")
-        forecast3_down_color = icp.get_param("dankbit.forecast3_down_color", default="#ef9a9a")
-        forecast3_wick_up_color = icp.get_param("dankbit.forecast3_wick_up_color", default="#66bb6a")
-        forecast3_wick_down_color = icp.get_param("dankbit.forecast3_wick_down_color", default="#e57373")
+        # _forecast_cfg) since they only affect the client-side
+        # forecastSeries, not simulate_forecast()'s own math.
+        forecast_up_color = icp.get_param("dankbit.forecast_up_color", default="#a5d6a7")
+        forecast_down_color = icp.get_param("dankbit.forecast_down_color", default="#ef9a9a")
+        forecast_wick_up_color = icp.get_param("dankbit.forecast_wick_up_color", default="#66bb6a")
+        forecast_wick_down_color = icp.get_param("dankbit.forecast_wick_down_color", default="#e57373")
 
         if asset.startswith("ETH"):
             weekly_param = "dankbit.eth_weekly_expiry"
@@ -1815,10 +1846,10 @@ class ChartController(http.Controller):
             "show_weekly_lines": show_weekly_lines,
             "show_monthly_lines": show_monthly_lines,
             "show_gamma_point": "false",
-            "forecast3_up_color": forecast3_up_color,
-            "forecast3_down_color": forecast3_down_color,
-            "forecast3_wick_up_color": forecast3_wick_up_color,
-            "forecast3_wick_down_color": forecast3_wick_down_color,
+            "forecast_up_color": forecast_up_color,
+            "forecast_down_color": forecast_down_color,
+            "forecast_wick_up_color": forecast_wick_up_color,
+            "forecast_wick_down_color": forecast_wick_down_color,
         }, None
 
     @http.route("/chart/<string:asset>", type="http", auth="user", website=True)

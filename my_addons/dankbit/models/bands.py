@@ -8,7 +8,7 @@ import numpy as np
 from odoo import fields, models
 
 from ..controllers import options as options_lib
-from ..controllers import forecast3 as forecast3_lib
+from ..controllers import forecast as forecast_lib
 
 _logger = logging.getLogger(__name__)
 
@@ -45,6 +45,25 @@ class Bands(models.Model):
     low_support_positive = fields.Boolean(string="Low/Support Positive")
     gamma_band = fields.Float(digits=(16, 4))
     delta_band = fields.Float(digits=(16, 4))
+    # Thales's newer-version Smart Role-Aware Synthetic Liquidity levels
+    # (forecast.smart_synthetic_liquidity) — the same upper/lower levels
+    # the Thales Forecast candle engine already uses internally
+    # (liquidity_map_engine), computed here from this same instrument's
+    # own high_zone_max/low_zone_min/per-leg Greeks/index_price (see
+    # _compute_asset) rather than a separate live computation, so this
+    # model's own values can never disagree with what that engine sees.
+    # 0.0 means absent — that side's blend had no contributing legs (see
+    # smart_synthetic_liquidity/weighted_avg2), or high_zone_max<=
+    # low_zone_min (no band to compute against) — same "0.0 = absent"
+    # convention high_zone_min/max etc. already use on this model.
+    smart_liq_upper_price = fields.Float(string="Smart Liquidity Upper", digits=(16, 4))
+    smart_liq_lower_price = fields.Float(string="Smart Liquidity Lower", digits=(16, 4))
+    # Strength (smart_synthetic_liquidity's upper_liq_m/lower_liq_m) behind
+    # the 2 prices above — which side is the stronger/more dominant
+    # liquidity level, not just where it sits. Same "0.0 = absent"
+    # convention as the price fields.
+    smart_liq_upper_strength = fields.Float(string="Smart Liquidity Upper Strength", digits=(16, 4))
+    smart_liq_lower_strength = fields.Float(string="Smart Liquidity Lower Strength", digits=(16, 4))
     # High Zone / Low Zone / Middle Zone — same definitions as
     # options.zone_summary()'s high_zone/low_zone/middle_zone (see the
     # /<instrument>/zones PNG page's info overlay): high_zone/low_zone are
@@ -62,8 +81,8 @@ class Bands(models.Model):
     middle_zone_min = fields.Float(string="Middle Zone Min", digits=(16, 4))
     middle_zone_max = fields.Float(string="Middle Zone Max", digits=(16, 4))
     # Per-leg gamma/delta/theta/vega prices + Abs strength values — same
-    # forecast3.per_leg_greeks() computation (a thin Pine-naming layer over
-    # options.per_leg_greeks()) already used by dankbit.forecast3.snapshot,
+    # forecast.per_leg_greeks() computation (a thin Pine-naming layer over
+    # options.per_leg_greeks()) already used by dankbit.forecast.snapshot,
     # so this model's per-leg numbers can never quietly disagree with the
     # Thales Forecast engine's or the /<instrument>/zones PNG page's own
     # info overlay for the same trades. *_price is the raw extremum price;
@@ -104,7 +123,7 @@ class Bands(models.Model):
     # Seller Max Profit / Buyer Max Loss — where the Shorts payoff curve
     # peaks and where the Longs curve bottoms out (renamed from
     # short_max_price/long_min_price to match Thales's own SMP/BML
-    # terminology, see dankbit.forecast3.snapshot's bml/smp fields) — this
+    # terminology, see dankbit.forecast.snapshot's bml/smp fields) — this
     # model's original two fields (see git history: 8c59981), repurposed
     # into top_intersection/bottom_intersection in 8da5a1a and since
     # reintroduced as their own fields alongside those, computed by the
@@ -120,7 +139,7 @@ class Bands(models.Model):
     ]
 
     # The 32 per-leg gamma/delta/theta/vega price + Abs field names —
-    # exactly forecast3_lib.per_leg_greeks()'s own dict keys, which this
+    # exactly forecast_lib.per_leg_greeks()'s own dict keys, which this
     # model's fields are named to match 1:1 (see _compute_asset/
     # _persist_extrema). Listed once here rather than by hand in both
     # places.
@@ -327,9 +346,9 @@ class Bands(models.Model):
         low_support_positive = bool(np.interp(low_support, STs, longs_obj.payoffs) > 0) if lvs_crossings else False
 
         # Per-leg gamma/delta/theta/vega prices + Abs strength values, via
-        # forecast3.per_leg_greeks() (a thin Pine-naming layer over
+        # forecast.per_leg_greeks() (a thin Pine-naming layer over
         # options.per_leg_greeks(), the single source of truth for this
-        # computation — chart_png_zones, dankbit.forecast3.snapshot, and
+        # computation — chart_png_zones, dankbit.forecast.snapshot, and
         # this model can never quietly disagree). `trades` is already this
         # target expiry's since-midnight set, so no separate "nearest
         # expiry among trades" re-filtering is needed here unlike
@@ -337,7 +356,7 @@ class Bands(models.Model):
         # set. Returns bcg_price/bcg_abs.../spv_price/spv_abs — the exact
         # field names this model persists, spread directly into the
         # returned dict below.
-        legs = forecast3_lib.per_leg_greeks(STs, trades)
+        legs = forecast_lib.per_leg_greeks(STs, trades)
 
         # Gamma band: average of the 4 gamma extrema the /<instrument>/zones
         # PNG page's info overlay shows (Buyer Call Gamma/Buyer Put Gamma,
@@ -361,6 +380,30 @@ class Bands(models.Model):
         # marker line, so the two can never disagree on where this point is.
         delta_band = (legs["bcd_price"] + legs["bpd_price"] + legs["scd_price"] + legs["spd_price"]) / 4.0
 
+        # Smart Role-Aware Synthetic Liquidity (see forecast.
+        # smart_synthetic_liquidity) — against this same instrument's own
+        # high_zone_max/low_zone_min band and per-leg legs dict (already
+        # shaped exactly as that function expects, same keys
+        # per_leg_greeks() returns), role_close = this same index_price.
+        # 0.0 means absent (degenerate top<=low band, or that side's blend
+        # had no contributing legs — see weighted_avg2), same "0.0 = absent"
+        # convention high_zone_min/max etc. already use on this model,
+        # rather than introducing None as a second sentinel type here.
+        smart_liq_top, smart_liq_low = high_zone_max, low_zone_min
+        smart_liq_band_width = smart_liq_top - smart_liq_low
+        smart_liq_upper_price = 0.0
+        smart_liq_lower_price = 0.0
+        smart_liq_upper_strength = 0.0
+        smart_liq_lower_strength = 0.0
+        if smart_liq_band_width > 0:
+            smart_liq = forecast_lib.smart_synthetic_liquidity(
+                legs, smart_liq_top, smart_liq_low, smart_liq_band_width, index_price,
+            )
+            smart_liq_upper_price = smart_liq["upper_liq_price"] or 0.0
+            smart_liq_lower_price = smart_liq["lower_liq_price"] or 0.0
+            smart_liq_upper_strength = smart_liq["upper_liq_m"] or 0.0
+            smart_liq_lower_strength = smart_liq["lower_liq_m"] or 0.0
+
         return {
             "asset": asset,
             "instrument": instrument,
@@ -373,6 +416,10 @@ class Bands(models.Model):
             "low_support_positive": low_support_positive,
             "gamma_band": gamma_band,
             "delta_band": delta_band,
+            "smart_liq_upper_price": smart_liq_upper_price,
+            "smart_liq_lower_price": smart_liq_lower_price,
+            "smart_liq_upper_strength": smart_liq_upper_strength,
+            "smart_liq_lower_strength": smart_liq_lower_strength,
             "high_zone_min": high_zone_min,
             "high_zone_max": high_zone_max,
             "low_zone_min": low_zone_min,
@@ -388,7 +435,7 @@ class Bands(models.Model):
             # Individual per-leg gamma/delta/theta/vega prices + Abs values
             # (bcg_price/bcg_abs.../spv_price/spv_abs) behind gamma_band/
             # delta_band and this model's own per-leg fields — spread
-            # straight from forecast3_lib.per_leg_greeks()'s dict, whose
+            # straight from forecast_lib.per_leg_greeks()'s dict, whose
             # keys already match this model's field names 1:1.
             **legs,
         }
@@ -396,7 +443,8 @@ class Bands(models.Model):
     def _persist_extrema(self, data):
         """Upsert the one record for `data['instrument']` — only the
         historical-line fields (computed_at/index_price/high_resistance/
-        low_support/gamma_band/delta_band/high_zone/low_zone/middle_zone/
+        low_support/gamma_band/delta_band/smart_liq_upper_price/
+        smart_liq_lower_price/high_zone/low_zone/middle_zone/
         seller_max_profit/buyer_max_loss, plus the 32 per-leg gamma/delta/
         theta/vega price+Abs fields — see _PER_LEG_GREEK_FIELDS);
         computed_at is refreshed to `data['computed_at']` (the moment
@@ -454,6 +502,10 @@ get_box_n() (the only caller of this method) is itself only ever
             "low_support_positive": data["low_support_positive"],
             "gamma_band": data["gamma_band"],
             "delta_band": data["delta_band"],
+            "smart_liq_upper_price": data["smart_liq_upper_price"],
+            "smart_liq_lower_price": data["smart_liq_lower_price"],
+            "smart_liq_upper_strength": data["smart_liq_upper_strength"],
+            "smart_liq_lower_strength": data["smart_liq_lower_strength"],
             "high_zone_min": data["high_zone_min"],
             "high_zone_max": data["high_zone_max"],
             "low_zone_min": data["low_zone_min"],

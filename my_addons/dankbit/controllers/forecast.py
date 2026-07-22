@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Forecast 3 — port of Thales's "Thales Bands" Pine indicator's forecast-
+"""Forecast — port of Thales's "Thales Bands" Pine indicator's forecast-
 candle engine onto Dankbit's own live-computed Greeks (no manual data entry:
-see dankbit.forecast3.snapshot for where the per-leg numbers below come
+see dankbit.forecast.snapshot for where the per-leg numbers below come
 from). Pure functions only, mirroring delta.py/gamma.py's own style — no
 Odoo/ORM access, no side effects.
 
@@ -11,11 +11,11 @@ forecast loop interpolates between a "selected" (current) and "previous"
 row that are both real, already-known data points. Dankbit has no
 foreknowledge of future Greek levels, so there is only ever one "current"
 set of levels (top/low/gamma/curve/theta/delta) — it stays constant across
-every forecast step, exactly like Forecast/Forecast 2's own gamma_band/
-sigma_annual inputs. The only thing that varies over real time is the
+every forecast step, exactly like this addon's earlier, now-removed
+GBM-based forecast engines' own gamma_band/sigma_annual inputs. The only thing that varies over real time is the
 *history* used by the Gamma-Band Consensus engine's slope math (see
 gamma_band_consensus below), which compares the current snapshot against
-the last couple of persisted dankbit.forecast3.snapshot rows.
+the last couple of persisted dankbit.forecast.snapshot rows.
 
 Ported from a newer Pine version (v6.2.1) than the original port: added
 Smart Role-Aware Synthetic Liquidity (smart_synthetic_liquidity —
@@ -24,7 +24,7 @@ Dankbit's earlier manually-entered dankbit.liquidity.snapshot workflow,
 removed once this automated equivalent existed), Gamma-Band Trend Lock
 (locks against a one-candle countertrend flip while a strong 3-way-
 aligned consensus holds, see the gb_counter_trend_locked block in
-simulate_forecast3), and the Wick-to-Body Acceptance Engine
+simulate_forecast), and the Wick-to-Body Acceptance Engine
 (wick_to_body_acceptance — converts part of an asymmetric wick into the
 candle body when one side's Market-Maker force dominance and
 independent signals agree). The newest version's other additions (a
@@ -43,7 +43,7 @@ from . import options as options_lib
 
 # Fallback real-hours-ago gap between snapshots when `candles` is empty
 # (no real klines available to anchor "now" to) — matches
-# dankbit.forecast3.snapshot.BUCKET_HOURS.
+# dankbit.forecast.snapshot.BUCKET_HOURS.
 BUCKET_HOURS_FALLBACK = 4.0
 
 
@@ -142,7 +142,7 @@ def derive_levels(current, cfg=None):
     """From one per_leg_greeks()+snapshot dict, derive the blended
     gamma/curve/theta averages and the weighted center Thales's forecast
     loop pulls price toward. `current` is a plain dict with the
-    dankbit.forecast3.snapshot field names (bcg_price, bcg_abs, bml, smp,
+    dankbit.forecast.snapshot field names (bcg_price, bcg_abs, bml, smp,
     top, low, ...).
 
     `buyer_gamma`/`seller_gamma`/`gamma_avg` are the PLAIN unweighted
@@ -158,7 +158,7 @@ def derive_levels(current, cfg=None):
     didn't match the reference script's actual (if seemingly
     unintentional) behavior; corrected to match after review.
 
-    `cfg` (optional, see simulate_forecast3/_cfg) can override
+    `cfg` (optional, see simulate_forecast/_cfg) can override
     GAMMA_CENTER_WEIGHT/CURVE_CENTER_WEIGHT/THETA_CENTER_WEIGHT — the
     only knob in this function exposed to res.config.settings' "Thales
     Forecast" section, added after the original Pine script's own author
@@ -216,7 +216,7 @@ def gamma_band_consensus(sel_top, prev_top, prev_prev_top,
                           sel_hours_ago, prev_hours_ago, prev_prev_hours_ago,
                           band_width):
     """`sel_*` is the current snapshot; `prev_*`/`prev_prev_*` are the last
-    2 persisted dankbit.forecast3.snapshot rows (newest first). `*_hours_ago`
+    2 persisted dankbit.forecast.snapshot rows (newest first). `*_hours_ago`
     is how many real hours before now each point was taken (0 for `sel`).
     Returns a dict with consensus_direction (-1/0/1), consensus_strength
     (0-1), conflict_strength, and the individual top/low/gamma slopes."""
@@ -511,7 +511,7 @@ def market_maker_gamma_contest(current, projected_price, band_width, body_confid
 # f_smartBandAdjustedLevel/f_smartBandAdjustedStrength. This fully
 # replaces Dankbit's earlier manually-entered dankbit.liquidity.snapshot
 # workflow (removed once this automated equivalent existed) — see
-# simulate_forecast3, which feeds this straight into liquidity_map_engine
+# simulate_forecast, which feeds this straight into liquidity_map_engine
 # with no manual data involved.
 # ============================================================
 SMART_LIQ_SELLER_PIN_WEIGHT = 1.10
@@ -677,7 +677,7 @@ def smart_synthetic_liquidity(current, top, low, band_width, role_close):
 # produced a level — same na-safe behavior the source script has for a
 # blank liquidity column. Fed entirely by smart_synthetic_liquidity()
 # (computed from this expiry's own Greeks, no manual data entry needed)
-# — see simulate_forecast3.
+# — see simulate_forecast.
 # ============================================================
 LIQUIDITY_VOLUME_NORMALIZER = 1000.0
 LIQUIDITY_DISTANCE_BAND_WIDTH = 0.60
@@ -747,6 +747,164 @@ def liquidity_map_engine(lower_liq_price, lower_liq_m, upper_liq_price, upper_li
         "lower_dominant": lower_dominant, "upper_dominant": upper_dominant,
         "upper_swept_rejected": upper_swept_rejected, "lower_swept_rejected": lower_swept_rejected,
         "bias_abs": bias_abs, "sweep_body_boost": sweep_body_boost,
+    }
+
+
+# ============================================================
+# Greek Flow Engine — Dankbit-original, not ported from Thales's source
+# Pine script (see this module's top docstring; every other engine above
+# either transliterates a named block from the script or, like Smart
+# Synthetic Liquidity, replaces a manually-entered CSV column with an
+# equivalent computed from these same Greeks). Motivated by a design
+# conversation on making forecast candle BODIES track reality more
+# closely: every engine above reacts only to the current scan's static
+# Greek levels/magnitudes; nothing anywhere in this cascade asks whether
+# a leg's own conviction is *growing or draining* scan-to-scan, or
+# whether a synthetic liquidity level is drifting toward or away from
+# price. This engine adds exactly that, from the same per-leg Abs fields
+# already loaded on every dankbit.forecast.snapshot row — no new data
+# source, no new model. Needs at least 1 real prior snapshot row
+# (history[0]); inert (impulse 0.0, multipliers 1.0, fakeout_risk False)
+# until one exists, same na-safe convention liquidity_map_engine uses
+# for a blank liquidity column.
+#
+# Three signals, in the same directional-sign convention as
+# market_maker_gamma_contest (positive = bullish contribution):
+#   - Delta Flow: rate of change of bcd_abs/bpd_abs/scd_abs/spd_abs
+#     (buyer conviction growing = directional push; seller conviction
+#     growing = pin/resistance building = opposing push — exactly
+#     market_maker_gamma_contest's call_breakout/call_pin split, just
+#     applied to a *trend* instead of a magnitude) — feeds `impulse`.
+#   - Vega Flow: same rate-of-change treatment for bcv_abs/bpv_abs vs.
+#     scv_abs/spv_abs, but vega has no inherent bullish/bearish direction
+#     (mirrors vega_regime's own framing) — growing buyer-side vega
+#     conviction means expansion is *accelerating* (wider wick_mult);
+#     growing seller-side conviction means compression is accelerating
+#     (damped body_confidence_mult) — feeds body_confidence_mult/wick_mult
+#     instead of impulse.
+#   - Smart Liquidity Drift: re-evaluates smart_synthetic_liquidity() on
+#     history[0]'s own Greeks (same top/low/band_width/last_close as the
+#     live call — see greek_flow's docstring for why last_close is
+#     deliberately reused rather than reconstructed for that historical
+#     moment) and compares how far upper_liq_price/lower_liq_price sat
+#     from last_close then vs. now; a level closing the gap contributes a
+#     small impulse toward it. A level opening the gap contributes
+#     nothing here — liquidity_map_engine's own proximity-based decay
+#     already prices that in, so there's no need to double-penalize it.
+#
+# Fakeout Risk: when Delta Flow's direction disagrees with the most
+# recent real candle's own body direction (option flow isn't confirming
+# what price already did), body_confidence_mult is damped and wick_mult
+# expanded — the same GAMMA_BAND_CONFLICT_*-style damping
+# gamma_band_consensus's own conflict case already uses elsewhere in
+# this cascade. When the two agree instead, a small confirmation boost
+# is applied, mirroring GAMMA_BAND_CONFIDENCE_BOOST's role for consensus.
+#
+# Deliberately NOT cfg-overridable: constants private to a nested helper
+# (vega_regime, market_maker_gamma_contest, smart_synthetic_liquidity's
+# internals, ...) are already excluded from res.config.settings' "Thales
+# Forecast" section by the "top-level only" scoping rule documented on
+# simulate_forecast/CLAUDE.md; this engine, called the same way those
+# are (once per step, from inside simulate_forecast's loop), follows
+# the same rule rather than becoming a special case.
+# ============================================================
+GREEK_FLOW_REF_HOURS = 8.0  # same reference window gamma_band_consensus's slope() extrapolates to — keeps flow rates on the same normalized-per-8h scale as the rest of this file
+GREEK_FLOW_DELTA_IMPULSE_STRENGTH = 0.16
+GREEK_FLOW_MAX_DELTA_IMPULSE = 0.18
+GREEK_FLOW_LIQ_DRIFT_IMPULSE_STRENGTH = 0.10
+GREEK_FLOW_MAX_LIQ_DRIFT_IMPULSE = 0.12
+GREEK_FLOW_VEGA_WICK_STRENGTH = 0.35
+GREEK_FLOW_VEGA_BODY_DAMPING = 0.20
+GREEK_FLOW_DEAD_ZONE = 0.05
+GREEK_FLOW_FAKEOUT_BODY_DAMPING = 0.35
+GREEK_FLOW_FAKEOUT_WICK_EXPANSION = 0.30
+GREEK_FLOW_CONFIRM_CONFIDENCE_BOOST = 0.20
+GREEK_FLOW_DECAY = 0.84  # per-step impulse decay, same shape as vega_regime's 0.86**step/mm's 0.80**step — a fresh mid-range choice since this engine has no direct Thales analog to match
+
+
+def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step):
+    """See the module-level "Greek Flow Engine" comment block above for
+    the full design. `synthetic_liq` is the CURRENT smart_synthetic_liquidity()
+    result — already computed once in simulate_forecast and passed in
+    here rather than recomputed, same as every other caller of it.
+    `history` is newest-first; only history[0] (the single most recent
+    prior snapshot) is used — unlike gamma_band_consensus's 3-point
+    slope, one prior point is enough here since these are trend/
+    confirmation signals feeding multipliers and a capped impulse, not a
+    standalone consensus direction the rest of the cascade defers to.
+
+    Returns a dict: impulse (own directional push, decayed by step, kept
+    fully separate from every other engine's own impulse term rather
+    than reaching into e.g. liquidity_map_engine's own accumulator),
+    body_confidence_mult, wick_mult, fakeout_risk (bool), plus
+    delta_flow_signal/vega_flow_signal (unscaled, for diagnostics/mode)."""
+    empty = {
+        "impulse": 0.0, "body_confidence_mult": 1.0, "wick_mult": 1.0,
+        "fakeout_risk": False, "delta_flow_signal": 0.0, "vega_flow_signal": 0.0,
+    }
+    if not history:
+        return empty
+
+    prev = history[0]
+    hours_ago = max((current["bucket_epoch"] - prev["bucket_epoch"]) / 3600.0, 1.0)
+
+    def rate(key, normalizer):
+        return (current[key] - prev[key]) * GREEK_FLOW_REF_HOURS / hours_ago / normalizer
+
+    buyer_call_delta_flow = rate("bcd_abs", DELTA_ABS_NORMALIZER)
+    buyer_put_delta_flow = rate("bpd_abs", DELTA_ABS_NORMALIZER)
+    seller_call_delta_flow = rate("scd_abs", DELTA_ABS_NORMALIZER)
+    seller_put_delta_flow = rate("spd_abs", DELTA_ABS_NORMALIZER)
+    delta_flow_signal = (buyer_call_delta_flow - seller_call_delta_flow) - (buyer_put_delta_flow - seller_put_delta_flow)
+
+    buyer_vega_flow = rate("bcv_abs", VEGA_ABS_NORMALIZER) + rate("bpv_abs", VEGA_ABS_NORMALIZER)
+    seller_vega_flow = rate("scv_abs", VEGA_ABS_NORMALIZER) + rate("spv_abs", VEGA_ABS_NORMALIZER)
+    vega_flow_signal = buyer_vega_flow - seller_vega_flow
+
+    prev_liq = smart_synthetic_liquidity(prev, top, low, band_width, last_close)
+    liq_drift_impulse = 0.0
+    for side_price, side_prev_price in (
+        (synthetic_liq.get("upper_liq_price"), prev_liq.get("upper_liq_price")),
+        (synthetic_liq.get("lower_liq_price"), prev_liq.get("lower_liq_price")),
+    ):
+        if side_price is None or side_prev_price is None:
+            continue
+        gap_now = abs(side_price - last_close)
+        gap_prev = abs(side_prev_price - last_close)
+        approach_rate = (gap_prev - gap_now) * GREEK_FLOW_REF_HOURS / hours_ago / band_width
+        if approach_rate > 0:
+            direction = 1.0 if side_price > last_close else -1.0
+            liq_drift_impulse += direction * min(approach_rate, 1.0) * GREEK_FLOW_LIQ_DRIFT_IMPULSE_STRENGTH
+    liq_drift_impulse = max(min(liq_drift_impulse, GREEK_FLOW_MAX_LIQ_DRIFT_IMPULSE), -GREEK_FLOW_MAX_LIQ_DRIFT_IMPULSE)
+
+    delta_impulse = max(min(delta_flow_signal * GREEK_FLOW_DELTA_IMPULSE_STRENGTH, GREEK_FLOW_MAX_DELTA_IMPULSE), -GREEK_FLOW_MAX_DELTA_IMPULSE)
+    impulse = (delta_impulse + liq_drift_impulse) * (GREEK_FLOW_DECAY ** step)
+
+    body_confidence_mult = 1.0
+    wick_mult = 1.0
+    if vega_flow_signal > GREEK_FLOW_DEAD_ZONE:
+        wick_mult = 1.0 + min(vega_flow_signal * GREEK_FLOW_VEGA_WICK_STRENGTH, 0.50)
+    elif vega_flow_signal < -GREEK_FLOW_DEAD_ZONE:
+        damping = min(abs(vega_flow_signal) * GREEK_FLOW_VEGA_BODY_DAMPING, 0.35)
+        body_confidence_mult = max(1.0 - damping, 0.55)
+        wick_mult = max(1.0 - min(abs(vega_flow_signal) * 0.15, 0.20), 0.80)
+
+    price_direction = 1 if last_close > last_open else (-1 if last_close < last_open else 0)
+    flow_direction = 1 if delta_flow_signal > GREEK_FLOW_DEAD_ZONE else (-1 if delta_flow_signal < -GREEK_FLOW_DEAD_ZONE else 0)
+    fakeout_risk = price_direction != 0 and flow_direction != 0 and price_direction != flow_direction
+    if fakeout_risk:
+        body_confidence_mult *= 1.0 - GREEK_FLOW_FAKEOUT_BODY_DAMPING
+        wick_mult *= 1.0 + GREEK_FLOW_FAKEOUT_WICK_EXPANSION
+    elif flow_direction != 0 and flow_direction == price_direction:
+        body_confidence_mult = min(body_confidence_mult * (1.0 + GREEK_FLOW_CONFIRM_CONFIDENCE_BOOST), 1.0)
+
+    return {
+        "impulse": impulse,
+        "body_confidence_mult": max(body_confidence_mult, 0.30),
+        "wick_mult": max(wick_mult, 0.30),
+        "fakeout_risk": fakeout_risk,
+        "delta_flow_signal": delta_flow_signal,
+        "vega_flow_signal": vega_flow_signal,
     }
 
 
@@ -1094,22 +1252,23 @@ def _atr14(candles):
 def _cfg(cfg, name):
     """Returns cfg[name] if the caller supplied an override for it, else
     this module's own hardcoded constant of that name. Used only by
-    simulate_forecast3's own top-level tunables (see its `cfg` parameter
+    simulate_forecast's own top-level tunables (see its `cfg` parameter
     and res.config.settings' "Thales Forecast" section) — constants
     private to nested helper functions are not overridable this way and
     keep using their bare module-level name directly."""
     return cfg[name] if cfg and name in cfg else globals()[name]
 
 
-def simulate_forecast3(index_price, sigma_annual, current, history, candles,
+def simulate_forecast(index_price, sigma_annual, current, history, candles,
                         hours_ahead=72, step_hours=4, start_offset_hours=4, cfg=None):
     """The full forecast-candle cascade, ported from Thales's per-step Pine
-    loop. `current` and each row of `history` are dankbit.forecast3.snapshot
+    loop. `current` and each row of `history` are dankbit.forecast.snapshot
     field dicts (newest history row first); `candles` are recent real 4h
     OHLC dicts, oldest first, with the last entry being the most recently
-    fetched (still-forming) real candle. Deterministic — unlike
-    Forecast/Forecast 2, there is no GBM/random component anywhere in this
-    engine (matching the source script, which has none either); every
+    fetched (still-forming) real candle. Deterministic — unlike this
+    addon's earlier, now-removed GBM-based forecast engines, there is no
+    random component anywhere in this engine (matching the source script,
+    which has none either); every
     candle is a direct function of the current Greeks and recent price
     action. Returns a list of {hours, open, high, low, close, mode} dicts,
     one per step_hours-spaced candle out to hours_ahead. `hours_ahead=72`
@@ -1126,12 +1285,12 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
     right below — without touching this module's hardcoded defaults for
     anyone who doesn't pass a cfg (e.g. tests, or a call with cfg=None).
     Sourced from res.config.settings' "Thales Forecast" section by
-    main.py's forecast3_json, falling back to these same hardcoded
+    main.py's forecast_json, falling back to these same hardcoded
     defaults for any setting left unset. Constants private to nested
     helper functions (vega_regime, market_maker_gamma_contest, cluster_*,
     smart_synthetic_liquidity's internals, delta_shock_module,
     gamma_shock_module, etc.) are NOT overridable via cfg — see the
-    "Top-level only" scoping decision in CLAUDE.md's Forecast 3 candles
+    "Top-level only" scoping decision in CLAUDE.md's Forecast candles
     section."""
     cfg = cfg or {}
     FORECAST_PULL_FACTOR = _cfg(cfg, "FORECAST_PULL_FACTOR")
@@ -1376,9 +1535,11 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
             # double-boost the same real candle.
             current_body_impulse *= liquidity["sweep_body_boost"]
 
+        flow = greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step)
+
         any_shock_active = bear_delta_shock or bull_delta_shock or bear_shock or bull_shock
-        body_confidence = 1.0 * vega_body_mult
-        wick_expansion = 1.0 * vega_wick_mult
+        body_confidence = 1.0 * vega_body_mult * flow["body_confidence_mult"]
+        wick_expansion = 1.0 * vega_wick_mult * flow["wick_mult"]
 
         if consensus["consensus_direction"] != 0:
             body_confidence = min(body_confidence * (1.0 + consensus["consensus_strength"] * GAMMA_BAND_CONFIDENCE_BOOST * (1.0 if consensus["all_aligned"] else 0.65)), 1.0)
@@ -1431,7 +1592,7 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
         forecast_impulse = (
             base_pull_impulse + slope_impulse + current_body_impulse + curve_extreme_impulse
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
-            + liquidity["impulse"]
+            + liquidity["impulse"] + flow["impulse"]
         ) * body_confidence
         if gb_counter_trend_locked:
             allowed_opposite = GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE * max(1.0 - consensus["consensus_strength"], 0.05)
@@ -1532,6 +1693,8 @@ def simulate_forecast3(index_price, sigma_annual, current, history, candles,
             mode.append("Liquidity Swept")
         elif liquidity["lower_dominant"] or liquidity["upper_dominant"]:
             mode.append("Liquidity Magnet")
+        if flow["fakeout_risk"]:
+            mode.append("Flow Fakeout")
         mode.append(sess)
 
         points.append({

@@ -17,7 +17,7 @@ from . import vega as vega_lib
 
 # The fraction of a leg's own curve extreme delta_saturation_price() (below)
 # looks for — 90% of the way from ATM to fully saturated ITM. Single source
-# of truth: main.py's ChartController and forecast3.py both used to keep
+# of truth: main.py's ChartController and forecast.py both used to keep
 # their own separate copy of this same 0.9 value.
 DELTA_SATURATION_FRACTION = 0.9
 
@@ -342,12 +342,12 @@ def per_leg_greeks(STs, trades, r=0.0):
     "vega_price", "vega_value"}} — raw (unscaled) prices and values; each
     caller applies its own display scaling (e.g. the /<instrument>/zones
     page's Value lines divide gamma/delta/theta/vega by 1e6/10/1e4/100,
-    forecast3.per_leg_greeks() does the same for its own *_abs fields).
+    forecast.per_leg_greeks() does the same for its own *_abs fields).
 
     Single source of truth for this computation — shared by chart_png_zones
     (main.py), dankbit.bands's gamma_band/delta_band
-    (models/bands.py), and forecast3.per_leg_greeks()
-    (controllers/forecast3.py), so the three can never quietly compute
+    (models/bands.py), and forecast.per_leg_greeks()
+    (controllers/forecast.py), so the three can never quietly compute
     different numbers for the same trades. `trades` should already be
     filtered to whichever expiry/time-window the caller cares about — this
     function only splits by direction/option_type, nothing else."""

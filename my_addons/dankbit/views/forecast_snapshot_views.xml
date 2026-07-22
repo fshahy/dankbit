@@ -1,37 +1,20 @@
 <?xml version="1.0"?>
 
 <odoo>
-    <record id="dankbit_bands_view_form" model="ir.ui.view">
-        <field name="name">dankbit_bands.view.form</field>
-        <field name="model">dankbit.bands</field>
+    <record id="dankbit_forecast_snapshot_view_form" model="ir.ui.view">
+        <field name="name">dankbit_forecast_snapshot.view.form</field>
+        <field name="model">dankbit.forecast.snapshot</field>
         <field name="arch" type="xml">
-            <form string="Bands">
+            <form string="Forecast Snapshot">
                 <sheet>
                     <group>
-                        <field name="computed_at" />
                         <field name="asset" />
-                        <field name="instrument" />
+                        <field name="bucket_start" />
                         <field name="index_price" />
-                        <field name="high_resistance" />
-                        <field name="high_resistance_positive" />
-                        <field name="low_support" />
-                        <field name="low_support_positive" />
-                        <field name="gamma_band" />
-                        <field name="delta_band" />
-                        <field name="smart_liq_upper_price" />
-                        <field name="smart_liq_lower_price" />
-                        <field name="smart_liq_upper_strength" />
-                        <field name="smart_liq_lower_strength" />
-                        <field name="seller_max_profit" />
-                        <field name="buyer_max_loss" />
-                    </group>
-                    <group string="Zones">
-                        <field name="high_zone_min" />
-                        <field name="high_zone_max" />
-                        <field name="low_zone_min" />
-                        <field name="low_zone_max" />
-                        <field name="middle_zone_min" />
-                        <field name="middle_zone_max" />
+                        <field name="top" />
+                        <field name="low" />
+                        <field name="bml" />
+                        <field name="smp" />
                     </group>
                     <group string="Gamma">
                         <field name="bcg_price" />
@@ -78,31 +61,20 @@
         </field>
     </record>
 
-    <record id="dankbit_bands_view_list" model="ir.ui.view">
-        <field name="name">dankbit_bands.view.list</field>
-        <field name="model">dankbit.bands</field>
+    <record id="dankbit_forecast_snapshot_view_list" model="ir.ui.view">
+        <field name="name">dankbit_forecast_snapshot.view.list</field>
+        <field name="model">dankbit.forecast.snapshot</field>
         <field name="arch" type="xml">
-            <list string="Bands">
-                <field name="computed_at" />
+            <list string="Forecast Snapshot">
                 <field name="asset" />
-                <field name="instrument" />
+                <field name="bucket_start" />
                 <field name="index_price" />
-                <field name="high_resistance" />
-                <field name="high_resistance_positive" />
-                <field name="low_support" />
-                <field name="low_support_positive" />
-                <field name="gamma_band" />
-                <field name="delta_band" />
-                <field name="seller_max_profit" />
-                <field name="buyer_max_loss" />
+                <field name="top" />
+                <field name="low" />
+                <field name="bml" />
+                <field name="smp" />
                 <!-- Hidden by default (too many columns to show all at once) —
                      available via the list view's column-picker dropdown. -->
-                <field name="high_zone_min" optional="hide" />
-                <field name="high_zone_max" optional="hide" />
-                <field name="low_zone_min" optional="hide" />
-                <field name="low_zone_max" optional="hide" />
-                <field name="middle_zone_min" optional="hide" />
-                <field name="middle_zone_max" optional="hide" />
                 <field name="bcg_price" optional="hide" />
                 <field name="bcg_abs" optional="hide" />
                 <field name="bpg_price" optional="hide" />
@@ -139,11 +111,11 @@
         </field>
     </record>
 
-    <record id="dankbit_bands_view_search" model="ir.ui.view">
-        <field name="name">dankbit.bands.view.search</field>
-        <field name="model">dankbit.bands</field>
+    <record id="dankbit_forecast_snapshot_view_search" model="ir.ui.view">
+        <field name="name">dankbit.forecast.snapshot.view.search</field>
+        <field name="model">dankbit.forecast.snapshot</field>
         <field name="arch" type="xml">
-            <search string="Search Bands">
+            <search string="Search Forecast Snapshot">
                 <field name="asset" string="Asset"/>
 
                 <separator/>
@@ -158,14 +130,14 @@
         </field>
     </record>
 
-    <record id="dankbit_bands_action" model="ir.actions.act_window">
-        <field name="name">Bands</field>
-        <field name="res_model">dankbit.bands</field>
+    <record id="dankbit_forecast_snapshot_action" model="ir.actions.act_window">
+        <field name="name">Forecast Snapshot</field>
+        <field name="res_model">dankbit.forecast.snapshot</field>
         <field name="view_mode">list,form</field>
     </record>
 
-    <menuitem id="dankbit_bands_menu" name="Bands"
-        action="dankbit_bands_action"
+    <menuitem id="dankbit_forecast_snapshot_menu" name="Forecast Snapshot"
+        action="dankbit_forecast_snapshot_action"
         parent="dankbit_root_menu"
-        sequence="50"/>
+        sequence="60"/>
 </odoo>

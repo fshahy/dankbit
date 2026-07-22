@@ -8,16 +8,28 @@ from odoo import fields, models
 _logger = logging.getLogger(__name__)
 
 # Bucket size for the snapshot history (independent of the forecast's own
-# horizon, see forecast3.simulate_forecast3's hours_ahead) — a snapshot is
+# horizon, see forecast.simulate_forecast's hours_ahead) — a snapshot is
 # taken once per bucket of this size, giving the Gamma-Band Consensus
-# engine (see forecast3.py) a real time-ordered history to compute slopes
-# from. 4h matches the candle spacing both the source Pine script and
-# Dankbit's own forecast steps use.
-BUCKET_HOURS = 4
+# engine and the Greek Flow Engine (see forecast.py) a real time-ordered
+# history to compute slopes/flow from. 1h (not the 4h candle spacing the
+# source Pine script and Dankbit's own forecast steps use) — the Greek
+# Flow Engine's whole premise is detecting scan-to-scan Greek trend
+# *within* the formation of one 4h forecast candle, which needs history
+# spaced tighter than that candle's own step; both engines' slope/flow
+# math already normalizes by real elapsed hours (gamma_band_consensus's
+# "per 8 real hours" extrapolation, greek_flow's GREEK_FLOW_REF_HOURS),
+# so tightening this only makes both more responsive, not incorrect.
+# Populated by compute_snapshot()'s hourly cron below — before that cron
+# existed, this model had no cron at all and relied solely on
+# compute_and_persist() being called live from /api/forecast/<asset>
+# (i.e. while the "Thales Forecast" checkbox was open somewhere); at 4h
+# buckets a multi-hour viewing gap only widened the slope window, but at
+# 1h buckets a reliable cadence matters more, hence the cron.
+BUCKET_HOURS = 1
 
 
-class Forecast3Snapshot(models.Model):
-    _name = "dankbit.forecast3.snapshot"
+class ForecastSnapshot(models.Model):
+    _name = "dankbit.forecast.snapshot"
     _order = "bucket_start"
 
     # One row per (asset, bucket_start) — continuously refined while its
@@ -28,7 +40,7 @@ class Forecast3Snapshot(models.Model):
     # real historical time series Thales's manually-dated CSV rows provide
     # in the source Pine script — Dankbit has no human typing in daily
     # snapshots, so this model exists purely to give the Gamma-Band
-    # Consensus engine (forecast3.gamma_band_consensus) the 3 real
+    # Consensus engine (forecast.gamma_band_consensus) the 3 real
     # historical points it needs to compute a top/low/gamma slope over
     # actual elapsed time.
     asset = fields.Char(required=True, index=True)
@@ -101,7 +113,7 @@ class Forecast3Snapshot(models.Model):
 
     _sql_constraints = [
         ("asset_bucket_uniq", "unique (asset, bucket_start)",
-         "Only one Forecast 3 snapshot is kept per asset per time bucket."),
+         "Only one Forecast snapshot is kept per asset per time bucket."),
     ]
 
     def _bucket_start_for(self, as_of):
@@ -124,7 +136,7 @@ class Forecast3Snapshot(models.Model):
         (identical to this row's own top/low: each curve's own highest/
         lowest zero-crossing, same skip-absent-sides rule) and all 32
         per-leg gamma/delta/theta/vega price+Abs fields (via its own call
-        into forecast3_lib.per_leg_greeks()) since that model started
+        into forecast_lib.per_leg_greeks()) since that model started
         persisting them too. This method used to re-fetch `asset`'s trades
         and call build_zone_curves()/per_leg_greeks() a second time just to
         get numbers _compute_asset() had already computed a moment
@@ -135,13 +147,13 @@ class Forecast3Snapshot(models.Model):
         twice for one asset."""
         bands_data = self.env["dankbit.bands"]._compute_asset(asset, expiry_index=0)
         if not bands_data:
-            _logger.warning("forecast3.compute_and_persist: dankbit.bands has nothing computable for %s, skipping", asset)
+            _logger.warning("forecast.compute_and_persist: dankbit.bands has nothing computable for %s, skipping", asset)
             return None
 
         top = bands_data["high_zone_max"]
         low = bands_data["low_zone_min"]
         if not top or not low:
-            _logger.warning("forecast3.compute_and_persist: no band for %s, skipping", asset)
+            _logger.warning("forecast.compute_and_persist: no band for %s, skipping", asset)
             return None
 
         as_of = bands_data["computed_at"]
@@ -168,13 +180,29 @@ class Forecast3Snapshot(models.Model):
 
     def recent_history(self, asset, limit=3):
         """The `limit` most recent snapshot rows for `asset`, newest first —
-        feeds forecast3.gamma_band_consensus's 3-point slope calculation.
-        History only ever accumulates as a side effect of
-        compute_and_persist() being called live from /api/forecast3/<asset>
-        (i.e. while the "Thales Forecast" checkbox is open somewhere) — no
-        cron fallback, since a gap here just widens the Gamma-Band
-        Consensus engine's slope window rather than breaking anything (see
-        gamma_band_consensus()'s real-elapsed-hours normalization)."""
+        feeds forecast.gamma_band_consensus's 3-point slope calculation
+        and forecast.greek_flow's Delta/Vega Flow + Smart Liquidity Drift
+        calculation. History accumulates both from compute_snapshot()'s
+        hourly cron (see below) and, in between cron ticks, as a side
+        effect of compute_and_persist() being called live from
+        /api/forecast/<asset> while the "Thales Forecast" checkbox is
+        open somewhere — either path upserts the same current bucket, so
+        they can never conflict, only refine the same row. A missed cron
+        tick just widens the slope/flow window rather than breaking
+        anything (see gamma_band_consensus()'s and greek_flow()'s
+        real-elapsed-hours normalization)."""
         return self.sudo().search(
             [("asset", "=", asset)], order="bucket_start desc", limit=limit
         )
+
+    def compute_snapshot(self):
+        """Cron entry point (hourly — see data/ir_cron.xml), mirroring
+        dankbit.bands.compute_snapshot()'s own asset-loop pattern. Unlike
+        that model, this one already had a live-write path
+        (compute_and_persist() called from /api/forecast/<asset> while
+        the Thales Forecast checkbox is open) before this cron existed —
+        this cron doesn't replace that path, it just guarantees the
+        roughly-hourly cadence recent_history()'s consumers (Gamma-Band
+        Consensus, Greek Flow) need even when nobody has the chart open."""
+        for asset in ("BTC", "ETH"):
+            self.compute_and_persist(asset)

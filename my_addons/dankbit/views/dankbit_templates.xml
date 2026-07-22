@@ -250,7 +250,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-forecast3-up-color="forecast3_up_color" t-att-data-forecast3-down-color="forecast3_down_color" t-att-data-forecast3-wick-up-color="forecast3_wick_up_color" t-att-data-forecast3-wick-down-color="forecast3_wick_down_color" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
@@ -278,8 +278,8 @@
 							<input type="checkbox" id="bands-toggle" onchange="onToggleBands()"/>
 							Bands
 						</label>
-						<label class="toggle-label" id="forecast3-toggle-wrap" style="display:none">
-							<input type="checkbox" id="forecast3-toggle" onchange="onToggleForecast3()"/>
+						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
+							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
 						</label>
 						<span class="tf-label">Boxes from:</span>
@@ -314,10 +314,10 @@
 					// Settings → Dankbit → Thales Forecast (res.config.settings),
 					// defaults are light red/green so forecast candles stay
 					// easily distinguishable from the real teal/red candle series.
-					const FORECAST3_UP_COLOR = cfg.forecast3UpColor || '#a5d6a7';
-					const FORECAST3_DOWN_COLOR = cfg.forecast3DownColor || '#ef9a9a';
-					const FORECAST3_WICK_UP_COLOR = cfg.forecast3WickUpColor || '#66bb6a';
-					const FORECAST3_WICK_DOWN_COLOR = cfg.forecast3WickDownColor || '#e57373';
+					const FORECAST_UP_COLOR = cfg.forecastUpColor || '#a5d6a7';
+					const FORECAST_DOWN_COLOR = cfg.forecastDownColor || '#ef9a9a';
+					const FORECAST_WICK_UP_COLOR = cfg.forecastWickUpColor || '#66bb6a';
+					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
 					// /my/<asset> is the only minimal page (candles + Gamma Tops
 					// only — no Weekly/Monthly/All/Daily delta=0 lines, no zones
 					// boxes/extrema), and currently the only one with Gamma
@@ -345,11 +345,11 @@
 					// default (matching the checkbox's own default-checked state
 					// above), since these boxes were always-on before this flag
 					// existed — unchecking it stops refreshZonesBoxes() from
-					// calling the server at all, which also means this browser's
-					// own polling stops refreshing the nearest expiry's
-					// dankbit.bands row (expiry_index 0) — the 4-hourly
-					// compute_snapshot() cron still keeps that row fresh on its own
-					// regardless.
+					// calling the server at all, purely to reduce server load.
+					// This has no effect on dankbit.bands either way: get_box()
+					// (which /api/zones-box/<asset> calls) never persists,
+					// checked or not — only the 4-hourly compute_snapshot() cron
+					// ever writes to that model.
 					let SHOW_ZONES_BOXES = true;
 					// User-toggleable via the "Bands" checkbox (Delta Chart
 					// only — this indicator is already suppressed on DG Chart via
@@ -375,7 +375,7 @@
 					// dankbit.zones_box_window_hours setting). Only 'hours' is ever
 					// sent as a query param (see refreshZonesBoxes()) — a live,
 					// non-persisted override on the server side (see get_box()'s
-					// hours param); the hourly compute_snapshot() cron and every
+					// hours param); the 4-hourly compute_snapshot() cron and every
 					// other viewer's default midnight-based view are completely
 					// unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
@@ -403,16 +403,16 @@
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
-					const FORECAST3_URL    = '/api/forecast3/' + ASSET;
+					const FORECAST_URL    = '/api/forecast/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
-					// checkbox at all, so SHOW_FORECAST3 simply never gets
+					// checkbox at all, so SHOW_FORECAST simply never gets
 					// set true there) — unchecked by default, same server-
 					// load-reducing pattern as every other optional indicator on
 					// this chart.
-					// Draws a fully deterministic path (see FORECAST3_URL) ported
-					// from Thales's own forecast-candle engine — see forecast3.py.
-					let SHOW_FORECAST3 = false;
+					// Draws a fully deterministic path (see FORECAST_URL) ported
+					// from Thales's own forecast-candle engine — see forecast.py.
+					let SHOW_FORECAST = false;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -479,6 +479,14 @@
 					const highResistanceSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const lowSupportSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
 					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					// Smart Role-Aware Synthetic Liquidity term-structure lines
+					// (dankbit.bands.smart_liq_upper_price/smart_liq_lower_price)
+					// — part of the "Bands" checkbox/refreshBands(), not a
+					// separate toggle, same orange used for this indicator
+					// before, dotted to stay distinct from the solid/dashed
+					// lines already on this chart.
+					const smartLiqUpperSeries = chart.addLineSeries({ color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					const smartLiqLowerSeries = chart.addLineSeries({ color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -517,13 +525,13 @@
 
 					// Thales Forecast candles ("Thales Forecast" checkbox) —
 					// Thales's deterministic forecast-candle engine (see
-					// forecast3.py), sourced from /api/forecast3/<asset>. Light
-					// red/green (user-configurable, see FORECAST3_UP_COLOR etc.
+					// forecast.py), sourced from /api/forecast/<asset>. Light
+					// red/green (user-configurable, see FORECAST_UP_COLOR etc.
 					// above) so it stays easily distinguishable from the real
 					// candles' own teal/red at a glance.
-					const forecast3Series = chart.addCandlestickSeries({
-						upColor: FORECAST3_UP_COLOR, downColor: FORECAST3_DOWN_COLOR, borderVisible: false,
-						wickUpColor: FORECAST3_WICK_UP_COLOR, wickDownColor: FORECAST3_WICK_DOWN_COLOR,
+					const forecastSeries = chart.addCandlestickSeries({
+						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
+						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
@@ -545,13 +553,25 @@
 						return top.gamma > 0 ? top : null;
 					}
 
+					// Signed leg contribution, /1e6 like the combined value —
+					// unlike the Abs. lines elsewhere in this addon, sign is
+					// kept (not abs()'d) here since the whole point of the
+					// breakdown is showing which legs pushed gamma up vs
+					// down at this strike, not just how big each one is.
+					function fmtLegGamma(v) {
+						const r = Math.round(v / 1e6);
+						return (r >= 0 ? '+' : '') + r;
+					}
+
 					function drawGammaTopLine(top, label) {
 						if (!top) return;
 						gammaTopsLines.push(series.createPriceLine({
 							price: top.price, color: 'black', lineWidth: 2,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'black',
-							title: 'Γ Top ' + label + ' +' + Math.round(top.gamma / 1e6),
+							title: 'Γ Top ' + label + ' +' + Math.round(top.gamma / 1e6) +
+								'  LC:' + fmtLegGamma(top.long_call) + ' LP:' + fmtLegGamma(top.long_put) +
+								' SC:' + fmtLegGamma(top.short_call) + ' SP:' + fmtLegGamma(top.short_put),
 						}));
 					}
 
@@ -812,8 +832,12 @@
 						highResistanceSeries.setData([]);
 						lowSupportSeries.setData([]);
 						gammaBandSeries.setData([]);
+						smartLiqUpperSeries.setData([]);
+						smartLiqLowerSeries.setData([]);
 						highResistanceSeries.setMarkers([]);
 						lowSupportSeries.setMarkers([]);
+						smartLiqUpperSeries.setMarkers([]);
+						smartLiqLowerSeries.setMarkers([]);
 					}
 
 					async function refreshBands() {
@@ -823,6 +847,41 @@
 						highResistanceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.high_resistance })));
 						lowSupportSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.low_support })));
 						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
+						// 0.0 means absent (see dankbit.bands' smart_liq_upper_price/
+						// smart_liq_lower_price) — filtered out rather than plotted,
+						// same principle setBoxData()'s "0.0 = no crossing" already
+						// applies to the zones boxes, so a legless/degenerate point
+						// doesn't render as a spurious price-0 dip in the line.
+						const smartLiqUpperRows = rows.filter(r => r.smart_liq_upper_price);
+						const smartLiqLowerRows = rows.filter(r => r.smart_liq_lower_price);
+						smartLiqUpperSeries.setData(smartLiqUpperRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_upper_price })));
+						smartLiqLowerSeries.setData(smartLiqLowerRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_lower_price })));
+
+						// Per-point (not whole-line) emphasis: dominance can flip from
+						// one tracked expiry to the next (e.g. upper stronger at the
+						// nearest expiry, lower stronger at a further one), and
+						// Lightweight Charts has no per-point lineWidth within a single
+						// series — so instead of thickening the whole line, draw a
+						// bigger marker dot only at the points where that side's own
+						// smart_liq_upper_strength/smart_liq_lower_strength actually
+						// beats its counterpart at that SAME expiry (each row compared
+						// only against itself, not some single "nearest" row). size:0
+						// hides the marker entirely at non-dominant points, same
+						// convention the +/- markers below use.
+						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: '#fb8c00',
+							shape: 'circle',
+							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 2 : 0,
+						})));
+						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: '#fb8c00',
+							shape: 'circle',
+							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 2 : 0,
+						})));
 
 						// +/- marker per point: whether the payoff at that
 						// intersection (not the intersection's own price) sits
@@ -924,10 +983,11 @@
 					// the checkbox's own default-checked state), since these boxes
 					// were always shown before this checkbox existed. Stops
 					// refreshZonesBoxes() from calling the server at all while off
-					// (see SHOW_ZONES_BOXES above) — including its side effect of
-					// persisting the nearest expiry's dankbit.bands row —
-					// not just hiding the result; the 4-hourly compute_snapshot()
-					// cron is untouched either way. Clears the boxes immediately
+					// (see SHOW_ZONES_BOXES above), purely to reduce server load —
+					// not just hiding the result; get_box() never persists to
+					// dankbit.bands regardless, so this has no effect on that
+					// model either way. The 4-hourly compute_snapshot() cron is
+					// untouched either way. Clears the boxes immediately
 					// when switched off and re-fetches immediately when switched
 					// back on.
 					function onToggleZonesBoxes() {
@@ -961,8 +1021,8 @@
 						}
 					}
 
-					function clearForecast3Lines() {
-						forecast3Series.setData([]);
+					function clearForecastLines() {
+						forecastSeries.setData([]);
 					}
 
 					// The Thales Forecast candles are 4h resolution and only
@@ -976,14 +1036,14 @@
 					// check rather than assuming the element is present.
 					function updateForecastVisibility() {
 						const visible = INTERVAL === '4h';
-						const wrap = document.getElementById('forecast3-toggle-wrap');
+						const wrap = document.getElementById('forecast-toggle-wrap');
 						if (wrap) wrap.style.display = visible ? '' : 'none';
-						refreshForecast3();
+						refreshForecast();
 					}
 
 					// "Thales Forecast" checkbox (Delta Chart only) —
-					// fetches /api/forecast3/<asset> and draws the forecast
-					// candles (see FORECAST3_URL, forecast3Series above). Stops
+					// fetches /api/forecast/<asset> and draws the forecast
+					// candles (see FORECAST_URL, forecastSeries above). Stops
 					// fetching entirely while off, or while not on the 4h
 					// timeframe (see updateForecastVisibility above), same
 					// server-load-reducing pattern as every other optional
@@ -995,7 +1055,7 @@
 					// Lightweight Charts builds one shared logical time axis
 					// from the union of every series' timestamps; server-
 					// relative "now" timestamps almost never land on that grid,
-					// so forecast3Series' points ended up alternating with
+					// so forecastSeries' points ended up alternating with
 					// futureAxisSeries' ticks in the same stretch — each series
 					// only getting every other logical slot, which rendered as
 					// every other forecast candle missing.
@@ -1011,27 +1071,27 @@
 					// forecast candle is always the next 4h candle after
 					// now, on the correct grid, regardless of which one
 					// realCandles[last] actually is.
-					async function refreshForecast3() {
-						if (!SHOW_FORECAST3 || INTERVAL !== '4h' || !realCandles.length) { clearForecast3Lines(); return; }
-						const data = await (await fetch(FORECAST3_URL)).json();
+					async function refreshForecast() {
+						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
+						const data = await (await fetch(FORECAST_URL)).json();
 						const points = data.points || [];
-						if (!points.length) { clearForecast3Lines(); return; }
+						if (!points.length) { clearForecastLines(); return; }
 						const intervalSec = INTERVAL_SECONDS[INTERVAL];
 						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
 						let firstTime = realCandles[realCandles.length - 1].time;
 						while (firstTime <= nowShifted) firstTime += intervalSec;
-						forecast3Series.setData(points.map((p, i) => ({
+						forecastSeries.setData(points.map((p, i) => ({
 							time: firstTime + i * intervalSec,
 							open: p.open, high: p.high, low: p.low, close: p.close,
 						})));
 					}
 
-					function onToggleForecast3() {
-						SHOW_FORECAST3 = document.getElementById('forecast3-toggle').checked;
-						if (SHOW_FORECAST3) {
-							refreshForecast3();
+					function onToggleForecast() {
+						SHOW_FORECAST = document.getElementById('forecast-toggle').checked;
+						if (SHOW_FORECAST) {
+							refreshForecast();
 						} else {
-							clearForecast3Lines();
+							clearForecastLines();
 						}
 					}
 
@@ -1116,7 +1176,7 @@
 					setInterval(refreshBands, REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
-					setInterval(refreshForecast3, REFRESH);
+					setInterval(refreshForecast, REFRESH);
 				//]]></script>
 			</body>
 		</html>

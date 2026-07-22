@@ -72,232 +72,232 @@
                             <field name="eth_monthly_expiry" placeholder="e.g. ETH-26SEP26"/>
                         </setting>
                     </block>
-                    <block title="Thales Forecast" id="dankbit_forecast3_settings" groups="base.group_no_one">
+                    <block title="Thales Forecast" id="dankbit_forecast_settings" groups="base.group_no_one">
                         <!-- Horizon -->
                         <setting>
-                            <field name="forecast3_hours_ahead" placeholder="Hours Ahead"/>
+                            <field name="forecast_hours_ahead" placeholder="Hours Ahead"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_step_hours" placeholder="Step Hours"/>
+                            <field name="forecast_step_hours" placeholder="Step Hours"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_start_offset_hours" placeholder="Start Offset Hours"/>
+                            <field name="forecast_start_offset_hours" placeholder="Start Offset Hours"/>
                         </setting>
                         <!-- Gamma/curve/theta center-weight blend -->
                         <setting>
-                            <field name="forecast3_gamma_center_weight" placeholder="Gamma Center Weight"/>
+                            <field name="forecast_gamma_center_weight" placeholder="Gamma Center Weight"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_curve_center_weight" placeholder="Curve Center Weight"/>
+                            <field name="forecast_curve_center_weight" placeholder="Curve Center Weight"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_theta_center_weight" placeholder="Theta Center Weight"/>
+                            <field name="forecast_theta_center_weight" placeholder="Theta Center Weight"/>
                         </setting>
                         <!-- Base impulse / wick factors -->
                         <setting>
-                            <field name="forecast3_pull_factor" placeholder="Pull Factor"/>
+                            <field name="forecast_pull_factor" placeholder="Pull Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_slope_factor" placeholder="Slope Factor"/>
+                            <field name="forecast_slope_factor" placeholder="Slope Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_body_factor" placeholder="Body Factor"/>
+                            <field name="forecast_body_factor" placeholder="Body Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_curve_extreme_body_weight" placeholder="Curve Extreme Body Weight"/>
+                            <field name="forecast_curve_extreme_body_weight" placeholder="Curve Extreme Body Weight"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_wick_factor" placeholder="Wick Factor"/>
+                            <field name="forecast_wick_factor" placeholder="Wick Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_atr_factor" placeholder="ATR Factor"/>
+                            <field name="forecast_atr_factor" placeholder="ATR Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_curve_wick_weight" placeholder="Curve Wick Weight"/>
+                            <field name="forecast_curve_wick_weight" placeholder="Curve Wick Weight"/>
                         </setting>
                         <!-- Gamma-Band Consensus / Trend Lock -->
                         <setting>
-                            <field name="forecast3_gb_opposite_wick_compression" placeholder="Gamma-Band Opposite Wick Compression"/>
+                            <field name="forecast_gb_opposite_wick_compression" placeholder="Gamma-Band Opposite Wick Compression"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_confirmed_target_boost" placeholder="Gamma-Band Confirmed Target Boost"/>
+                            <field name="forecast_gb_confirmed_target_boost" placeholder="Gamma-Band Confirmed Target Boost"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_confidence_boost" placeholder="Gamma-Band Confidence Boost"/>
+                            <field name="forecast_gb_confidence_boost" placeholder="Gamma-Band Confidence Boost"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_conflict_body_damping" placeholder="Gamma-Band Conflict Body Damping"/>
+                            <field name="forecast_gb_conflict_body_damping" placeholder="Gamma-Band Conflict Body Damping"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_conflict_wick_expansion" placeholder="Gamma-Band Conflict Wick Expansion"/>
+                            <field name="forecast_gb_conflict_wick_expansion" placeholder="Gamma-Band Conflict Wick Expansion"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_opposing_magnet_damping" placeholder="Gamma-Band Opposing Magnet Damping"/>
+                            <field name="forecast_gb_opposing_magnet_damping" placeholder="Gamma-Band Opposing Magnet Damping"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_trend_lock_strength" placeholder="Gamma-Band Trend Lock Strength"/>
+                            <field name="forecast_gb_trend_lock_strength" placeholder="Gamma-Band Trend Lock Strength"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_counter_body_damping" placeholder="Gamma-Band Counter Body Damping"/>
+                            <field name="forecast_gb_counter_body_damping" placeholder="Gamma-Band Counter Body Damping"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_counter_max_opp_impulse" placeholder="Gamma-Band Counter Max Opposite Impulse"/>
+                            <field name="forecast_gb_counter_max_opp_impulse" placeholder="Gamma-Band Counter Max Opposite Impulse"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gb_counter_escape_atr" placeholder="Gamma-Band Counter Escape ATR"/>
+                            <field name="forecast_gb_counter_escape_atr" placeholder="Gamma-Band Counter Escape ATR"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_gamma_confirm_buffer_pct" placeholder="Gamma Confirm Buffer %"/>
+                            <field name="forecast_gamma_confirm_buffer_pct" placeholder="Gamma Confirm Buffer %"/>
                         </setting>
                         <!-- Option Cluster Structure Engine -->
                         <setting>
-                            <field name="forecast3_cluster_alignment_threshold" placeholder="Cluster Alignment Threshold"/>
+                            <field name="forecast_cluster_alignment_threshold" placeholder="Cluster Alignment Threshold"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_cluster_body_confidence_floor" placeholder="Cluster Body Confidence Floor"/>
+                            <field name="forecast_cluster_body_confidence_floor" placeholder="Cluster Body Confidence Floor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_cluster_compressed_threshold" placeholder="Cluster Compressed Threshold"/>
+                            <field name="forecast_cluster_compressed_threshold" placeholder="Cluster Compressed Threshold"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_cluster_compression_body_damping" placeholder="Cluster Compression Body Damping"/>
+                            <field name="forecast_cluster_compression_body_damping" placeholder="Cluster Compression Body Damping"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_cluster_compression_wick_compression" placeholder="Cluster Compression Wick Compression"/>
+                            <field name="forecast_cluster_compression_wick_compression" placeholder="Cluster Compression Wick Compression"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_cluster_expansion_threshold" placeholder="Cluster Expansion Threshold"/>
+                            <field name="forecast_cluster_expansion_threshold" placeholder="Cluster Expansion Threshold"/>
                         </setting>
                         <!-- Liquidity -->
                         <setting>
-                            <field name="forecast3_liquidity_aligned_wick_compression" placeholder="Liquidity Aligned Wick Compression"/>
+                            <field name="forecast_liquidity_aligned_wick_compression" placeholder="Liquidity Aligned Wick Compression"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_liquidity_body_confidence_floor" placeholder="Liquidity Body Confidence Floor"/>
+                            <field name="forecast_liquidity_body_confidence_floor" placeholder="Liquidity Body Confidence Floor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_liquidity_opposite_wick_compression" placeholder="Liquidity Opposite Wick Compression"/>
+                            <field name="forecast_liquidity_opposite_wick_compression" placeholder="Liquidity Opposite Wick Compression"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_liquidity_sweep_wick_compression" placeholder="Liquidity Sweep Wick Compression"/>
+                            <field name="forecast_liquidity_sweep_wick_compression" placeholder="Liquidity Sweep Wick Compression"/>
                         </setting>
                         <!-- Momentum / Gamma Neutral Zone -->
                         <setting>
-                            <field name="forecast3_momentum_body_confidence_floor" placeholder="Momentum Body Confidence Floor"/>
+                            <field name="forecast_momentum_body_confidence_floor" placeholder="Momentum Body Confidence Floor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_momentum_wick_compression" placeholder="Momentum Wick Compression"/>
+                            <field name="forecast_momentum_wick_compression" placeholder="Momentum Wick Compression"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_near_gamma_body_damping" placeholder="Near-Gamma Body Damping"/>
+                            <field name="forecast_near_gamma_body_damping" placeholder="Near-Gamma Body Damping"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_near_gamma_wick_expansion" placeholder="Near-Gamma Wick Expansion"/>
+                            <field name="forecast_near_gamma_wick_expansion" placeholder="Near-Gamma Wick Expansion"/>
                         </setting>
                         <!-- Regime (low/high-volume, weekday/weekend) -->
                         <setting>
-                            <field name="forecast3_high_vol_pull_factor" placeholder="High-Volume Pull Factor"/>
+                            <field name="forecast_high_vol_pull_factor" placeholder="High-Volume Pull Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_low_vol_pull_factor" placeholder="Low-Volume Pull Factor"/>
+                            <field name="forecast_low_vol_pull_factor" placeholder="Low-Volume Pull Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_weekday_pull_factor" placeholder="Weekday Pull Factor"/>
+                            <field name="forecast_weekday_pull_factor" placeholder="Weekday Pull Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_high_vol_shock_factor" placeholder="High-Volume Shock Factor"/>
+                            <field name="forecast_high_vol_shock_factor" placeholder="High-Volume Shock Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_low_vol_shock_factor" placeholder="Low-Volume Shock Factor"/>
+                            <field name="forecast_low_vol_shock_factor" placeholder="Low-Volume Shock Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_weekday_shock_factor" placeholder="Weekday Shock Factor"/>
+                            <field name="forecast_weekday_shock_factor" placeholder="Weekday Shock Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_weekend_atr_factor" placeholder="Weekend ATR Factor"/>
+                            <field name="forecast_weekend_atr_factor" placeholder="Weekend ATR Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_weekend_body_factor" placeholder="Weekend Body Factor"/>
+                            <field name="forecast_weekend_body_factor" placeholder="Weekend Body Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_weekend_shock_factor" placeholder="Weekend Shock Factor"/>
+                            <field name="forecast_weekend_shock_factor" placeholder="Weekend Shock Factor"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_bucket_hours_fallback" placeholder="Bucket Hours Fallback"/>
+                            <field name="forecast_bucket_hours_fallback" placeholder="Bucket Hours Fallback"/>
                         </setting>
                         <!-- Session tables (Asia/London/Overlap/NY/PostNY) -->
                         <setting>
-                            <field name="forecast3_session_body_asia" placeholder="Session Body (Asia)"/>
+                            <field name="forecast_session_body_asia" placeholder="Session Body (Asia)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_body_london" placeholder="Session Body (London)"/>
+                            <field name="forecast_session_body_london" placeholder="Session Body (London)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_body_overlap" placeholder="Session Body (Overlap)"/>
+                            <field name="forecast_session_body_overlap" placeholder="Session Body (Overlap)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_body_ny" placeholder="Session Body (NY)"/>
+                            <field name="forecast_session_body_ny" placeholder="Session Body (NY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_body_postny" placeholder="Session Body (PostNY)"/>
+                            <field name="forecast_session_body_postny" placeholder="Session Body (PostNY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_atr_asia" placeholder="Session ATR (Asia)"/>
+                            <field name="forecast_session_atr_asia" placeholder="Session ATR (Asia)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_atr_london" placeholder="Session ATR (London)"/>
+                            <field name="forecast_session_atr_london" placeholder="Session ATR (London)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_atr_overlap" placeholder="Session ATR (Overlap)"/>
+                            <field name="forecast_session_atr_overlap" placeholder="Session ATR (Overlap)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_atr_ny" placeholder="Session ATR (NY)"/>
+                            <field name="forecast_session_atr_ny" placeholder="Session ATR (NY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_atr_postny" placeholder="Session ATR (PostNY)"/>
+                            <field name="forecast_session_atr_postny" placeholder="Session ATR (PostNY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_shock_asia" placeholder="Session Shock (Asia)"/>
+                            <field name="forecast_session_shock_asia" placeholder="Session Shock (Asia)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_shock_london" placeholder="Session Shock (London)"/>
+                            <field name="forecast_session_shock_london" placeholder="Session Shock (London)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_shock_overlap" placeholder="Session Shock (Overlap)"/>
+                            <field name="forecast_session_shock_overlap" placeholder="Session Shock (Overlap)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_shock_ny" placeholder="Session Shock (NY)"/>
+                            <field name="forecast_session_shock_ny" placeholder="Session Shock (NY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_shock_postny" placeholder="Session Shock (PostNY)"/>
+                            <field name="forecast_session_shock_postny" placeholder="Session Shock (PostNY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_firstmove_asia" placeholder="Session Firstmove (Asia)"/>
+                            <field name="forecast_session_firstmove_asia" placeholder="Session Firstmove (Asia)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_firstmove_london" placeholder="Session Firstmove (London)"/>
+                            <field name="forecast_session_firstmove_london" placeholder="Session Firstmove (London)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_firstmove_overlap" placeholder="Session Firstmove (Overlap)"/>
+                            <field name="forecast_session_firstmove_overlap" placeholder="Session Firstmove (Overlap)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_firstmove_ny" placeholder="Session Firstmove (NY)"/>
+                            <field name="forecast_session_firstmove_ny" placeholder="Session Firstmove (NY)"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_session_firstmove_postny" placeholder="Session Firstmove (PostNY)"/>
+                            <field name="forecast_session_firstmove_postny" placeholder="Session Firstmove (PostNY)"/>
                         </setting>
                         <!-- Forecast candle colors -->
                         <setting>
-                            <field name="forecast3_up_color" placeholder="Forecast Up Color"/>
+                            <field name="forecast_up_color" placeholder="Forecast Up Color"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_down_color" placeholder="Forecast Down Color"/>
+                            <field name="forecast_down_color" placeholder="Forecast Down Color"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_wick_up_color" placeholder="Forecast Wick Up Color"/>
+                            <field name="forecast_wick_up_color" placeholder="Forecast Wick Up Color"/>
                         </setting>
                         <setting>
-                            <field name="forecast3_wick_down_color" placeholder="Forecast Wick Down Color"/>
+                            <field name="forecast_wick_down_color" placeholder="Forecast Wick Down Color"/>
                         </setting>
                     </block>
                  </app>
