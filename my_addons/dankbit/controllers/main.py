@@ -34,18 +34,18 @@ class _AggTrade:
 
 
 class ChartController(http.Controller):
-    @http.route("/help", auth="public", type="http", website=True)
+    @http.route("/help", auth="user", type="http", website=True)
     def help_page(self):
         return request.render("dankbit.dankbit_help")
 
-    @http.route("/<string:instrument>/s", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/s", type="http", auth="user", website=True)
     def chart_slideshow(self, instrument):
         return request.render("dankbit.dankbit_slideshow", {
             "instrument": instrument,
             "hours_list": [0, 4, 8, 12, 24],
         })
 
-    @http.route("/<string:instrument>/<int:hours>", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/<int:hours>", type="http", auth="user", website=True)
     def chart_png_hours(self, instrument, hours):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -183,7 +183,7 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:instrument>/zones", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/zones", type="http", auth="user", website=True)
     def chart_png_zones(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -541,23 +541,23 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:instrument>/lp", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/lp", type="http", auth="user", website=True)
     def chart_png_long_puts(self, instrument):
         return self._chart_png_single_leg(instrument, "lp")
 
-    @http.route("/<string:instrument>/lc", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/lc", type="http", auth="user", website=True)
     def chart_png_long_calls(self, instrument):
         return self._chart_png_single_leg(instrument, "lc")
 
-    @http.route("/<string:instrument>/sp", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/sp", type="http", auth="user", website=True)
     def chart_png_short_puts(self, instrument):
         return self._chart_png_single_leg(instrument, "sp")
 
-    @http.route("/<string:instrument>/sc", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>/sc", type="http", auth="user", website=True)
     def chart_png_short_calls(self, instrument):
         return self._chart_png_single_leg(instrument, "sc")
 
-    @http.route("/<string:instrument>", type="http", auth="public", website=True)
+    @http.route("/<string:instrument>", type="http", auth="user", website=True)
     def chart_png_all(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -705,7 +705,7 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:asset>/weekly", type="http", auth="public", website=True)
+    @http.route("/<string:asset>/weekly", type="http", auth="user", website=True)
     def chart_png_weekly(self, asset):
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -720,7 +720,7 @@ class ChartController(http.Controller):
             )
         return self.chart_png_until(instrument)
 
-    @http.route("/<string:asset>/monthly", type="http", auth="public", website=True)
+    @http.route("/<string:asset>/monthly", type="http", auth="user", website=True)
     def chart_png_monthly(self, asset):
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -735,7 +735,7 @@ class ChartController(http.Controller):
             )
         return self.chart_png_until(instrument)
 
-    @http.route("/i/<string:instrument>", type="http", auth="public", website=True)
+    @http.route("/i/<string:instrument>", type="http", auth="user", website=True)
     def chart_png_until(self, instrument):
         # instrument is e.g. "BTC-3JUL26" — asset prefix + expiry, no strike/type
         parts = instrument.split("-", 1)
@@ -951,7 +951,7 @@ class ChartController(http.Controller):
     # JSON API endpoints
     # ------------------------------------------------------------------
 
-    @http.route("/api/delta-zero/<string:instrument>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/delta-zero/<string:instrument>", type="http", auth="user", website=False, csrf=False)
     def delta_zero_json(self, instrument):
         parts = instrument.upper().split("-", 1)
         if len(parts) != 2:
@@ -1034,7 +1034,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/delta-zero-all/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/delta-zero-all/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def delta_zero_all_json(self, asset):
         asset = asset.upper()
         icp = request.env["ir.config_parameter"].sudo()
@@ -1168,7 +1168,7 @@ class ChartController(http.Controller):
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/delta-zero-tomorrow/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def delta_zero_tomorrow_json(self, asset):
         payload = self._delta_zero_for_calendar_day(asset, 1)
         return request.make_response(
@@ -1176,7 +1176,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/delta-zero-day-after-tomorrow/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/delta-zero-day-after-tomorrow/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def delta_zero_day_after_tomorrow_json(self, asset):
         payload = self._delta_zero_for_calendar_day(asset, 2)
         return request.make_response(
@@ -1276,7 +1276,7 @@ class ChartController(http.Controller):
         ]
         return strikes, trade_count
 
-    @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def gamma_by_strike_json(self, asset):
         """Per-strike combined portfolio dollar-gamma, every trade through
         expiry, all active expiries — feeds the Gamma Chart's "Gamma Tops"
@@ -1301,7 +1301,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/gamma-by-strike-until/<string:instrument>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/gamma-by-strike-until/<string:instrument>", type="http", auth="user", website=False, csrf=False)
     def gamma_by_strike_until_json(self, instrument):
         """Same per-strike computation as gamma_by_strike_json, but
         restricted to every active expiry up to and including `instrument`'s
@@ -1353,7 +1353,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/bands/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/bands/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def bands_json(self, asset):
         """One point per instrument stored in dankbit.bands (each
         instrument has exactly one, continuously-refined-then-frozen row —
@@ -1430,7 +1430,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/zones-box/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/zones-box/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def zones_box_json(self, asset):
         """Live zones-box boundaries for the nearest active expiry —
         computed fresh on every request via dankbit.bands.get_box(),
@@ -1482,7 +1482,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/nearest-expiry/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/nearest-expiry/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def nearest_expiry_json(self, asset):
         """The single nearest active expiry for `asset`, as a full
         instrument string (e.g. "BTC-9JUL26") — the same expiry the yellow
@@ -1558,7 +1558,7 @@ class ChartController(http.Controller):
 
         return candles
 
-    @http.route("/api/klines/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/klines/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def klines_proxy(self, asset, interval="4h", limit="500"):
         candles = self._fetch_candles(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
@@ -1683,7 +1683,7 @@ class ChartController(http.Controller):
         }
         return cfg, horizon
 
-    @http.route("/api/forecast3/<string:asset>", type="http", auth="public", website=False, csrf=False)
+    @http.route("/api/forecast3/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def forecast3_json(self, asset, **kw):
         """"Forecast 3" — full port of Thales's "Thales Bands" Pine
         indicator's forecast-candle engine (see forecast3.py) onto
@@ -1821,7 +1821,7 @@ class ChartController(http.Controller):
             "forecast3_wick_down_color": forecast3_wick_down_color,
         }, None
 
-    @http.route("/chart/<string:asset>", type="http", auth="public", website=True)
+    @http.route("/chart/<string:asset>", type="http", auth="user", website=True)
     def chart_tv(self, asset):
         asset = asset.upper()
 
@@ -1838,14 +1838,9 @@ class ChartController(http.Controller):
     def my_chart_tv(self, asset):
         """Same page as /chart/<asset> (identical template/context), plus the
         Gamma Tops indicator — /chart/<asset> itself is
-        unaffected, it always passes show_gamma_point=false. auth="user"
-        (unlike every other route in this file, all auth="public") — a
-        logged-out request is redirected to the login page instead of
-        rendering; the JSON APIs this page's own JS calls client-side
-        (gamma-by-strike, gamma-by-strike-until, nearest-expiry, etc.) stay
-        auth="public" and untouched, since the browser's session cookie is
-        sent automatically on those same-origin fetches once the user is
-        logged in to view this page at all."""
+        unaffected, it always passes show_gamma_point=false. Every route in
+        this addon is auth="user"; a logged-out request to any of them is
+        redirected to the login page instead of rendering/responding."""
         asset = asset.upper()
 
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
