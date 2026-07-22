@@ -29,7 +29,7 @@
             <field name="active">False</field>
             <field name="name">Dankbit - Compute Bands Snapshot</field>
             <field name="model_id" ref="model_dankbit_bands"/>
-            <field name="interval_number">4</field>
+            <field name="interval_number">1</field>
             <field name="interval_type">hours</field>
             <field name="state">code</field>
             <field name="code">model.compute_snapshot()</field>
