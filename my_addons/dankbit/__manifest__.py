@@ -17,6 +17,7 @@
         "views/trade_views.xml",
         "views/bands_views.xml",
         "views/forecast_snapshot_views.xml",
+        "views/forecast_log_views.xml",
         "views/http_log_views.xml",
         "views/dankbit_templates.xml",
         "wizard/plot_wizard_view.xml",

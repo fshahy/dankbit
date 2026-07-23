@@ -47,6 +47,28 @@
             <field name="priority">5</field>
         </record>
 
+        <record id="dankbit_log_forecast_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Log Forecast Candles</field>
+            <field name="model_id" ref="model_dankbit_forecast_log"/>
+            <field name="interval_number">4</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.log_forecast()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_check_forecast_accuracy_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Check Forecast Accuracy</field>
+            <field name="model_id" ref="model_dankbit_forecast_log"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.check_accuracy()</field>
+            <field name="priority">5</field>
+        </record>
+
         <record id="dankbit_delete_old_http_logs_cron" model="ir.cron">
             <field name="active">False</field>
             <field name="name">Dankbit - Delete Old HTTP Logs</field>
