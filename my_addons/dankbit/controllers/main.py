@@ -1,6 +1,5 @@
 import base64
 import json
-import requests as _requests
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -10,7 +9,6 @@ from odoo.http import request
 from . import options
 from . import delta
 from . import gamma
-from . import forecast
 
 
 class _AggTrade:
@@ -1670,182 +1668,14 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    def _fetch_candles(self, asset, interval="4h", limit=500):
-        """Real Deribit perpetual-futures candles, oldest-first — shared by
-        klines_proxy (below, which reverses to newest-first for the
-        frontend) and forecast_json (which needs real historical bars for
-        its ATR/momentum/liquidity-sweep detection, see forecast.py).
-        Deribit has no native 4h resolution (240 is rejected as "unsupported
-        resolution") — fetch 1h candles and aggregate every 4 into one,
-        bucketed by timestamp (not position) so buckets stay calendar-
-        aligned to 00:00 UTC regardless of the fetch window's exact
-        boundaries."""
-        instrument_map = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
-        instrument = instrument_map.get(asset.upper(), asset.upper() + "-PERPETUAL")
-        resolution_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
-                          "1h": 60, "1d": "1D"}
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-        bucket_hours = 4 if interval == "4h" else 1
-        resolution = 60 if interval == "4h" else resolution_map.get(interval, 360)
-        granularity_ms = (86400000 if resolution == "1D"
-                          else int(resolution) * 60 * 1000)
-        start_ms = now_ms - limit * bucket_hours * granularity_ms
-        url = (f"https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
-               f"?instrument_name={instrument}&resolution={resolution}"
-               f"&start_timestamp={start_ms}&end_timestamp={now_ms}")
-        resp = _requests.get(url, timeout=10).json()
-        result = resp.get("result", {})
-        ticks  = result.get("ticks",  [])
-        opens  = result.get("open",   [])
-        highs  = result.get("high",   [])
-        lows   = result.get("low",    [])
-        closes = result.get("close",  [])
-        candles = [
-            {"t": ticks[i], "o": opens[i], "h": highs[i], "l": lows[i], "c": closes[i]}
-            for i in range(len(ticks))
-        ]
-
-        if interval == "4h":
-            bucket_ms = 4 * 3600 * 1000
-            buckets = {}
-            for c in candles:
-                key = c["t"] // bucket_ms
-                if key not in buckets:
-                    buckets[key] = {"t": key * bucket_ms, "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"]}
-                else:
-                    b = buckets[key]
-                    b["h"] = max(b["h"], c["h"])
-                    b["l"] = min(b["l"], c["l"])
-                    b["c"] = c["c"]
-            candles = [buckets[k] for k in sorted(buckets)]
-
-        return candles
-
     @http.route("/api/klines/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def klines_proxy(self, asset, interval="4h", limit="500"):
-        candles = self._fetch_candles(asset, interval=interval, limit=int(limit))
+        candles = request.env["dankbit.trade"].get_candles(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
-
-    _FORECAST_SNAPSHOT_FIELDS = [
-        "top", "low", "bml", "smp",
-        "bcg_price", "bpg_price", "scg_price", "spg_price",
-        "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
-        "bcd_price", "bpd_price", "scd_price", "spd_price",
-        "bcd_abs", "bpd_abs", "scd_abs", "spd_abs",
-        "bct_price", "bpt_price", "sct_price", "spt_price",
-        "bct_abs", "bpt_abs", "sct_abs", "spt_abs",
-        "bcv_price", "bpv_price", "scv_price", "spv_price",
-        "bcv_abs", "bpv_abs", "scv_abs", "spv_abs",
-    ]
-
-    def _snapshot_to_dict(self, record):
-        """dankbit.forecast.snapshot record -> plain dict keyed exactly as
-        forecast.py's engine expects (see per_leg_greeks/derive_levels),
-        plus bucket_epoch (UTC epoch seconds) for the Gamma-Band
-        Consensus/center-slope real-elapsed-time math."""
-        data = {f: getattr(record, f) for f in self._FORECAST_SNAPSHOT_FIELDS}
-        data["bucket_epoch"] = record.bucket_start.replace(tzinfo=timezone.utc).timestamp()
-        return data
-
-    def _forecast_cfg(self):
-        """Reads res.config.settings' "Thales Forecast" section into a cfg
-        dict + a dict of horizon kwargs, for forecast.simulate_forecast.
-        Falls back to that function's own hardcoded defaults (repeated here
-        verbatim) for any setting left unset — same default-in-the-reading-
-        code convention every other dankbit.* config_parameter uses in this
-        addon (see res_config_settings.py)."""
-        icp = request.env["ir.config_parameter"].sudo()
-
-        def f(key, default):
-            return float(icp.get_param(f"dankbit.{key}", default))
-
-        cfg = {}
-        cfg["GAMMA_CENTER_WEIGHT"] = f("forecast_gamma_center_weight", 0.70)
-        cfg["CURVE_CENTER_WEIGHT"] = f("forecast_curve_center_weight", 0.20)
-        cfg["THETA_CENTER_WEIGHT"] = f("forecast_theta_center_weight", 0.10)
-        cfg["FORECAST_PULL_FACTOR"] = f("forecast_pull_factor", 0.55)
-        cfg["FORECAST_SLOPE_FACTOR"] = f("forecast_slope_factor", 0.35)
-        cfg["FORECAST_BODY_FACTOR"] = f("forecast_body_factor", 0.3)
-        cfg["FORECAST_CURVE_EXTREME_BODY_WEIGHT"] = f("forecast_curve_extreme_body_weight", 0.26)
-        cfg["FORECAST_WICK_FACTOR"] = f("forecast_wick_factor", 0.35)
-        cfg["FORECAST_ATR_FACTOR"] = f("forecast_atr_factor", 0.3)
-        cfg["FORECAST_CURVE_WICK_WEIGHT"] = f("forecast_curve_wick_weight", 0.42)
-        cfg["GAMMA_BAND_OPPOSITE_WICK_COMPRESSION"] = f("forecast_gb_opposite_wick_compression", 0.18)
-        cfg["GAMMA_BAND_CONFIRMED_TARGET_BOOST"] = f("forecast_gb_confirmed_target_boost", 0.55)
-        cfg["GAMMA_BAND_CONFIDENCE_BOOST"] = f("forecast_gb_confidence_boost", 0.2)
-        cfg["GAMMA_BAND_CONFLICT_BODY_DAMPING"] = f("forecast_gb_conflict_body_damping", 0.3)
-        cfg["GAMMA_BAND_CONFLICT_WICK_EXPANSION"] = f("forecast_gb_conflict_wick_expansion", 0.25)
-        cfg["GAMMA_BAND_OPPOSING_MAGNET_DAMPING"] = f("forecast_gb_opposing_magnet_damping", 0.6)
-        cfg["GAMMA_BAND_TREND_LOCK_STRENGTH"] = f("forecast_gb_trend_lock_strength", 0.55)
-        cfg["GAMMA_BAND_COUNTER_BODY_DAMPING"] = f("forecast_gb_counter_body_damping", 0.18)
-        cfg["GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE"] = f("forecast_gb_counter_max_opp_impulse", 0.03)
-        cfg["GAMMA_BAND_COUNTER_ESCAPE_ATR"] = f("forecast_gb_counter_escape_atr", 0.95)
-        cfg["GAMMA_CONFIRM_BUFFER_PCT"] = f("forecast_gamma_confirm_buffer_pct", 0.06)
-        cfg["CLUSTER_ALIGNMENT_THRESHOLD"] = f("forecast_cluster_alignment_threshold", 0.6)
-        cfg["CLUSTER_BODY_CONFIDENCE_FLOOR"] = f("forecast_cluster_body_confidence_floor", 0.58)
-        cfg["CLUSTER_COMPRESSED_THRESHOLD"] = f("forecast_cluster_compressed_threshold", 0.18)
-        cfg["CLUSTER_COMPRESSION_BODY_DAMPING"] = f("forecast_cluster_compression_body_damping", 0.15)
-        cfg["CLUSTER_COMPRESSION_WICK_COMPRESSION"] = f("forecast_cluster_compression_wick_compression", 0.3)
-        cfg["CLUSTER_EXPANSION_THRESHOLD"] = f("forecast_cluster_expansion_threshold", 0.025)
-        cfg["LIQUIDITY_ALIGNED_WICK_COMPRESSION"] = f("forecast_liquidity_aligned_wick_compression", 0.25)
-        cfg["LIQUIDITY_BODY_CONFIDENCE_FLOOR"] = f("forecast_liquidity_body_confidence_floor", 0.6)
-        cfg["LIQUIDITY_OPPOSITE_WICK_COMPRESSION"] = f("forecast_liquidity_opposite_wick_compression", 0.35)
-        cfg["LIQUIDITY_SWEEP_WICK_COMPRESSION"] = f("forecast_liquidity_sweep_wick_compression", 0.7)
-        cfg["MOMENTUM_BODY_CONFIDENCE_FLOOR"] = f("forecast_momentum_body_confidence_floor", 0.62)
-        cfg["MOMENTUM_WICK_COMPRESSION"] = f("forecast_momentum_wick_compression", 0.75)
-        cfg["NEAR_GAMMA_BODY_DAMPING"] = f("forecast_near_gamma_body_damping", 0.4)
-        cfg["NEAR_GAMMA_WICK_EXPANSION"] = f("forecast_near_gamma_wick_expansion", 0.25)
-        cfg["HIGH_VOL_PULL_FACTOR"] = f("forecast_high_vol_pull_factor", 1.05)
-        cfg["LOW_VOL_PULL_FACTOR"] = f("forecast_low_vol_pull_factor", 0.75)
-        cfg["WEEKDAY_PULL_FACTOR"] = f("forecast_weekday_pull_factor", 1.0)
-        cfg["HIGH_VOL_SHOCK_FACTOR"] = f("forecast_high_vol_shock_factor", 1.1)
-        cfg["LOW_VOL_SHOCK_FACTOR"] = f("forecast_low_vol_shock_factor", 0.7)
-        cfg["WEEKDAY_SHOCK_FACTOR"] = f("forecast_weekday_shock_factor", 1.0)
-        cfg["WEEKEND_ATR_FACTOR"] = f("forecast_weekend_atr_factor", 0.75)
-        cfg["WEEKEND_BODY_FACTOR"] = f("forecast_weekend_body_factor", 0.65)
-        cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast_weekend_shock_factor", 0.75)
-        cfg["BUCKET_HOURS_FALLBACK"] = f("forecast_bucket_hours_fallback", 4.0)
-
-        cfg["SESSION_BODY_FACTOR"] = {
-            "Asia": f("session_body_asia", 0.7),
-            "London": f("session_body_london", 0.9),
-            "Overlap": f("session_body_overlap", 1.05),
-            "NY": f("session_body_ny", 0.95),
-            "PostNY": f("session_body_postny", 0.7),
-        }
-        cfg["SESSION_ATR_FACTOR"] = {
-            "Asia": f("session_atr_asia", 0.75),
-            "London": f("session_atr_london", 0.95),
-            "Overlap": f("session_atr_overlap", 1.1),
-            "NY": f("session_atr_ny", 1.0),
-            "PostNY": f("session_atr_postny", 0.75),
-        }
-        cfg["SESSION_SHOCK_FACTOR"] = {
-            "Asia": f("session_shock_asia", 0.65),
-            "London": f("session_shock_london", 0.95),
-            "Overlap": f("session_shock_overlap", 1.1),
-            "NY": f("session_shock_ny", 1.0),
-            "PostNY": f("session_shock_postny", 0.65),
-        }
-        cfg["SESSION_FIRST_MOVE_ATR"] = {
-            "Asia": f("session_firstmove_asia", 0.35),
-            "London": f("session_firstmove_london", 0.55),
-            "Overlap": f("session_firstmove_overlap", 0.75),
-            "NY": f("session_firstmove_ny", 0.6),
-            "PostNY": f("session_firstmove_postny", 0.35),
-        }
-
-        horizon = {
-            "hours_ahead": int(icp.get_param("dankbit.forecast_hours_ahead", 72)),
-            "step_hours": int(icp.get_param("dankbit.forecast_step_hours", 4)),
-            "start_offset_hours": int(icp.get_param("dankbit.forecast_start_offset_hours", 4)),
-        }
-        return cfg, horizon
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def forecast_json(self, asset, **kw):
@@ -1856,13 +1686,19 @@ class ChartController(http.Controller):
         Unlike this addon's earlier, now-removed GBM-based forecast
         engines, this path is fully deterministic — no random component
         anywhere, matching the source script, which has none either; every
-        candle is a direct function of the current
-        Greeks, the last couple of persisted dankbit.forecast.snapshot
-        rows (for the Gamma-Band Consensus slope), and recent real 4h
-        candles (for ATR/momentum/liquidity-sweep detection). `points` is
-        empty when there's nothing computable yet for this asset (no index
-        price, no active expiry, or no trades in the current 00:00-UTC
-        window — see dankbit.forecast.snapshot.compute_and_persist)."""
+        candle is a direct function of the current Greeks, the last couple
+        of persisted dankbit.forecast.snapshot rows (for the Gamma-Band
+        Consensus slope), recent real 4h candles (for ATR/momentum/
+        liquidity-sweep detection), and the forward Gamma Band dashed-line
+        points (so the forecast trends the same direction as that line —
+        see forecast.gamma_band_term_slope). The actual computation lives
+        on dankbit.forecast.snapshot.get_forecast_points() — this route is
+        now just that method plus JSON serialization, so dankbit.forecast.log's
+        cron (see that model) can run the exact same computation without
+        an HTTP request context. `points` is empty when there's nothing
+        computable yet for this asset (no index price, no active expiry,
+        or no trades in the current 00:00-UTC window — see
+        dankbit.forecast.snapshot.compute_and_persist)."""
         asset = asset.upper()
         if asset not in ("BTC", "ETH"):
             return request.make_response(
@@ -1870,46 +1706,24 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
-        index_price = request.env["dankbit.trade"].get_index_price(asset)
-
-        cr = request.env.cr
-        cr.execute("""
-            SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0)
-            FROM dankbit_trade
-            WHERE name ILIKE %s
-              AND deribit_ts >= NOW() - INTERVAL '24 hours'
-        """, (f"{asset}-%",))
-        avg_iv_row = cr.fetchone()
-        sigma_annual = float(avg_iv_row[0]) / 100.0 if avg_iv_row and avg_iv_row[0] else None
-
-        Snapshot = request.env["dankbit.forecast.snapshot"]
-        current_record = Snapshot.compute_and_persist(asset)
-
-        points = []
-        if index_price and sigma_annual and current_record:
-            history_records = Snapshot.recent_history(asset, limit=4).filtered(
-                lambda r: r.bucket_start != current_record.bucket_start
-            )[:3]
-            current = self._snapshot_to_dict(current_record)
-            history = [self._snapshot_to_dict(r) for r in history_records]
-            candles = self._fetch_candles(asset, interval="4h", limit=40)
-
-            now = datetime.now(timezone.utc)
-            now_ms = int(now.timestamp() * 1000)
-            cfg, horizon = self._forecast_cfg()
-            for p in forecast.simulate_forecast(index_price, sigma_annual, current, history, candles, cfg=cfg, **horizon):
-                points.append({
-                    "t": now_ms + int(p["hours"] * 3600 * 1000),
-                    "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
-                    "mode": p["mode"],
-                })
+        result = request.env["dankbit.forecast.snapshot"].get_forecast_points(asset)
+        generated_at = result["generated_at"]
+        now_ms = int(generated_at.timestamp() * 1000)
+        points = [
+            {
+                "t": now_ms + int(p["hours"] * 3600 * 1000),
+                "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
+                "mode": p["mode"],
+            }
+            for p in result["points"]
+        ]
 
         payload = {
             "asset": asset,
-            "index_price": index_price,
-            "sigma_annual": sigma_annual,
+            "index_price": result["index_price"],
+            "sigma_annual": result["sigma_annual"],
             "points": points,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at.isoformat(),
         }
         return request.make_response(
             json.dumps(payload),
@@ -1945,8 +1759,9 @@ class ChartController(http.Controller):
         show_monthly_lines = "true" if icp.get_param("dankbit.show_monthly_lines", default="True") == "True" else "false"
 
         # Thales Forecast candle colors — rendering-only, read here (not
-        # _forecast_cfg) since they only affect the client-side
-        # forecastSeries, not simulate_forecast()'s own math.
+        # dankbit.forecast.snapshot.get_forecast_cfg()) since they only
+        # affect the client-side forecastSeries, not simulate_forecast()'s
+        # own math.
         forecast_up_color = icp.get_param("dankbit.forecast_up_color", default="#a5d6a7")
         forecast_down_color = icp.get_param("dankbit.forecast_down_color", default="#ef9a9a")
         forecast_wick_up_color = icp.get_param("dankbit.forecast_wick_up_color", default="#66bb6a")

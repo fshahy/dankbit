@@ -171,9 +171,9 @@ class ResConfigSettings(models.TransientModel):
     forecast_body_factor = fields.Float(
         string="Body Factor",
         config_parameter="dankbit.forecast_body_factor",
-        default=0.3,
+        default=0.42,
         digits=(16, 4),
-        help="Weight of the most recent real candle's body in the base impulse. Default 0.3.",
+        help="Weight of the most recent real candle's body in the base impulse. Default 0.42.",
     )
 
     forecast_curve_extreme_body_weight = fields.Float(
@@ -286,6 +286,23 @@ class ResConfigSettings(models.TransientModel):
         default=0.95,
         digits=(16, 4),
         help="Body-to-ATR ratio a real candle needs to escape the Trend Lock. Default 0.95.",
+    )
+
+    forecast_gb_term_slope_impulse_strength = fields.Float(
+        string="Gb Term Slope Impulse Strength",
+        config_parameter="dankbit.forecast_gb_term_slope_impulse_strength",
+        default=0.16,
+        digits=(16, 4),
+        help="Weight of the forward slope between the nearest and next tracked expiry's own Gamma Band "
+             "point (the chart's dashed line's forward-most segment) in the base impulse. Default 0.16.",
+    )
+
+    forecast_gb_term_slope_max_impulse = fields.Float(
+        string="Gb Term Slope Max Impulse",
+        config_parameter="dankbit.forecast_gb_term_slope_max_impulse",
+        default=0.2,
+        digits=(16, 4),
+        help="Cap on the per-step impulse from the Gamma Band term-structure slope. Default 0.2.",
     )
 
     forecast_gamma_confirm_buffer_pct = fields.Float(

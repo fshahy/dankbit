@@ -607,6 +607,44 @@ get_box_n() (the only caller of this method) is itself only ever
         expiries' term-structure lines depend on."""
         return self._compute_asset(asset, expiry_index=0, hours=hours)
 
+    def gamma_band_term_structure(self, asset):
+        """The forward points of the chart's own violet dashed Gamma Band
+        line (this model's own gamma_band field, /api/bands/<asset>) for
+        forecast_lib.gamma_band_term_slope() — up to 2 dicts, soonest-
+        expiring tracked instrument first, each {"gamma_band",
+        "expiration_epoch"}. Same persisted dankbit_bands rows +
+        dankbit_trade expiration lookup /api/bands/<asset> serves, but
+        restricted to `t.expiration > NOW()` (so an already-expired,
+        frozen-in-place row can't be mistaken for a forward point) and to
+        just the 2 tracked instruments soonest to expire — exactly the two
+        points forming that line's forward-most segment on the chart.
+        Fewer than 2 rows (e.g. this model hasn't tracked a 2nd expiry yet)
+        means gamma_band_term_slope() treats the bias as inert, same
+        na-safe convention that engine's other history-dependent signals
+        use. Lives here (rather than on the controller, where it used to
+        be) since it's a plain query against this model's own persisted
+        rows — moving it here lets the forecast-log cron reuse it without
+        needing an HTTP request context."""
+        cr = self.env.cr
+        cr.execute("""
+            SELECT b.gamma_band, t.expiration
+            FROM dankbit_bands b
+            JOIN (
+                SELECT SUBSTRING(name FROM '^[^-]+-[^-]+') AS instrument, MIN(expiration) AS expiration
+                FROM dankbit_trade
+                WHERE name ILIKE %s
+                GROUP BY instrument
+            ) t ON t.instrument = b.instrument
+            WHERE b.asset = %s AND t.expiration > NOW()
+            ORDER BY t.expiration ASC
+            LIMIT 2
+        """, (f"{asset}-%", asset))
+        term_structure = []
+        for gamma_band, expiration in cr.fetchall():
+            exp_ts = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
+            term_structure.append({"gamma_band": float(gamma_band or 0.0), "expiration_epoch": exp_ts.timestamp()})
+        return term_structure
+
     def compute_snapshot(self):
         """Cron entry point (every 4 hours — see data/ir_cron.xml) — the
         *sole* source of truth for every tracked expiry_index, including 0

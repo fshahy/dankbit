@@ -302,6 +302,60 @@ def gamma_band_reclaim_bias(consensus, projected_price, current_close, gamma_ref
 
 
 # ============================================================
+# Gamma-Band Term-Structure Bias — Dankbit-original, not ported from
+# Thales's source script (which only ever holds one expiry's worth of
+# manually-entered levels at a time, so it has no notion of a forward
+# multi-expiry term structure at all). The chart's own violet dashed
+# Gamma Band line (dankbit.bands.gamma_band, one persisted point per
+# tracked expiry, connected point-to-point at each instrument's own
+# expiration time — see CLAUDE.md's TradingView Chart Notes, Bands
+# lines) visibly rises or falls going forward whenever the next tracked
+# expiry's own gamma_band differs from the nearest one's. Added on user
+# feedback that the forecast candles should visually track that same
+# forward direction: when the dashed line is heading up toward the next
+# tracked expiry, the forecast should trend up, and vice versa.
+# gamma_band_term_slope() reads exactly those same two points (the
+# line's forward-most segment) and turns their slope into a direction +
+# strength, fed into simulate_forecast's impulse cascade as one more
+# additive, step-decayed term alongside — not overriding — every other
+# engine, so a strong shock/momentum/liquidity signal can still dominate
+# a given step.
+# ============================================================
+GAMMA_BAND_TERM_SLOPE_REF_HOURS = 24.0
+GAMMA_BAND_TERM_SLOPE_DEAD_ZONE = 0.03
+GAMMA_BAND_TERM_SLOPE_FULL_STRENGTH = 0.20
+GAMMA_BAND_TERM_SLOPE_IMPULSE_STRENGTH = 0.16
+GAMMA_BAND_TERM_SLOPE_MAX_IMPULSE = 0.20
+
+
+def gamma_band_term_slope(term_structure, band_width):
+    """Forward slope of the on-chart Gamma Band dashed line. `term_structure`
+    is main.py's _gamma_band_term_structure(asset) result: up to 2 dicts,
+    soonest-expiring tracked instrument first, each {"gamma_band",
+    "expiration_epoch"} — already restricted to expiries still ahead of
+    now, so index 0/1 are exactly the two points forming the line's
+    forward-most segment. Returns (direction -1/0/1, strength 0-1,
+    normalized_slope). Inert ((0, 0.0, 0.0)) with fewer than 2 forward
+    points — e.g. dankbit.bands hasn't tracked a 2nd expiry yet — same
+    na-safe convention this module's other history-dependent signals use.
+
+    Normalized per GAMMA_BAND_TERM_SLOPE_REF_HOURS real hours and by
+    band_width, the same per-real-hour/band-width scale
+    gamma_band_consensus's own slope() uses — just a longer reference
+    window (24h vs. 8h), since this line's two points are typically days
+    apart rather than hours."""
+    if not term_structure or len(term_structure) < 2:
+        return 0, 0.0, 0.0
+    a, b = term_structure[0], term_structure[1]
+    hours_gap = max((b["expiration_epoch"] - a["expiration_epoch"]) / 3600.0, 1.0)
+    raw_slope = (b["gamma_band"] - a["gamma_band"]) / hours_gap
+    normalized = raw_slope * GAMMA_BAND_TERM_SLOPE_REF_HOURS / max(band_width, 1e-9)
+    direction = 1 if normalized > GAMMA_BAND_TERM_SLOPE_DEAD_ZONE else (-1 if normalized < -GAMMA_BAND_TERM_SLOPE_DEAD_ZONE else 0)
+    strength = min(abs(normalized) / max(GAMMA_BAND_TERM_SLOPE_FULL_STRENGTH, 0.001), 1.0)
+    return direction, strength, normalized
+
+
+# ============================================================
 # Delta Shock Module (Thales's f_deltaShockModule) — put/call delta-
 # saturation levels breaking outside the top/low band, confirmed by price
 # also being on the correct side of the gamma reference.
@@ -1153,7 +1207,7 @@ LOW_VOL_SHOCK_FACTOR, HIGH_VOL_SHOCK_FACTOR = 0.70, 1.10
 
 FORECAST_PULL_FACTOR = 0.55
 FORECAST_SLOPE_FACTOR = 0.35
-FORECAST_BODY_FACTOR = 0.30
+FORECAST_BODY_FACTOR = 0.42
 FORECAST_CURVE_EXTREME_BODY_WEIGHT = 0.26
 FORECAST_WICK_FACTOR = 0.35
 FORECAST_ATR_FACTOR = 0.30
@@ -1260,12 +1314,19 @@ def _cfg(cfg, name):
 
 
 def simulate_forecast(index_price, sigma_annual, current, history, candles,
-                        hours_ahead=72, step_hours=4, start_offset_hours=4, cfg=None):
+                        hours_ahead=72, step_hours=4, start_offset_hours=4, cfg=None,
+                        gamma_band_term_structure=None):
     """The full forecast-candle cascade, ported from Thales's per-step Pine
     loop. `current` and each row of `history` are dankbit.forecast.snapshot
     field dicts (newest history row first); `candles` are recent real 4h
     OHLC dicts, oldest first, with the last entry being the most recently
-    fetched (still-forming) real candle. Deterministic — unlike this
+    fetched (still-forming) real candle. `gamma_band_term_structure` is
+    main.py's _gamma_band_term_structure(asset) result — up to 2 forward
+    dankbit.bands points (soonest-expiring tracked instrument first) feeding
+    gamma_band_term_slope() (see that function/its own section header for
+    why this exists — added so the forecast tracks the same forward
+    direction as the chart's own dashed Gamma Band line). Deterministic —
+    unlike this
     addon's earlier, now-removed GBM-based forecast engines, there is no
     random component anywhere in this engine (matching the source script,
     which has none either); every
@@ -1310,6 +1371,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     GAMMA_BAND_COUNTER_BODY_DAMPING = _cfg(cfg, "GAMMA_BAND_COUNTER_BODY_DAMPING")
     GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE = _cfg(cfg, "GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE")
     GAMMA_BAND_COUNTER_ESCAPE_ATR = _cfg(cfg, "GAMMA_BAND_COUNTER_ESCAPE_ATR")
+    GAMMA_BAND_TERM_SLOPE_IMPULSE_STRENGTH = _cfg(cfg, "GAMMA_BAND_TERM_SLOPE_IMPULSE_STRENGTH")
+    GAMMA_BAND_TERM_SLOPE_MAX_IMPULSE = _cfg(cfg, "GAMMA_BAND_TERM_SLOPE_MAX_IMPULSE")
     GAMMA_CONFIRM_BUFFER_PCT = _cfg(cfg, "GAMMA_CONFIRM_BUFFER_PCT")
     CLUSTER_ALIGNMENT_THRESHOLD = _cfg(cfg, "CLUSTER_ALIGNMENT_THRESHOLD")
     CLUSTER_BODY_CONFIDENCE_FLOOR = _cfg(cfg, "CLUSTER_BODY_CONFIDENCE_FLOOR")
@@ -1443,6 +1506,10 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     lower_liq_price, lower_liq_m = synthetic_liq["lower_liq_price"], synthetic_liq["lower_liq_m"]
     upper_liq_price, upper_liq_m = synthetic_liq["upper_liq_price"], synthetic_liq["upper_liq_m"]
 
+    # Gamma-Band Term-Structure Bias — computed once (both points, and thus
+    # the slope between them, are step-invariant).
+    term_direction, term_strength, _term_slope_norm = gamma_band_term_slope(gamma_band_term_structure, band_width)
+
     points = []
     projected_open = index_price
     n_candles = int(round(hours_ahead / step_hours))
@@ -1537,6 +1604,11 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
         flow = greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step)
 
+        term_slope_impulse = 0.0
+        if term_direction != 0:
+            term_slope_impulse = term_direction * term_strength * GAMMA_BAND_TERM_SLOPE_IMPULSE_STRENGTH * combined_body_mult * (0.88 ** step)
+            term_slope_impulse = max(min(term_slope_impulse, GAMMA_BAND_TERM_SLOPE_MAX_IMPULSE), -GAMMA_BAND_TERM_SLOPE_MAX_IMPULSE)
+
         any_shock_active = bear_delta_shock or bull_delta_shock or bear_shock or bull_shock
         body_confidence = 1.0 * vega_body_mult * flow["body_confidence_mult"]
         wick_expansion = 1.0 * vega_wick_mult * flow["wick_mult"]
@@ -1592,7 +1664,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         forecast_impulse = (
             base_pull_impulse + slope_impulse + current_body_impulse + curve_extreme_impulse
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
-            + liquidity["impulse"] + flow["impulse"]
+            + liquidity["impulse"] + flow["impulse"] + term_slope_impulse
         ) * body_confidence
         if gb_counter_trend_locked:
             allowed_opposite = GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE * max(1.0 - consensus["consensus_strength"], 0.05)
@@ -1695,6 +1767,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             mode.append("Liquidity Magnet")
         if flow["fakeout_risk"]:
             mode.append("Flow Fakeout")
+        if term_direction != 0:
+            mode.append("Gamma Band Term " + ("Up" if term_direction > 0 else "Down"))
         mode.append(sess)
 
         points.append({

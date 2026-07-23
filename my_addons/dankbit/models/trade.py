@@ -226,6 +226,64 @@ class Trade(models.Model):
             _logger.exception("get_open_interest_by_currency failed and no cache available")
             return {}
 
+    def get_candles(self, asset, interval="4h", limit=500):
+        """Real Deribit perpetual-futures candles, oldest-first — shared by
+        ChartController.klines_proxy (which reverses to newest-first for the
+        frontend) and dankbit.forecast.snapshot.get_forecast_points (which
+        needs real historical bars for the Thales Forecast engine's ATR/
+        momentum/liquidity-sweep detection, see controllers/forecast.py).
+        Deribit has no native 4h resolution (240 is rejected as "unsupported
+        resolution") — fetch 1h candles and aggregate every 4 into one,
+        bucketed by timestamp (not position) so buckets stay calendar-
+        aligned to 00:00 UTC regardless of the fetch window's exact
+        boundaries. Lives here (rather than on the controller, where it
+        used to be) since it's a plain Deribit REST lookup with no Odoo/
+        HTTP-request dependency, the same category of call get_index_price/
+        get_open_interest_by_currency above already handle — moving it
+        here lets the forecast-log cron reuse it without needing an HTTP
+        request context."""
+        instrument_map = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
+        instrument = instrument_map.get(asset.upper(), asset.upper() + "-PERPETUAL")
+        resolution_map = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30,
+                           "1h": 60, "1d": "1D"}
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        bucket_hours = 4 if interval == "4h" else 1
+        resolution = 60 if interval == "4h" else resolution_map.get(interval, 360)
+        granularity_ms = (86400000 if resolution == "1D"
+                          else int(resolution) * 60 * 1000)
+        start_ms = now_ms - limit * bucket_hours * granularity_ms
+        url = (f"https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
+               f"?instrument_name={instrument}&resolution={resolution}"
+               f"&start_timestamp={start_ms}&end_timestamp={now_ms}")
+        resp = requests.get(url, timeout=10).json()
+        result = resp.get("result", {})
+        ticks  = result.get("ticks",  [])
+        opens  = result.get("open",   [])
+        highs  = result.get("high",   [])
+        lows   = result.get("low",    [])
+        closes = result.get("close",  [])
+        candles = [
+            {"t": ticks[i], "o": opens[i], "h": highs[i], "l": lows[i], "c": closes[i]}
+            for i in range(len(ticks))
+        ]
+
+        if interval == "4h":
+            bucket_ms = 4 * 3600 * 1000
+            buckets = {}
+            for c in candles:
+                key = c["t"] // bucket_ms
+                if key not in buckets:
+                    buckets[key] = {"t": key * bucket_ms, "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"]}
+                else:
+                    b = buckets[key]
+                    b["h"] = max(b["h"], c["h"])
+                    b["l"] = min(b["l"], c["l"])
+                    b["c"] = c["c"]
+            candles = [buckets[k] for k in sorted(buckets)]
+
+        return candles
+
     def _get_latest_trade_ts_for_instrument(self, instrument_name: str):
         return self.with_context(active_test=False).search(
             [("name", "=", instrument_name)], order="deribit_ts desc", limit=1

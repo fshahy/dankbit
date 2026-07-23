@@ -147,6 +147,12 @@
                             <field name="forecast_gb_counter_escape_atr" placeholder="Gamma-Band Counter Escape ATR"/>
                         </setting>
                         <setting>
+                            <field name="forecast_gb_term_slope_impulse_strength" placeholder="Gamma-Band Term Slope Impulse Strength"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_gb_term_slope_max_impulse" placeholder="Gamma-Band Term Slope Max Impulse"/>
+                        </setting>
+                        <setting>
                             <field name="forecast_gamma_confirm_buffer_pct" placeholder="Gamma Confirm Buffer %"/>
                         </setting>
                         <!-- Option Cluster Structure Engine -->
