@@ -221,6 +221,13 @@
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
 					}
+					#exchange-label {
+						position: fixed; top: 8px; right: 80px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -265,6 +272,7 @@
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
+				<div id="exchange-label"/>
 				<div id="tf-bar">
 					<button class="tf-btn" onclick="setTf('1h')">1h</button>
 					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
@@ -315,6 +323,11 @@
 					const cfg              = document.getElementById('cfg').dataset;
 					const INSTRUMENT       = cfg.instrument;
 					const ASSET            = cfg.asset;
+					// Candles are Binance spot (see dankbit.trade.get_candles) —
+					// BTC/ETH are the only assets this addon ever serves a chart
+					// for, so this string concat mirrors the server-side
+					// _BINANCE_SYMBOL_MAP without needing a new cfg field.
+					document.getElementById('exchange-label').textContent = 'Binance Spot · ' + ASSET + 'USDT';
 					const MONTHLY_INST     = cfg.monthly || '';
 					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
 					const ZONES_BOX_REFRESH = parseInt(cfg.zonesBoxRefresh, 10) * 1000;
