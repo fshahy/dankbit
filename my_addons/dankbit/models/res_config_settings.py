@@ -108,6 +108,21 @@ class ResConfigSettings(models.TransientModel):
         help="Show the Monthly delta=0 line on the TradingView chart.",
     )
 
+    forecast_trade_weighted_greeks = fields.Boolean(
+        string="Forecast: Trade-Weighted Per-Leg Greeks",
+        default=False,
+        help="Use the trade-weighted single-strike per-leg Greek extraction "
+             "(forecast.trade_weighted_per_leg_greeks) requested directly by "
+             "Thales's original indicator author, instead of the default "
+             "Black-Scholes portfolio-curve extraction (per_leg_greeks) — "
+             "affects the Thales Forecast candle engine only, never the "
+             "/<instrument>/zones page or the persisted dankbit.bands "
+             "numbers. Off by default: this changes the numeric scale of "
+             "every BCG/BPG/.../SPV Abs field the forecast cascade reads, "
+             "so it should be validated against real forecast accuracy "
+             "(see the Forecast Log pivot view) before relying on it.",
+    )
+
     # ============================================================
     # Thales Forecast — the top-level tunables
     # simulate_forecast() itself uses directly (see forecast.py's
@@ -730,6 +745,7 @@ class ResConfigSettings(models.TransientModel):
             show_daily_lines=icp.get_param("dankbit.show_daily_lines", "True") == "True",
             show_weekly_lines=icp.get_param("dankbit.show_weekly_lines", "True") == "True",
             show_monthly_lines=icp.get_param("dankbit.show_monthly_lines", "True") == "True",
+            forecast_trade_weighted_greeks=icp.get_param("dankbit.forecast_trade_weighted_greeks", "False") == "True",
         )
         return res
 
@@ -739,5 +755,6 @@ class ResConfigSettings(models.TransientModel):
         icp.set_param("dankbit.show_daily_lines", str(self.show_daily_lines))
         icp.set_param("dankbit.show_weekly_lines", str(self.show_weekly_lines))
         icp.set_param("dankbit.show_monthly_lines", str(self.show_monthly_lines))
+        icp.set_param("dankbit.forecast_trade_weighted_greeks", str(self.forecast_trade_weighted_greeks))
 
 

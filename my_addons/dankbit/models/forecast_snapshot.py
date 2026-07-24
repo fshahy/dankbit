@@ -161,7 +161,11 @@ class ForecastSnapshot(models.Model):
         agree on field names, so Thales Forecast's band and per-leg
         Greeks can never quietly drift from what's actually drawn
         elsewhere in the app, and never do the same query/curve-build
-        twice for one asset."""
+        twice for one asset. Exception: when
+        res.config.settings' forecast_trade_weighted_greeks toggle is on,
+        the 32 per-leg fields below are instead computed by
+        _trade_weighted_per_leg_fields(), which does re-fetch this
+        expiry's own trades — see that method's own docstring for why."""
         bands_data = self.env["dankbit.bands"]._compute_asset(asset, expiry_index=0)
         if not bands_data:
             _logger.warning("forecast.compute_and_persist: dankbit.bands has nothing computable for %s, skipping", asset)
@@ -175,6 +179,10 @@ class ForecastSnapshot(models.Model):
 
         as_of = bands_data["computed_at"]
 
+        per_leg_fields = {f: bands_data[f] for f in self.env["dankbit.bands"]._PER_LEG_GREEK_FIELDS}
+        if self.env["ir.config_parameter"].sudo().get_param("dankbit.forecast_trade_weighted_greeks", "False") == "True":
+            per_leg_fields = self._trade_weighted_per_leg_fields(asset, bands_data["index_price"], per_leg_fields)
+
         vals = {
             "asset": asset,
             "bucket_start": self._bucket_start_for(as_of),
@@ -184,7 +192,7 @@ class ForecastSnapshot(models.Model):
             "bml": bands_data["buyer_max_loss"],
             "smp": bands_data["seller_max_profit"],
         }
-        vals.update({f: bands_data[f] for f in self.env["dankbit.bands"]._PER_LEG_GREEK_FIELDS})
+        vals.update(per_leg_fields)
 
         record = self.sudo().search([
             ("asset", "=", asset),
@@ -194,6 +202,73 @@ class ForecastSnapshot(models.Model):
             record.write(vals)
             return record
         return self.sudo().create(vals)
+
+    def _trade_weighted_per_leg_fields(self, asset, index_price, fallback):
+        """The per-leg extraction method Thales's original indicator author
+        asked for directly (see forecast_lib.trade_weighted_per_leg_greeks),
+        gated behind res.config.settings' forecast_trade_weighted_greeks
+        toggle (default off — see that field's own help text; enable once
+        ready to validate against real forecast accuracy, dankbit.forecast.log).
+        Re-fetches this expiry's own trades independently of
+        dankbit.bands._compute_asset() (which `fallback` was computed
+        from): unlike the Black-Scholes-curve path, the two per-leg
+        extraction methods can no longer share one trades-query-plus-curve-
+        build, since they're now deliberately different computations over
+        the same trades. Falls back per-field to `fallback` (bands_data's
+        own per-leg fields, still Black-Scholes-curve-based) for any leg
+        the trade-weighted method found no trade for at all (see
+        trade_weighted_per_leg_greeks's own None-for-empty-bucket
+        behavior) rather than discarding the whole row or persisting a
+        None into a Float field."""
+        instrument = self.env["dankbit.bands"].nearest_expiry(asset)
+        if not instrument:
+            return fallback
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        window_start = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+        trades = self.env["dankbit.trade"].with_context(active_test=False).search([
+            ("name", "=ilike", f"{instrument}-%"),
+            ("deribit_ts", ">=", window_start),
+            ("deribit_ts", "<=", as_of),
+        ])
+        if not trades:
+            return fallback
+
+        open_interest = self.env["dankbit.trade"].get_open_interest_by_currency(asset)
+        trade_weighted = forecast_lib.trade_weighted_per_leg_greeks(trades, index_price, open_interest)
+        return {f: (trade_weighted[f] if trade_weighted.get(f) is not None else fallback[f]) for f in fallback}
+
+    def session_activity_history(self, asset, hour_utc, lookback_days=14, limit=500):
+        """Same-hour-of-day historical Greek-activity scores for `asset`,
+        feeding forecast_lib.session_activity_regime()'s baseline —
+        mirrors Thales's own SessionActivityRegimeEngine.classify(f,
+        historical_same_hour_scores), which compares today's scan against
+        the historical average for that same UTC hour rather than a fixed
+        session-of-day table (see forecast.py's Session Activity Regime
+        Engine section). Smart Liquidity strength isn't itself persisted
+        on this model (see dankbit.bands's smart_liq_upper_strength/...
+        instead), so each row's score recomputes it on the fly via
+        forecast_lib.smart_synthetic_liquidity(), using that row's own
+        index_price as the role_close reference — a reasonable stand-in
+        for a real recent close when scoring historical activity rather
+        than reconstructing that moment's actual price action."""
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).replace(tzinfo=None)
+        rows = self.sudo().search([
+            ("asset", "=", asset),
+            ("bucket_start", ">=", since),
+        ], order="bucket_start desc", limit=limit)
+
+        scores = []
+        for row in rows:
+            if row.bucket_start.hour != hour_utc:
+                continue
+            data = row.to_dict()
+            synthetic_liq = None
+            if row.top and row.low:
+                band_width = max(row.top - row.low, 1e-9)
+                synthetic_liq = forecast_lib.smart_synthetic_liquidity(data, row.top, row.low, band_width, row.index_price)
+            scores.append(forecast_lib.session_activity_score(data, synthetic_liq))
+        return scores
 
     def recent_history(self, asset, limit=3):
         """The `limit` most recent snapshot rows for `asset`, newest first —
@@ -365,10 +440,12 @@ class ForecastSnapshot(models.Model):
             history = [r.to_dict() for r in history_records]
             candles = self.env["dankbit.trade"].get_candles(asset, interval="4h", limit=40)
             gamma_band_term_structure = self.env["dankbit.bands"].gamma_band_term_structure(asset)
+            session_activity_history = self.session_activity_history(asset, generated_at.hour)
             cfg, horizon = self.get_forecast_cfg()
             points = forecast_lib.simulate_forecast(
                 index_price, sigma_annual, current, history, candles, cfg=cfg,
-                gamma_band_term_structure=gamma_band_term_structure, **horizon,
+                gamma_band_term_structure=gamma_band_term_structure,
+                session_activity_history=session_activity_history, **horizon,
             )
 
         return {

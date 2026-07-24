@@ -73,6 +73,10 @@
                         </setting>
                     </block>
                     <block title="Thales Forecast" id="dankbit_forecast_settings" groups="base.group_no_one">
+                        <!-- Per-leg extraction method -->
+                        <setting help="Use the trade-weighted single-strike per-leg Greek extraction requested directly by Thales's original indicator author, instead of the default Black-Scholes portfolio-curve extraction. Affects the Thales Forecast candle engine only. Validate against real forecast accuracy (Forecast Log) before relying on it.">
+                            <field name="forecast_trade_weighted_greeks"/>
+                        </setting>
                         <!-- Horizon -->
                         <setting>
                             <field name="forecast_hours_ahead" placeholder="Hours Ahead"/>

@@ -37,9 +37,14 @@ docstring for what it does and doesn't cover.
 """
 
 import math
+from collections import defaultdict
 from datetime import datetime, timezone
 
+from . import delta as delta_lib
+from . import gamma as gamma_lib
 from . import options as options_lib
+from . import theta as theta_lib
+from . import vega as vega_lib
 
 # Fallback real-hours-ago gap between snapshots when `candles` is empty
 # (no real klines available to anchor "now" to) — matches
@@ -82,6 +87,85 @@ def per_leg_greeks(STs, trades):
         "bcv_abs": abs(lc["vega_value"]) / 100, "bpv_abs": abs(lp["vega_value"]) / 100,
         "scv_abs": abs(sc["vega_value"]) / 100, "spv_abs": abs(sp["vega_value"]) / 100,
     }
+
+
+# ============================================================
+# Trade-weighted per-leg extraction — an ALTERNATIVE to per_leg_greeks()
+# above, ported at the explicit request of Thales's original indicator
+# author from his own live-dashboard reference implementation
+# (ThalesFeatureBuilder.build/_max_level in his Python demo). Deliberately
+# NOT a replacement for per_leg_greeks(): that function stays the single
+# source of truth for /<instrument>/zones and dankbit.bands (see
+# options.per_leg_greeks's own docstring), so this module's forecast-only
+# use of the function below can never change what either of those surfaces
+# displays. Gated behind res.config.settings' forecast_trade_weighted_greeks
+# toggle (default off) — see dankbit.forecast.snapshot.compute_and_persist.
+#
+# Conceptual difference from per_leg_greeks(): that function asks "at which
+# PRICE does this leg's AGGREGATED portfolio Greek curve peak/bottom",
+# built from a synthetic price grid across every trade in the leg. This
+# function instead asks "which SINGLE TRADE currently carries the largest
+# weighted Greek force", and reports THAT TRADE'S OWN STRIKE as the level —
+# his own reference implementation evaluates each instrument's greeks via a
+# live Deribit order-book lookup (one REST call per instrument, evaluated
+# at current mark/index price); this port evaluates the equivalent
+# per-contract Black-Scholes greek analytically instead (this addon
+# already treats bs_delta/bs_gamma/bs_theta/bs_vega as authoritative
+# everywhere else), avoiding an extra live API round-trip per instrument
+# on every forecast computation.
+#
+# Calibration note: the resulting *_abs values are NOT on the same numeric
+# scale as per_leg_greeks()'s (dollar-Greek-curve-extremum-based) *_abs
+# values — they're a trade-prominence score (amount * open_interest *
+# |per-contract greek|) in bespoke units, scaled below only to land in a
+# roughly similar order of magnitude. Every downstream engine that reads
+# *_abs fields (vega_regime, market_maker_gamma_contest,
+# smart_synthetic_liquidity, greek_flow, session_activity_score) was tuned
+# against per_leg_greeks()'s own scale — per the source demo's own README
+# ("outputs must be calibrated against real backtesting before analytical
+# use"), this toggle should be validated against real forecast accuracy
+# (see dankbit.forecast.log) before relying on it, not assumed correct.
+# ============================================================
+def trade_weighted_per_leg_greeks(trades, index_price, open_interest):
+    """`trades` is any iterable of dankbit.trade-like records (needs
+    .strike, .option_type, .direction, .amount, .iv, .name,
+    .get_hours_to_expiry()); `open_interest` is a {instrument_name: OI}
+    dict (see dankbit.trade.get_open_interest_by_currency) — an instrument
+    missing from it falls back to a weight of 1 (unknown, not zero), same
+    "missing means unknown" convention ChartController._gamma_by_strike()
+    already uses for this same lookup. Returns the same 32-key dict shape
+    as per_leg_greeks() (bcg_price/bcg_abs/.../spv_price/spv_abs)."""
+    buckets = defaultdict(list)  # "{B|S}{C|P}{G|D|T|V}" -> [(strike, weight), ...]
+    for t in trades:
+        weight_base = max(t.amount or 0.0, 0.0001) * max(open_interest.get(t.name) or 1, 1)
+        T = t.get_hours_to_expiry() / (24.0 * 365.0)
+        sigma = (t.iv or 0.0) / 100.0
+        gamma_w = abs(float(gamma_lib.bs_gamma(index_price, t.strike, T, 0.0, sigma))) * weight_base
+        delta_w = abs(float(delta_lib.bs_delta(index_price, t.strike, T, 0.0, sigma, option_type=t.option_type))) * weight_base
+        theta_w = abs(float(theta_lib.bs_theta(index_price, t.strike, T, 0.0, sigma, option_type=t.option_type))) * weight_base
+        vega_w = abs(float(vega_lib.bs_vega(index_price, t.strike, T, 0.0, sigma))) * weight_base
+
+        role = "B" if t.direction == "buy" else "S"
+        cp = "C" if t.option_type == "call" else "P"
+        buckets[f"{role}{cp}G"].append((t.strike, gamma_w))
+        buckets[f"{role}{cp}D"].append((t.strike, delta_w))
+        buckets[f"{role}{cp}T"].append((t.strike, theta_w))
+        buckets[f"{role}{cp}V"].append((t.strike, vega_w))
+
+    def max_level(key):
+        rows = buckets.get(key)
+        if not rows:
+            return None, 0.0
+        level, strength = max(rows, key=lambda row: abs(row[1]))
+        return float(level), float(abs(strength))
+
+    result = {}
+    for bucket_role, out_role in (("BC", "bc"), ("BP", "bp"), ("SC", "sc"), ("SP", "sp")):
+        for letter, out_letter, scale in (("G", "g", 1_000_000.0), ("D", "d", 10.0), ("T", "t", 10_000.0), ("V", "v", 100.0)):
+            price, strength = max_level(f"{bucket_role}{letter}")
+            result[f"{out_role}{out_letter}_price"] = price
+            result[f"{out_role}{out_letter}_abs"] = strength / scale
+    return result
 
 
 def weighted_avg2(price_a, price_b, weight_a, weight_b):
@@ -863,6 +947,17 @@ def liquidity_map_engine(lower_liq_price, lower_liq_m, upper_liq_price, upper_li
 # the same rule rather than becoming a special case.
 # ============================================================
 GREEK_FLOW_REF_HOURS = 8.0  # same reference window gamma_band_consensus's slope() extrapolates to — keeps flow rates on the same normalized-per-8h scale as the rest of this file
+# How many prior dankbit.forecast.snapshot rows get_forecast_points() supplies
+# as `history` (see that method's history_records[:3]) — the closest fit here
+# to Thales's own live-dashboard demo (SessionActivityRegimeEngine aside,
+# see GreekFlowEngine.lookback_hours=4/required_snapshots=4 in his reference
+# implementation), since BUCKET_HOURS=1 means 3 history rows span up to ~3
+# real hours back, alongside `current` for 4 total points. Used both as the
+# window's oldest-endpoint selector (see `prev` below — his own engine diffs
+# the window's FIRST point against its LAST, not just the single most recent
+# prior one) and as the denominator of the confidence/coverage scaling
+# applied to the resulting impulse (his own `cov = len(win)/required_snapshots`).
+GREEK_FLOW_LOOKBACK_SNAPSHOTS = 3
 GREEK_FLOW_DELTA_IMPULSE_STRENGTH = 0.16
 GREEK_FLOW_MAX_DELTA_IMPULSE = 0.18
 GREEK_FLOW_LIQ_DRIFT_IMPULSE_STRENGTH = 0.10
@@ -876,16 +971,26 @@ GREEK_FLOW_CONFIRM_CONFIDENCE_BOOST = 0.20
 GREEK_FLOW_DECAY = 0.84  # per-step impulse decay, same shape as vega_regime's 0.86**step/mm's 0.80**step — a fresh mid-range choice since this engine has no direct Thales analog to match
 
 
-def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step):
+def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step,
+                session_flow_mult=1.0, session_fakeout_mult=1.0):
     """See the module-level "Greek Flow Engine" comment block above for
     the full design. `synthetic_liq` is the CURRENT smart_synthetic_liquidity()
     result — already computed once in simulate_forecast and passed in
     here rather than recomputed, same as every other caller of it.
-    `history` is newest-first; only history[0] (the single most recent
-    prior snapshot) is used — unlike gamma_band_consensus's 3-point
-    slope, one prior point is enough here since these are trend/
-    confirmation signals feeding multipliers and a capped impulse, not a
-    standalone consensus direction the rest of the cascade defers to.
+    `history` is newest-first; the OLDEST entry available (history[-1],
+    up to GREEK_FLOW_LOOKBACK_SNAPSHOTS back) is diffed against `current`
+    — matching Thales's own GreekFlowEngine, whose window compares its
+    first point against its last rather than only ever the single most
+    recent prior one — so this widens as more history accumulates, up to
+    that cap, rather than always being a 1-bucket-wide comparison.
+    `coverage` (len(history)/GREEK_FLOW_LOOKBACK_SNAPSHOTS, capped at 1)
+    scales the resulting impulse down when fewer snapshots are available
+    than the target window, mirroring his own `cov` confidence term.
+    `session_flow_mult`/`session_fakeout_mult` are
+    session_activity_regime()'s own greek_flow_mult/fakeout_mult for the
+    current scan (his SessionActivityRegimeEngine feeds an equivalent
+    session_greek_flow_multiplier into his GreekFlowEngine.compute()) —
+    1.0/1.0 when no activity regime was computed, a no-op.
 
     Returns a dict: impulse (own directional push, decayed by step, kept
     fully separate from every other engine's own impulse term rather
@@ -899,7 +1004,8 @@ def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close
     if not history:
         return empty
 
-    prev = history[0]
+    prev = history[min(len(history), GREEK_FLOW_LOOKBACK_SNAPSHOTS) - 1]
+    coverage = min(len(history) / GREEK_FLOW_LOOKBACK_SNAPSHOTS, 1.0)
     hours_ago = max((current["bucket_epoch"] - prev["bucket_epoch"]) / 3600.0, 1.0)
 
     def rate(key, normalizer):
@@ -932,7 +1038,7 @@ def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close
     liq_drift_impulse = max(min(liq_drift_impulse, GREEK_FLOW_MAX_LIQ_DRIFT_IMPULSE), -GREEK_FLOW_MAX_LIQ_DRIFT_IMPULSE)
 
     delta_impulse = max(min(delta_flow_signal * GREEK_FLOW_DELTA_IMPULSE_STRENGTH, GREEK_FLOW_MAX_DELTA_IMPULSE), -GREEK_FLOW_MAX_DELTA_IMPULSE)
-    impulse = (delta_impulse + liq_drift_impulse) * (GREEK_FLOW_DECAY ** step)
+    impulse = (delta_impulse + liq_drift_impulse) * coverage * session_flow_mult * (GREEK_FLOW_DECAY ** step)
 
     body_confidence_mult = 1.0
     wick_mult = 1.0
@@ -947,8 +1053,8 @@ def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close
     flow_direction = 1 if delta_flow_signal > GREEK_FLOW_DEAD_ZONE else (-1 if delta_flow_signal < -GREEK_FLOW_DEAD_ZONE else 0)
     fakeout_risk = price_direction != 0 and flow_direction != 0 and price_direction != flow_direction
     if fakeout_risk:
-        body_confidence_mult *= 1.0 - GREEK_FLOW_FAKEOUT_BODY_DAMPING
-        wick_mult *= 1.0 + GREEK_FLOW_FAKEOUT_WICK_EXPANSION
+        body_confidence_mult *= 1.0 - GREEK_FLOW_FAKEOUT_BODY_DAMPING * session_fakeout_mult
+        wick_mult *= 1.0 + GREEK_FLOW_FAKEOUT_WICK_EXPANSION * session_fakeout_mult
     elif flow_direction != 0 and flow_direction == price_direction:
         body_confidence_mult = min(body_confidence_mult * (1.0 + GREEK_FLOW_CONFIRM_CONFIDENCE_BOOST), 1.0)
 
@@ -1167,6 +1273,112 @@ def wick_to_body_acceptance(
 
 
 # ============================================================
+# Session Activity Regime Engine — ported from Thales's own live-dashboard
+# reference implementation (SessionActivityRegimeEngine in his Python demo,
+# sent directly by the indicator's original author) at his request. This is
+# independent of, and additive alongside, the fixed SESSION_BODY_FACTOR/etc.
+# table below: that table damps/boosts by TIME of day (Asia is always
+# quieter than the NY/London overlap); this engine instead damps/boosts by
+# how unusually active THIS scan's actual Greek exposure is relative to the
+# historical average for that same hour-of-day — a quiet Asia session and an
+# unusually wild Asia session get the same SESSION_BODY_FACTOR entry, but
+# different session_activity_regime() multipliers. Computed once per call
+# (both the current score and the historical baseline are step-invariant)
+# and applied uniformly across every forecast step, mirroring his own
+# design: one scan produces one regime, fed into the whole candle path, not
+# recomputed per step. His own engine does no scan-to-scan flow analysis of
+# its own — the coupling with Greek Flow (greek_flow_mult/fakeout_mult) also
+# mirrors his GreekFlowEngine.compute(session_greek_flow_multiplier=...).
+# ============================================================
+SESSION_ACTIVITY_LOW_THRESHOLD = 0.70
+SESSION_ACTIVITY_HIGH_THRESHOLD = 1.35
+SESSION_ACTIVITY_EXTREME_THRESHOLD = 2.25
+SESSION_ACTIVITY_LOW_BODY_DAMPING = 0.65
+SESSION_ACTIVITY_LOW_WICK_BOOST = 1.25
+SESSION_ACTIVITY_LOW_FLOW_DAMPING = 0.70
+SESSION_ACTIVITY_LOW_FAKEOUT_MULT = 1.25
+SESSION_ACTIVITY_HIGH_BODY_BOOST = 1.20
+SESSION_ACTIVITY_HIGH_FLOW_BOOST = 1.25
+SESSION_ACTIVITY_HIGH_FAKEOUT_MULT = 0.90
+SESSION_ACTIVITY_EXTREME_BODY_BOOST = 1.35
+SESSION_ACTIVITY_EXTREME_WICK_BOOST = 1.10
+SESSION_ACTIVITY_EXTREME_FLOW_BOOST_MULT = 1.15
+SESSION_ACTIVITY_EXTREME_FAKEOUT_MULT = 0.80
+
+
+def session_activity_score(current, synthetic_liq=None):
+    """Thales's own activity-scoring formula (his `_score`/`f_score`: the
+    sum of the 16 Abs strength fields plus half the Smart Liquidity
+    upper/lower strengths), adapted to Dankbit's own field units: his raw
+    BCGAbs/etc. are single-trade amount*OI*|greek| weights (his
+    feature_builder.py), Dankbit's bcg_abs/etc. are aggregated dollar-Greek
+    curve extrema divided by a display scale (see per_leg_greeks) — neither
+    lands in the same numeric range his thresholds below assume, so each
+    field is first normalized the same way vega_regime/market_maker_gamma_contest
+    already do (dividing by that Greek's own *_ABS_NORMALIZER, clamped to
+    [0, 3]) before summing, rather than reusing his raw-sum formula verbatim.
+    `synthetic_liq` (smart_synthetic_liquidity()'s result, optional) adds
+    the same 0.5-weighted liquidity-strength term his own score includes;
+    omitted (not zeroed) when unavailable, e.g. a historical row computed
+    before this addon tracked Smart Liquidity, so it doesn't artificially
+    undercount that row's activity."""
+    def norm(fields, normalizer):
+        return sum(min(max((current.get(f) or 0.0) / normalizer, 0.0), 3.0) for f in fields)
+
+    score = (
+        norm(("bcg_abs", "bpg_abs", "scg_abs", "spg_abs"), GAMMA_ABS_NORMALIZER)
+        + norm(("bcd_abs", "bpd_abs", "scd_abs", "spd_abs"), DELTA_ABS_NORMALIZER)
+        + norm(("bct_abs", "bpt_abs", "sct_abs", "spt_abs"), THETA_ABS_NORMALIZER)
+        + norm(("bcv_abs", "bpv_abs", "scv_abs", "spv_abs"), VEGA_ABS_NORMALIZER)
+    )
+    if synthetic_liq:
+        upper_m = min(max((synthetic_liq.get("upper_liq_m") or 0.0) / LIQUIDITY_VOLUME_NORMALIZER, 0.0), 3.0)
+        lower_m = min(max((synthetic_liq.get("lower_liq_m") or 0.0) / LIQUIDITY_VOLUME_NORMALIZER, 0.0), 3.0)
+        score += 0.5 * (upper_m + lower_m)
+    return score
+
+
+def session_activity_regime(current_score, historical_scores):
+    """Classifies `current_score` (session_activity_score()'s output for
+    the current scan) as low/normal/high/extreme relative to the mean of
+    `historical_scores` — same-hour-of-day historical activity scores, see
+    dankbit.forecast.snapshot.session_activity_history(). Non-positive
+    entries are dropped from the baseline (matching his own
+    `[x for x in ... if x>0]` filter); `relative_score` falls back to 1.0
+    (i.e. "normal") when no usable baseline exists yet, e.g. right after
+    this addon starts tracking history for a given hour-of-day — same
+    na-safe convention this module's other history-dependent signals use.
+    Returns a dict: regime, body_mult, wick_mult, greek_flow_mult,
+    fakeout_mult (feeds greek_flow()'s session_flow_mult/
+    session_fakeout_mult), relative_score."""
+    positive_history = [x for x in (historical_scores or []) if x and x > 0]
+    baseline = sum(positive_history) / len(positive_history) if positive_history else None
+    relative = current_score / baseline if baseline else 1.0
+
+    if relative >= SESSION_ACTIVITY_EXTREME_THRESHOLD:
+        return {
+            "regime": "extreme", "body_mult": SESSION_ACTIVITY_EXTREME_BODY_BOOST,
+            "wick_mult": SESSION_ACTIVITY_EXTREME_WICK_BOOST,
+            "greek_flow_mult": SESSION_ACTIVITY_HIGH_FLOW_BOOST * SESSION_ACTIVITY_EXTREME_FLOW_BOOST_MULT,
+            "fakeout_mult": SESSION_ACTIVITY_EXTREME_FAKEOUT_MULT, "relative_score": relative,
+        }
+    if relative >= SESSION_ACTIVITY_HIGH_THRESHOLD:
+        return {
+            "regime": "high", "body_mult": SESSION_ACTIVITY_HIGH_BODY_BOOST, "wick_mult": 1.0,
+            "greek_flow_mult": SESSION_ACTIVITY_HIGH_FLOW_BOOST,
+            "fakeout_mult": SESSION_ACTIVITY_HIGH_FAKEOUT_MULT, "relative_score": relative,
+        }
+    if relative <= SESSION_ACTIVITY_LOW_THRESHOLD:
+        return {
+            "regime": "low", "body_mult": SESSION_ACTIVITY_LOW_BODY_DAMPING,
+            "wick_mult": SESSION_ACTIVITY_LOW_WICK_BOOST, "greek_flow_mult": SESSION_ACTIVITY_LOW_FLOW_DAMPING,
+            "fakeout_mult": SESSION_ACTIVITY_LOW_FAKEOUT_MULT, "relative_score": relative,
+        }
+    return {"regime": "normal", "body_mult": 1.0, "wick_mult": 1.0, "greek_flow_mult": 1.0,
+            "fakeout_mult": 1.0, "relative_score": relative}
+
+
+# ============================================================
 # Session-aware + weekend/regime multiplier tables (Thales's own defaults,
 # UTC-only — sessionTimezone defaults to "Etc/UTC" in the source script, and
 # every other server-side computation in this addon already works in UTC).
@@ -1315,7 +1527,7 @@ def _cfg(cfg, name):
 
 def simulate_forecast(index_price, sigma_annual, current, history, candles,
                         hours_ahead=72, step_hours=4, start_offset_hours=4, cfg=None,
-                        gamma_band_term_structure=None):
+                        gamma_band_term_structure=None, session_activity_history=None):
     """The full forecast-candle cascade, ported from Thales's per-step Pine
     loop. `current` and each row of `history` are dankbit.forecast.snapshot
     field dicts (newest history row first); `candles` are recent real 4h
@@ -1325,7 +1537,13 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     dankbit.bands points (soonest-expiring tracked instrument first) feeding
     gamma_band_term_slope() (see that function/its own section header for
     why this exists — added so the forecast tracks the same forward
-    direction as the chart's own dashed Gamma Band line). Deterministic —
+    direction as the chart's own dashed Gamma Band line).
+    `session_activity_history` is dankbit.forecast.snapshot.
+    session_activity_history()'s result for the current hour-of-day — same-
+    hour-of-day historical Greek-activity scores feeding
+    session_activity_regime() (see that function). None/empty means no
+    regime multiplier is applied (equivalent to "normal", every multiplier
+    1.0). Deterministic —
     unlike this
     addon's earlier, now-removed GBM-based forecast engines, there is no
     random component anywhere in this engine (matching the source script,
@@ -1506,6 +1724,12 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     lower_liq_price, lower_liq_m = synthetic_liq["lower_liq_price"], synthetic_liq["lower_liq_m"]
     upper_liq_price, upper_liq_m = synthetic_liq["upper_liq_price"], synthetic_liq["upper_liq_m"]
 
+    # Session Activity Regime — computed once (current score + historical
+    # baseline are both step-invariant), applied uniformly across every
+    # step below, same as his own SessionActivityRegimeEngine feeding one
+    # multiplier set into the whole forecast run.
+    activity = session_activity_regime(session_activity_score(current, synthetic_liq), session_activity_history)
+
     # Gamma-Band Term-Structure Bias — computed once (both points, and thus
     # the slope between them, are step-invariant).
     term_direction, term_strength, _term_slope_norm = gamma_band_term_slope(gamma_band_term_structure, band_width)
@@ -1534,7 +1758,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         low_vol_regime = sess in ("Asia", "PostNY")
         high_vol_regime = sess in ("London", "Overlap", "NY")
         pull_mult = (LOW_VOL_PULL_FACTOR if low_vol_regime else HIGH_VOL_PULL_FACTOR if high_vol_regime else WEEKDAY_PULL_FACTOR)
-        combined_body_mult = max(body_mult * pull_mult, 0.45)
+        combined_body_mult = max(body_mult * pull_mult * activity["body_mult"], 0.45)
         combined_wick_mult = max(atr_mult, 0.40)
         combined_shock_mult = max(shock_mult * (LOW_VOL_SHOCK_FACTOR if low_vol_regime else HIGH_VOL_SHOCK_FACTOR if high_vol_regime else WEEKDAY_SHOCK_FACTOR), 0.35)
 
@@ -1602,7 +1826,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             # double-boost the same real candle.
             current_body_impulse *= liquidity["sweep_body_boost"]
 
-        flow = greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step)
+        flow = greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step,
+                           session_flow_mult=activity["greek_flow_mult"], session_fakeout_mult=activity["fakeout_mult"])
 
         term_slope_impulse = 0.0
         if term_direction != 0:
@@ -1611,7 +1836,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
         any_shock_active = bear_delta_shock or bull_delta_shock or bear_shock or bull_shock
         body_confidence = 1.0 * vega_body_mult * flow["body_confidence_mult"]
-        wick_expansion = 1.0 * vega_wick_mult * flow["wick_mult"]
+        wick_expansion = 1.0 * vega_wick_mult * flow["wick_mult"] * activity["wick_mult"]
 
         if consensus["consensus_direction"] != 0:
             body_confidence = min(body_confidence * (1.0 + consensus["consensus_strength"] * GAMMA_BAND_CONFIDENCE_BOOST * (1.0 if consensus["all_aligned"] else 0.65)), 1.0)
@@ -1769,6 +1994,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             mode.append("Flow Fakeout")
         if term_direction != 0:
             mode.append("Gamma Band Term " + ("Up" if term_direction > 0 else "Down"))
+        if activity["regime"] != "normal":
+            mode.append("Activity " + activity["regime"].capitalize())
         mode.append(sess)
 
         points.append({
