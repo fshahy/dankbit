@@ -235,9 +235,13 @@ class Bands(models.Model):
         boundaries for `asset` as of now, for one specific active expiry
         only — mirrors the /<instrument>/zones PNG route called with that
         specific instrument, aggregated per-asset. Trades are taken since
-        today's UTC midnight by default; passing `hours` instead restricts
+        the most recent Tehran midnight by default (options.day_window_start —
+        despite the "00:00 UTC" label this and every other day-windowed
+        route in this addon uses, confirmed against Thales's own numbers:
+        his R/S didn't match ours at all until this was corrected, even
+        though GAVG/gamma_band already did); passing `hours` instead restricts
         to the trailing `hours` hours through now — used by /chart/<asset>'s
-        00:00-UTC-vs-trailing-hours radio toggle (see get_box,
+        00:00-vs-trailing-hours radio toggle (see get_box,
         dankbit_templates.xml). `expiry_index` selects which active expiry, in soonest-first
         order: 0 (default) is the nearest one, 1 is the next one after that,
         etc. The result includes that expiry's own `expiration` datetime
@@ -282,7 +286,7 @@ class Bands(models.Model):
 
         window_start = (
             as_of - timedelta(hours=hours) if hours is not None
-            else as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+            else options_lib.day_window_start(as_of)
         )
         domain = [
             ("name", "=ilike", f"{asset}-%"),
@@ -489,7 +493,7 @@ class Bands(models.Model):
         live off the return value (see get_box), since nothing reads
         box-boundary history.
 
-        Called only from compute_snapshot()'s 4-hourly cron (see
+        Called only from compute_snapshot()'s hourly cron (see
         TRACKED_EXPIRY_COUNT below), for every tracked expiry_index
         including 0 — there is no browser-triggered live path at all,
         deliberately, for any of them: /api/zones-box/<asset> (the "Zones"
@@ -565,7 +569,7 @@ get_box_n() (the only caller of this method) is itself only ever
     # lines (see get_box_n/refreshBands), which render whatever rows
     # exist for the asset regardless of whether a box was ever drawn for
     # them. Every tracked expiry_index, including 0, is only ever computed
-    # by the 4-hourly compute_snapshot() cron (see below) — there is no
+    # by the hourly compute_snapshot() cron (see below) — there is no
     # browser-triggered live path for any of them; the "Zones" checkbox's
     # own live box rendering goes through get_box() -> _compute_asset()
     # directly and never persists.
@@ -575,7 +579,7 @@ get_box_n() (the only caller of this method) is itself only ever
         """Bands computation for `asset`'s `expiry_index`-th soonest
         active expiry, computed fresh on every call and persisted via
         _persist_extrema. The *only* caller, for every expiry_index
-        (including 0), is compute_snapshot()'s 4-hourly cron — there is no
+        (including 0), is compute_snapshot()'s hourly cron — there is no
         HTTP route or browser-triggered path that reaches this method at
         all, by design (see TRACKED_EXPIRY_COUNT). /api/zones-box/<asset>
         (the one that actually renders the yellow box on the chart) goes
@@ -597,7 +601,7 @@ get_box_n() (the only caller of this method) is itself only ever
         _compute_asset() directly, never via get_box_n(), so a live page
         view can never persist anything into dankbit.bands: the nearest
         expiry's row (expiry_index 0) is refreshed *only* by
-        compute_snapshot()'s 4-hourly cron, exactly like expiry_index 1/2
+        compute_snapshot()'s hourly cron, exactly like expiry_index 1/2
         (see TRACKED_EXPIRY_COUNT) — no browser action, for any expiry_index,
         ever writes to this model. An explicit `hours` overrides the default
         since-00:00-UTC-through-now trade window with the trailing `hours`
@@ -646,7 +650,9 @@ get_box_n() (the only caller of this method) is itself only ever
         return term_structure
 
     def compute_snapshot(self):
-        """Cron entry point (every 4 hours — see data/ir_cron.xml) — the
+        """Cron entry point (hourly — see data/ir_cron.xml; tightened from an
+        initial 4 hours per Thales dev request, for fresher Bands-lines/
+        gamma-band-term-structure history) — the
         *sole* source of truth for every tracked expiry_index, including 0
         (the nearest expiry): no browser action ever computes or persists
         into dankbit.bands, for any expiry_index (see TRACKED_EXPIRY_COUNT/

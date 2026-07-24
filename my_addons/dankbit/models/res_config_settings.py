@@ -39,15 +39,21 @@ class ResConfigSettings(models.TransientModel):
     )
 
     zones_box_refresh_interval = fields.Integer(
-        string="Zones box refresh interval (s)",
+        string="Zones box / Bands refresh interval (s)",
         config_parameter="dankbit.zones_box_refresh_interval",
-        help="How often (in seconds) the TradingView chart re-fetches the yellow/teal zones boxes. Defaults to 3600 (1 hour).",
+        help="How often (in seconds) the TradingView chart re-fetches the yellow/teal "
+             "zones boxes AND the Bands lines (High/Resistance, Low/Support, Gamma Band, "
+             "Smart Liquidity) — both share this one (deliberately slow) interval rather "
+             "than the general refresh_interval, since dankbit.bands rows only ever "
+             "change once per hourly compute_snapshot() cron tick regardless of how "
+             "often the browser polls, so polling faster than this just wastes requests. "
+             "Defaults to 3600 (1 hour).",
     )
 
     zones_box_window_hours = fields.Integer(
         string="Zones Box Trailing Window (h)",
         config_parameter="dankbit.zones_box_window_hours",
-        help="How many trailing hours of trades the yellow/teal zones boxes use when the chart's trade-window toggle is set to \"X hours ago\" instead of \"00:00 UTC\". Defaults to 8.",
+        help="How many trailing hours of trades the yellow/teal zones boxes use when the chart's trade-window toggle is set to \"X hours ago\" instead of \"00:00 Tehran\". Defaults to 8.",
     )
 
     deribit_timeout = fields.Float(

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from odoo import fields, models
 
 from ..controllers import forecast as forecast_lib
+from ..controllers import options as options_lib
 
 _logger = logging.getLogger(__name__)
 
@@ -140,7 +141,8 @@ class ForecastSnapshot(models.Model):
 
     def compute_and_persist(self, asset):
         """Compute this moment's per-leg Greeks/band data for `asset` (nearest
-        active expiry, trades since 00:00 UTC) and upsert it into the current
+        active expiry, trades since 00:00 Tehran — see options.day_window_start)
+        and upsert it into the current
         4h bucket's row, refining it in place until the bucket rolls over
         (see BUCKET_HOURS). Returns the upserted record, or None if there's
         nothing computable yet (no index price, no active expiry, or no
@@ -225,7 +227,7 @@ class ForecastSnapshot(models.Model):
             return fallback
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-        window_start = as_of.replace(hour=0, minute=0, second=0, microsecond=0)
+        window_start = options_lib.day_window_start(as_of)
         trades = self.env["dankbit.trade"].with_context(active_test=False).search([
             ("name", "=ilike", f"{instrument}-%"),
             ("deribit_ts", ">=", window_start),

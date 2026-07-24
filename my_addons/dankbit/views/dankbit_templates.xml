@@ -305,7 +305,7 @@
 						<span class="tf-label">Boxes from:</span>
 						<label class="toggle-label">
 							<input type="radio" name="zones-box-window" id="zones-box-window-midnight" checked="checked" onchange="onZonesBoxWindowChange()"/>
-							00:00 UTC
+							00:00 Tehran
 						</label>
 						<label class="toggle-label">
 							<input type="radio" name="zones-box-window" id="zones-box-window-hours" onchange="onZonesBoxWindowChange()"/>
@@ -330,6 +330,8 @@
 					document.getElementById('exchange-label').textContent = 'Binance Spot · ' + ASSET + 'USDT';
 					const MONTHLY_INST     = cfg.monthly || '';
 					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
+					// Also drives Bands' own poll interval (see setInterval(refreshBands, ...)
+					// below) — not just the Zones boxes despite the name/setting.
 					const ZONES_BOX_REFRESH = parseInt(cfg.zonesBoxRefresh, 10) * 1000;
 					const ZONES_BOX_WINDOW_HOURS = parseInt(cfg.zonesBoxWindowHours, 10);
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
@@ -631,43 +633,53 @@
 					// re-fetches all 7 scopes (or clears, if just turned
 					// off).
 					async function refreshGammaTops() {
-						gammaTopsLines.forEach(l => series.removePriceLine(l));
-						gammaTopsLines.length = 0;
-						if (!SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS) return;
+						// Re-entrancy guard (see gammaTopsRefreshing's own comment) —
+						// a call that finds one already in flight just skips this
+						// tick entirely rather than racing it; the next poll or
+						// toggle will pick up fresh data anyway.
+						if (gammaTopsRefreshing) return;
+						gammaTopsRefreshing = true;
+						try {
+							gammaTopsLines.forEach(l => series.removePriceLine(l));
+							gammaTopsLines.length = 0;
+							if (!SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS) return;
 
-						const allData = await (await fetch(SG_URL)).json();
-						drawGammaTopLine(gammaTop(allData), 'All');
+							const allData = await (await fetch(SG_URL)).json();
+							drawGammaTopLine(gammaTop(allData), 'All');
 
-						const weeklyData = await (await fetch(SGW_URL)).json();
-						drawGammaTopLine(gammaTop(weeklyData), 'Weekly');
+							const weeklyData = await (await fetch(SGW_URL)).json();
+							drawGammaTopLine(gammaTop(weeklyData), 'Weekly');
 
-						if (SGM_URL) {
-							const monthlyData = await (await fetch(SGM_URL)).json();
-							drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
-						}
+							if (SGM_URL) {
+								const monthlyData = await (await fetch(SGM_URL)).json();
+								drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
+							}
 
-						const nearest = await (await fetch(NEAREST_EXPIRY_URL)).json();
-						if (nearest.expiry) {
-							const nearestData = await (await fetch('/api/gamma-by-strike-until/' + nearest.expiry)).json();
-							drawGammaTopLine(gammaTop(nearestData), 'Nearest');
-						}
+							const nearest = await (await fetch(NEAREST_EXPIRY_URL)).json();
+							if (nearest.expiry) {
+								const nearestData = await (await fetch('/api/gamma-by-strike-until/' + nearest.expiry)).json();
+								drawGammaTopLine(gammaTop(nearestData), 'Nearest');
+							}
 
-						const next = await (await fetch(NEXT_EXPIRY_URL)).json();
-						if (next.expiry) {
-							const nextData = await (await fetch('/api/gamma-by-strike-until/' + next.expiry)).json();
-							drawGammaTopLine(gammaTop(nextData), 'Nearest + 1');
-						}
+							const next = await (await fetch(NEXT_EXPIRY_URL)).json();
+							if (next.expiry) {
+								const nextData = await (await fetch('/api/gamma-by-strike-until/' + next.expiry)).json();
+								drawGammaTopLine(gammaTop(nextData), 'Nearest + 1');
+							}
 
-						const plus2 = await (await fetch(NEAREST_PLUS_2_EXPIRY_URL)).json();
-						if (plus2.expiry) {
-							const plus2Data = await (await fetch('/api/gamma-by-strike-until/' + plus2.expiry)).json();
-							drawGammaTopLine(gammaTop(plus2Data), 'Nearest + 2');
-						}
+							const plus2 = await (await fetch(NEAREST_PLUS_2_EXPIRY_URL)).json();
+							if (plus2.expiry) {
+								const plus2Data = await (await fetch('/api/gamma-by-strike-until/' + plus2.expiry)).json();
+								drawGammaTopLine(gammaTop(plus2Data), 'Nearest + 2');
+							}
 
-						const plus3 = await (await fetch(NEAREST_PLUS_3_EXPIRY_URL)).json();
-						if (plus3.expiry) {
-							const plus3Data = await (await fetch('/api/gamma-by-strike-until/' + plus3.expiry)).json();
-							drawGammaTopLine(gammaTop(plus3Data), 'Nearest + 3');
+							const plus3 = await (await fetch(NEAREST_PLUS_3_EXPIRY_URL)).json();
+							if (plus3.expiry) {
+								const plus3Data = await (await fetch('/api/gamma-by-strike-until/' + plus3.expiry)).json();
+								drawGammaTopLine(gammaTop(plus3Data), 'Nearest + 3');
+							}
+						} finally {
+							gammaTopsRefreshing = false;
 						}
 					}
 
@@ -750,6 +762,15 @@
 					// gamma peak/bottom line indicator of its own; that
 					// indicator lives only on the Gamma Chart.
 					let gammaTopsLines = [];
+					// refreshGammaTops does 7 sequential awaited fetches, and is
+					// itself called from init(), the checkbox's onToggleGammaTops(),
+					// and setInterval(refreshGammaTops, REFRESH) — without this
+					// guard, an overlapping invocation (e.g. a poll tick firing
+					// while a previous run is still mid-flight) races on the
+					// shared gammaTopsLines array: each clears what the other
+					// already drew and pushes its own lines on top, leaving
+					// duplicated/orphaned price lines behind.
+					let gammaTopsRefreshing = false;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -1347,7 +1368,14 @@
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
-					setInterval(refreshBands, REFRESH);
+					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
+					// underlying dankbit.bands rows only ever change once per
+					// hourly compute_snapshot() cron tick, so polling any faster
+					// just re-fetches identical data; syncing it to the same
+					// (slower) interval Zones already uses cuts wasted requests
+					// with zero loss of real freshness, which matters more now
+					// that this addon is heading toward more concurrent users.
+					setInterval(refreshBands, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);

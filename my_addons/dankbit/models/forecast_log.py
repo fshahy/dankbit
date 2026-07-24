@@ -61,9 +61,14 @@ class ForecastLog(models.Model):
     checked_at = fields.Datetime()
 
     def log_forecast(self):
-        """Cron entry point (every 4 hours — see data/ir_cron.xml, matching
-        forecast.simulate_forecast's own step_hours default so each tick's
-        candles land close to a prior tick's own target times). For each of
+        """Cron entry point (hourly — see data/ir_cron.xml; tightened from an
+        initial 4 hours, which matched forecast.simulate_forecast's own
+        step_hours default so each tick's candles landed close to a prior
+        tick's own target times, per Thales dev request for more frequent
+        accuracy sampling — ticks now overlap rather than lining up 1:1 with
+        the candle spacing, which check_accuracy() below doesn't care about
+        but does mean ~4x the row volume for the same real-world span). For
+        each of
         BTC/ETH, calls dankbit.forecast.snapshot.get_forecast_points() (the
         exact same computation /api/forecast/<asset> serves) and persists
         one row per returned candle. A run with nothing computable yet

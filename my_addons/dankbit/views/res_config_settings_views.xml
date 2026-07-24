@@ -39,7 +39,7 @@
 
                     <block title="TradingView Chart Settings" id="dankbit_tv_chart_settings" groups="base.group_no_one">
                         <setting>
-                            <field name="zones_box_refresh_interval" placeholder="Zones Box Refresh Interval (s)"/>
+                            <field name="zones_box_refresh_interval" placeholder="Zones Box / Bands Refresh Interval (s)"/>
                         </setting>
                         <setting>
                             <field name="zones_box_window_hours" placeholder="Zones Box Trailing Window (h)"/>
