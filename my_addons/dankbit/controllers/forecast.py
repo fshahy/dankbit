@@ -452,8 +452,13 @@ PARTIAL_DELTA_DRIFT_STRENGTH = 0.11
 
 def delta_shock_module(put_delta_level, call_delta_level, lower_band, upper_band,
                         projected_price, current_close, gamma_ref, confirmed_below, confirmed_above,
-                        band_width, put_strength_mult, call_strength_mult):
-    """Returns (impulse, bear_shock, bull_shock)."""
+                        band_width, put_strength_mult, call_strength_mult, threshold_mult=1.0):
+    """Returns (impulse, bear_shock, bull_shock). `threshold_mult` (session ×
+    weekend, see simulate_forecast's `threshold_mult`) scales
+    DELTA_SHOCK_THRESHOLD up on a weekend/quiet session so a shock needs a
+    proportionally bigger break to qualify — was computed in
+    simulate_forecast but never actually passed into this function until
+    this fix; see that function's own docstring."""
     put_below = put_delta_level is not None and put_delta_level < lower_band
     call_above = call_delta_level is not None and call_delta_level > upper_band
     raw_below_gamma = projected_price < gamma_ref or current_close < gamma_ref
@@ -464,11 +469,12 @@ def delta_shock_module(put_delta_level, call_delta_level, lower_band, upper_band
     price_near_green = projected_price >= upper_band - band_width * DELTA_SHOCK_PROXIMITY_PCT or current_close >= upper_band - band_width * DELTA_SHOCK_PROXIMITY_PCT
     put_distance = (lower_band - put_delta_level) / band_width if put_below else 0.0
     call_distance = (call_delta_level - upper_band) / band_width if call_above else 0.0
+    effective_threshold = DELTA_SHOCK_THRESHOLD * threshold_mult
 
     bear_confirm_ok = price_below_red or price_near_red
     bull_confirm_ok = price_above_green or price_near_green
-    bear_shock = put_below and confirmed_below and bear_confirm_ok and (price_below_red or put_distance >= DELTA_SHOCK_THRESHOLD)
-    bull_shock = call_above and confirmed_above and bull_confirm_ok and (price_above_green or call_distance >= DELTA_SHOCK_THRESHOLD)
+    bear_shock = put_below and confirmed_below and bear_confirm_ok and (price_below_red or put_distance >= effective_threshold)
+    bull_shock = call_above and confirmed_above and bull_confirm_ok and (price_above_green or call_distance >= effective_threshold)
 
     impulse = 0.0
     if bear_shock:
@@ -496,25 +502,32 @@ SHOCK_CONTINUATION_STRENGTH = 0.70
 
 
 def gamma_shock_module(last_close, last_open, atr, lower_band, upper_band, band_width,
-                        gamma_ref, confirmed_below, confirmed_above, bml, smp, put_delta, call_delta):
-    """Returns (impulse, bear_active, bull_active, strength)."""
+                        gamma_ref, confirmed_below, confirmed_above, bml, smp, put_delta, call_delta,
+                        threshold_mult=1.0):
+    """Returns (impulse, bear_active, bull_active, strength). `threshold_mult`
+    (session × weekend, see simulate_forecast's `threshold_mult`) scales
+    SHOCK_BREAK_THRESHOLD up on a weekend/quiet session so a real close
+    needs to break proportionally further past the band to activate — was
+    computed in simulate_forecast but never actually passed into this
+    function until this fix; see that function's own docstring."""
     body_size = abs(last_close - last_open)
     atr_safe = max(atr, 1e-9)
     strong_body = body_size >= atr_safe * SHOCK_BODY_ATR_MULT
     bear_break = (lower_band - last_close) / band_width if last_close < lower_band else 0.0
     bull_break = (last_close - upper_band) / band_width if last_close > upper_band else 0.0
+    effective_break_threshold = SHOCK_BREAK_THRESHOLD * threshold_mult
 
-    bear_active = last_close < lower_band and confirmed_below and (strong_body or bear_break >= SHOCK_BREAK_THRESHOLD)
-    bull_active = last_close > upper_band and confirmed_above and (strong_body or bull_break >= SHOCK_BREAK_THRESHOLD)
+    bear_active = last_close < lower_band and confirmed_below and (strong_body or bear_break >= effective_break_threshold)
+    bull_active = last_close > upper_band and confirmed_above and (strong_body or bull_break >= effective_break_threshold)
 
     strength = 0.0
     impulse = 0.0
     if bear_active:
-        strength = min(max(bear_break / max(SHOCK_BREAK_THRESHOLD, 0.01), body_size / max(atr_safe * SHOCK_BODY_ATR_MULT, 1e-9)), 2.0) / 2.0
+        strength = min(max(bear_break / max(effective_break_threshold, 0.01), body_size / max(atr_safe * SHOCK_BODY_ATR_MULT, 1e-9)), 2.0) / 2.0
         target = min(lower_band, bml, put_delta) if put_delta is not None else min(lower_band, bml)
         impulse = ((target - last_close) / band_width) * SHOCK_CONTINUATION_STRENGTH * (0.70 + strength * 0.60)
     elif bull_active:
-        strength = min(max(bull_break / max(SHOCK_BREAK_THRESHOLD, 0.01), body_size / max(atr_safe * SHOCK_BODY_ATR_MULT, 1e-9)), 2.0) / 2.0
+        strength = min(max(bull_break / max(effective_break_threshold, 0.01), body_size / max(atr_safe * SHOCK_BODY_ATR_MULT, 1e-9)), 2.0) / 2.0
         target = max(upper_band, smp, call_delta) if call_delta is not None else max(upper_band, smp)
         impulse = ((target - last_close) / band_width) * SHOCK_CONTINUATION_STRENGTH * (0.70 + strength * 0.60)
     return impulse, bear_active, bull_active, strength
@@ -1737,6 +1750,14 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     points = []
     projected_open = index_price
     n_candles = int(round(hours_ahead / step_hours))
+    # Weekend move-cap state (see the WEEKEND_PER_CANDLE_MOVE_ATR block
+    # below) — weekend_started tracks whether we're already past the first
+    # weekend candle (so FIRST_WEEKEND_CANDLE_DAMPENING/
+    # MAX_FIRST_WEEKEND_MOVE_ATR only apply once per weekend, not every
+    # step), weekend_cumulative_move tracks the running total |move| since
+    # the weekend started, reset the moment a step lands back on a weekday.
+    weekend_started = False
+    weekend_cumulative_move = 0.0
     for step in range(n_candles):
         hours_out = start_offset_hours + step * step_hours
         candle_dt_hour = (now_utc + hours_out * 3600.0) if now_utc else None
@@ -1801,14 +1822,22 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         delta_impulse, bear_delta_shock, bull_delta_shock = delta_shock_module(
             put_delta_level, call_delta_level, low, top, projected_open,
             closes[-1] if closes else projected_open, gamma_ref, confirmed_below, confirmed_above,
-            band_width, put_strength_mult, call_strength_mult,
+            band_width, put_strength_mult, call_strength_mult, threshold_mult=threshold_mult,
         )
+        # combined_shock_mult (session x weekend x low/high-vol regime) was
+        # already computed above but never actually applied anywhere —
+        # confirmed dead weight before this fix, which is why a Friday-
+        # evening/weekend shock fired at full weekday strength. Scaled here
+        # rather than inside delta_shock_module so both its full-shock and
+        # partial-drift branches get the same session-aware damping.
+        delta_impulse *= combined_shock_mult
 
         gamma_shock_impulse, bear_shock, bull_shock, shock_strength = gamma_shock_module(
             closes[-1] if closes else projected_open, candles[-1]["o"] if candles else projected_open,
             atr, low, top, band_width, gamma_ref, confirmed_below, confirmed_above,
-            current["bml"], current["smp"], put_delta_level, call_delta_level,
+            current["bml"], current["smp"], put_delta_level, call_delta_level, threshold_mult=threshold_mult,
         )
+        gamma_shock_impulse *= combined_shock_mult
 
         mm = market_maker_gamma_contest(current, projected_open, band_width, combined_body_mult, step)
         mm_impulse = mm["impulse"]
@@ -1905,6 +1934,37 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             first_move_cap = max(effective_atr * SESSION_FIRST_MOVE_ATR[sess], 1e-9)
             step_move = max(min(step_move, first_move_cap), -first_move_cap)
 
+        # Weekend move cap — the rest of the cascade above (combined_body_mult,
+        # combined_shock_mult, the shock modules' own threshold_mult) already
+        # softens weekend candles, but nothing previously stopped a strong
+        # shock/consensus signal from compounding across many weekend steps
+        # in a row (crypto trades 24/7, but real weekend moves are usually
+        # much calmer than a weekday session — WEEKEND_PER_CANDLE_MOVE_ATR/
+        # WEEKEND_TOTAL_MOVE_ATR/MAX_FIRST_WEEKEND_MOVE_ATR/
+        # FIRST_WEEKEND_CANDLE_DAMPENING were defined for exactly this but,
+        # like threshold_mult/combined_shock_mult above, were never actually
+        # wired in — confirmed dead constants before this fix). The first
+        # weekend candle gets its own tighter cap (a Friday-close-into-
+        # Saturday transition is where a spurious "shock" is most likely to
+        # have just fired); every subsequent weekend candle is capped
+        # per-step and against a running total so a multi-candle cascade
+        # can't quietly rebuild the same large move one small-looking step
+        # at a time.
+        if is_weekend:
+            if not weekend_started:
+                first_weekend_cap = max(effective_atr * MAX_FIRST_WEEKEND_MOVE_ATR, 1e-9)
+                step_move = max(min(step_move * FIRST_WEEKEND_CANDLE_DAMPENING, first_weekend_cap), -first_weekend_cap)
+                weekend_started = True
+            else:
+                per_candle_cap = max(effective_atr * WEEKEND_PER_CANDLE_MOVE_ATR, 1e-9)
+                step_move = max(min(step_move, per_candle_cap), -per_candle_cap)
+            remaining_budget = max(atr * WEEKEND_TOTAL_MOVE_ATR - weekend_cumulative_move, 0.0)
+            step_move = max(min(step_move, remaining_budget), -remaining_budget)
+            weekend_cumulative_move += abs(step_move)
+        else:
+            weekend_started = False
+            weekend_cumulative_move = 0.0
+
         projected_close = projected_open + step_move
 
         upper_target_sum, upper_target_weight = top, 1.0
@@ -1996,6 +2056,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             mode.append("Gamma Band Term " + ("Up" if term_direction > 0 else "Down"))
         if activity["regime"] != "normal":
             mode.append("Activity " + activity["regime"].capitalize())
+        if is_weekend:
+            mode.append("Weekend")
         mode.append(sess)
 
         points.append({
