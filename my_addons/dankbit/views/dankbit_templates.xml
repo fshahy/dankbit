@@ -533,7 +533,7 @@
 					// separate toggle, same orange used for this indicator
 					// before, dotted to stay distinct from the solid/dashed
 					// lines already on this chart.
-					const smartLiqUpperSeries = chart.addLineSeries({ color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					const smartLiqUpperSeries = chart.addLineSeries({ color: '#4fc3f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 					const smartLiqLowerSeries = chart.addLineSeries({ color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
@@ -1066,16 +1066,16 @@
 						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'inBar',
-							color: '#fb8c00',
+							color: '#4fc3f7',
 							shape: 'circle',
-							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 2 : 0,
+							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
 						})));
 						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'inBar',
 							color: '#fb8c00',
 							shape: 'circle',
-							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 2 : 0,
+							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
 						})));
 
 						// +/- marker per point: whether the payoff at that

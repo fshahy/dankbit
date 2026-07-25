@@ -240,7 +240,7 @@ class ForecastSnapshot(models.Model):
         trade_weighted = forecast_lib.trade_weighted_per_leg_greeks(trades, index_price, open_interest)
         return {f: (trade_weighted[f] if trade_weighted.get(f) is not None else fallback[f]) for f in fallback}
 
-    def session_activity_history(self, asset, hour_utc, lookback_days=14, limit=500):
+    def session_activity_history(self, asset, hour_utc, lookback_days=14, limit=500, cfg=None):
         """Same-hour-of-day historical Greek-activity scores for `asset`,
         feeding forecast_lib.session_activity_regime()'s baseline —
         mirrors Thales's own SessionActivityRegimeEngine.classify(f,
@@ -253,7 +253,18 @@ class ForecastSnapshot(models.Model):
         forecast_lib.smart_synthetic_liquidity(), using that row's own
         index_price as the role_close reference — a reasonable stand-in
         for a real recent close when scoring historical activity rather
-        than reconstructing that moment's actual price action."""
+        than reconstructing that moment's actual price action.
+
+        `cfg` (optional — the same per-asset cfg dict get_forecast_cfg(asset)
+        builds) is forwarded to smart_synthetic_liquidity()/
+        session_activity_score() so every historical row's score is
+        computed with the SAME asset-aware GAMMA_ABS_NORMALIZER/etc. as
+        the live scan it's being compared against, rather than the
+        BTC-calibrated module defaults. Computed via get_forecast_cfg(asset)
+        if not supplied, so this method still works correctly when called
+        on its own."""
+        if cfg is None:
+            cfg, _ = self.get_forecast_cfg(asset)
         since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).replace(tzinfo=None)
         rows = self.sudo().search([
             ("asset", "=", asset),
@@ -268,8 +279,8 @@ class ForecastSnapshot(models.Model):
             synthetic_liq = None
             if row.top and row.low:
                 band_width = max(row.top - row.low, 1e-9)
-                synthetic_liq = forecast_lib.smart_synthetic_liquidity(data, row.top, row.low, band_width, row.index_price)
-            scores.append(forecast_lib.session_activity_score(data, synthetic_liq))
+                synthetic_liq = forecast_lib.smart_synthetic_liquidity(data, row.top, row.low, band_width, row.index_price, cfg=cfg)
+            scores.append(forecast_lib.session_activity_score(data, synthetic_liq, cfg=cfg))
         return scores
 
     def recent_history(self, asset, limit=3):
@@ -299,7 +310,7 @@ class ForecastSnapshot(models.Model):
         data["bucket_epoch"] = self.bucket_start.replace(tzinfo=timezone.utc).timestamp()
         return data
 
-    def get_forecast_cfg(self):
+    def get_forecast_cfg(self, asset):
         """Reads res.config.settings' "Thales Forecast" section into a cfg
         dict + a dict of horizon kwargs, for forecast.simulate_forecast.
         Lives here (rather than on the controller, where it used to be) so
@@ -309,11 +320,22 @@ class ForecastSnapshot(models.Model):
         Falls back to simulate_forecast's own hardcoded defaults (repeated
         here verbatim) for any setting left unset — same default-in-the-
         reading-code convention every other dankbit.* config_parameter
-        uses in this addon (see res_config_settings.py)."""
+        uses in this addon (see res_config_settings.py).
+
+        Per-asset (per Thales dev feedback that the forecast engine reads
+        as BTC-optimized): every key below is read from
+        `dankbit.<key>` for BTC and `dankbit.eth_<key>` for ETH — same
+        unprefixed-is-BTC/`eth_`-prefixed-is-ETH convention this addon
+        already uses for from_price/weekly_expiry/etc. (see
+        res_config_settings.py) — so BTC-tuned forecast weights are never
+        force-applied to ETH, and either asset can be retuned
+        independently. `asset` is expected to be "BTC" or "ETH"; any
+        other value falls back to the BTC (unprefixed) keys."""
         icp = self.env["ir.config_parameter"].sudo()
+        prefix = "eth_" if asset == "ETH" else ""
 
         def f(key, default):
-            return float(icp.get_param(f"dankbit.{key}", default))
+            return float(icp.get_param(f"dankbit.{prefix}{key}", default))
 
         cfg = {}
         cfg["GAMMA_CENTER_WEIGHT"] = f("forecast_gamma_center_weight", 0.70)
@@ -326,6 +348,7 @@ class ForecastSnapshot(models.Model):
         cfg["FORECAST_WICK_FACTOR"] = f("forecast_wick_factor", 0.35)
         cfg["FORECAST_ATR_FACTOR"] = f("forecast_atr_factor", 0.3)
         cfg["FORECAST_CURVE_WICK_WEIGHT"] = f("forecast_curve_wick_weight", 0.42)
+        cfg["GREEK_FLOW_IMPULSE_WEIGHT"] = f("forecast_greek_flow_impulse_weight", 1.75)
         cfg["GAMMA_BAND_OPPOSITE_WICK_COMPRESSION"] = f("forecast_gb_opposite_wick_compression", 0.18)
         cfg["GAMMA_BAND_CONFIRMED_TARGET_BOOST"] = f("forecast_gb_confirmed_target_boost", 0.55)
         cfg["GAMMA_BAND_CONFIDENCE_BOOST"] = f("forecast_gb_confidence_boost", 0.2)
@@ -364,39 +387,66 @@ class ForecastSnapshot(models.Model):
         cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast_weekend_shock_factor", 0.75)
         cfg["BUCKET_HOURS_FALLBACK"] = f("forecast_bucket_hours_fallback", 4.0)
 
+        # Per-asset dollar-Greek activity scale — see forecast.py's own
+        # module-level comment on GAMMA_ABS_NORMALIZER/etc. for why these
+        # 4 needed to become asset-aware. Fallback defaults (used only
+        # when the corresponding ir.config_parameter row has never been
+        # written, e.g. nobody has saved the Settings form yet) differ by
+        # asset too, matching each field's own default= in
+        # res_config_settings.py — ETH's values were derived from real
+        # dankbit.forecast.snapshot history (median dollar-Greek leg
+        # magnitude, BTC vs ETH, over the first ~2 days of data): gamma
+        # ~0.13x BTC's, theta ~0.22x, vega ~0.10x, but delta ~3.8x BTC's
+        # (ETH's dollar-delta legs run LARGER than BTC's, not smaller —
+        # see eth_forecast_delta_abs_normalizer's own help text).
+        eth = asset == "ETH"
+        cfg["GAMMA_ABS_NORMALIZER"] = f("forecast_gamma_abs_normalizer", 0.02 if eth else 0.15)
+        cfg["DELTA_ABS_NORMALIZER"] = f("forecast_delta_abs_normalizer", 2250.0 if eth else 600.0)
+        cfg["THETA_ABS_NORMALIZER"] = f("forecast_theta_abs_normalizer", 110.0 if eth else 500.0)
+        cfg["VEGA_ABS_NORMALIZER"] = f("forecast_vega_abs_normalizer", 250.0 if eth else 2500.0)
+
+        # NOTE: these 4 tables previously read "session_body_asia" etc.
+        # (missing the "forecast_" prefix every other key in this method
+        # uses) — that key never matched any field's real
+        # config_parameter (dankbit.forecast_session_body_asia, see
+        # res_config_settings.py), so the 20 session settings fields were
+        # silently never read at all; a user editing them in Settings had
+        # no effect. Fixed to "forecast_session_body_asia" etc. below,
+        # discovered and corrected while adding per-asset (BTC/ETH)
+        # support to this method.
         cfg["SESSION_BODY_FACTOR"] = {
-            "Asia": f("session_body_asia", 0.7),
-            "London": f("session_body_london", 0.9),
-            "Overlap": f("session_body_overlap", 1.05),
-            "NY": f("session_body_ny", 0.95),
-            "PostNY": f("session_body_postny", 0.7),
+            "Asia": f("forecast_session_body_asia", 0.7),
+            "London": f("forecast_session_body_london", 0.9),
+            "Overlap": f("forecast_session_body_overlap", 1.05),
+            "NY": f("forecast_session_body_ny", 0.95),
+            "PostNY": f("forecast_session_body_postny", 0.7),
         }
         cfg["SESSION_ATR_FACTOR"] = {
-            "Asia": f("session_atr_asia", 0.75),
-            "London": f("session_atr_london", 0.95),
-            "Overlap": f("session_atr_overlap", 1.1),
-            "NY": f("session_atr_ny", 1.0),
-            "PostNY": f("session_atr_postny", 0.75),
+            "Asia": f("forecast_session_atr_asia", 0.75),
+            "London": f("forecast_session_atr_london", 0.95),
+            "Overlap": f("forecast_session_atr_overlap", 1.1),
+            "NY": f("forecast_session_atr_ny", 1.0),
+            "PostNY": f("forecast_session_atr_postny", 0.75),
         }
         cfg["SESSION_SHOCK_FACTOR"] = {
-            "Asia": f("session_shock_asia", 0.65),
-            "London": f("session_shock_london", 0.95),
-            "Overlap": f("session_shock_overlap", 1.1),
-            "NY": f("session_shock_ny", 1.0),
-            "PostNY": f("session_shock_postny", 0.65),
+            "Asia": f("forecast_session_shock_asia", 0.65),
+            "London": f("forecast_session_shock_london", 0.95),
+            "Overlap": f("forecast_session_shock_overlap", 1.1),
+            "NY": f("forecast_session_shock_ny", 1.0),
+            "PostNY": f("forecast_session_shock_postny", 0.65),
         }
         cfg["SESSION_FIRST_MOVE_ATR"] = {
-            "Asia": f("session_firstmove_asia", 0.35),
-            "London": f("session_firstmove_london", 0.55),
-            "Overlap": f("session_firstmove_overlap", 0.75),
-            "NY": f("session_firstmove_ny", 0.6),
-            "PostNY": f("session_firstmove_postny", 0.35),
+            "Asia": f("forecast_session_firstmove_asia", 0.35),
+            "London": f("forecast_session_firstmove_london", 0.55),
+            "Overlap": f("forecast_session_firstmove_overlap", 0.75),
+            "NY": f("forecast_session_firstmove_ny", 0.6),
+            "PostNY": f("forecast_session_firstmove_postny", 0.35),
         }
 
         horizon = {
-            "hours_ahead": int(icp.get_param("dankbit.forecast_hours_ahead", 72)),
-            "step_hours": int(icp.get_param("dankbit.forecast_step_hours", 4)),
-            "start_offset_hours": int(icp.get_param("dankbit.forecast_start_offset_hours", 4)),
+            "hours_ahead": int(icp.get_param(f"dankbit.{prefix}forecast_hours_ahead", 72)),
+            "step_hours": int(icp.get_param(f"dankbit.{prefix}forecast_step_hours", 4)),
+            "start_offset_hours": int(icp.get_param(f"dankbit.{prefix}forecast_start_offset_hours", 4)),
         }
         return cfg, horizon
 
@@ -442,8 +492,8 @@ class ForecastSnapshot(models.Model):
             history = [r.to_dict() for r in history_records]
             candles = self.env["dankbit.trade"].get_candles(asset, interval="4h", limit=40)
             gamma_band_term_structure = self.env["dankbit.bands"].gamma_band_term_structure(asset)
-            session_activity_history = self.session_activity_history(asset, generated_at.hour)
-            cfg, horizon = self.get_forecast_cfg()
+            cfg, horizon = self.get_forecast_cfg(asset)
+            session_activity_history = self.session_activity_history(asset, generated_at.hour, cfg=cfg)
             points = forecast_lib.simulate_forecast(
                 index_price, sigma_annual, current, history, candles, cfg=cfg,
                 gamma_band_term_structure=gamma_band_term_structure,

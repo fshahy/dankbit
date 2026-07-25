@@ -216,6 +216,31 @@ DIVERGENCE_THETA_WEIGHT = 0.15
 BUYER_THETA_BASE_WEIGHT = 0.25
 SELLER_THETA_BASE_WEIGHT = 0.75
 
+# Per-asset dollar-Greek activity scale — "how big does a leg's own
+# bcg_abs/bcd_abs/bct_abs/bcv_abs (etc.) need to be to count as strong
+# conviction." Read by vega_regime, market_maker_gamma_contest,
+# smart_synthetic_liquidity, greek_flow, and session_activity_score to
+# turn a raw dollar-Greek magnitude into a clamped 0-3ish "activity"
+# score that gates/scales those engines. These 4 constants are the
+# BTC-calibrated defaults (per Thales dev feedback that the forecast
+# reads as BTC-optimized — BTC options trade at strikes/notional roughly
+# one to two orders of magnitude larger than ETH's, so a BTC-tuned
+# DELTA_ABS_NORMALIZER=600 risked leaving ETH's raw values permanently
+# under VEGA_MIN_ACTIVITY/VEGA_DOMINANCE_THRESHOLD, keeping those 5
+# engines near-inert for ETH regardless of real market conviction).
+# Deliberately promoted to the SAME "top-level tunable" exception
+# derive_levels' GAMMA_CENTER_WEIGHT/CURVE_CENTER_WEIGHT/
+# THETA_CENTER_WEIGHT already are: every nested helper below that reads
+# one of these 4 takes its own `cfg=None` parameter and resolves via
+# _cfg(cfg, "...") rather than the bare module constant, so
+# simulate_forecast can pass its own per-asset cfg straight through
+# (get_forecast_cfg(asset) on dankbit.forecast.snapshot builds that cfg
+# from res.config.settings' eth_forecast_gamma_abs_normalizer/etc. for
+# ETH, forecast_gamma_abs_normalizer/etc. for BTC — see that method and
+# res_config_settings.py). Every other constant private to those same
+# nested helpers (SMART_LIQ_*/SYNTH_LIQ_*/MM_*/VEGA_*/SESSION_ACTIVITY_*)
+# stays un-cfg-overridable, same "top-level only" scoping rule as before
+# — only these 4 became an exception, not a wholesale change to that rule.
 GAMMA_ABS_NORMALIZER = 0.15
 DELTA_ABS_NORMALIZER = 600.0
 THETA_ABS_NORMALIZER = 500.0
@@ -548,8 +573,16 @@ VEGA_COMPRESSION_BODY_DAMPING = 0.12
 VEGA_COMPRESSION_WICK_DAMPING = 0.08
 
 
-def vega_regime(current, projected_price, band_width, consensus_direction, consensus_strength, step):
-    """Returns (impulse, wick_multiplier, expansion_active, compression_active)."""
+def vega_regime(current, projected_price, band_width, consensus_direction, consensus_strength, step, cfg=None):
+    """Returns (impulse, wick_multiplier, expansion_active, compression_active).
+    `cfg` (optional, see simulate_forecast/_cfg) can override VEGA_ABS_NORMALIZER
+    — the per-asset scale for "how big is a big dollar-vega leg" (see
+    GAMMA_ABS_NORMALIZER/DELTA_ABS_NORMALIZER/THETA_ABS_NORMALIZER/
+    VEGA_ABS_NORMALIZER's own module-level comment for why this needed to
+    become asset-aware). Every other constant in this function stays
+    nested-helper-private, same "top-level only" rule derive_levels'
+    own cfg parameter already established."""
+    VEGA_ABS_NORMALIZER = _cfg(cfg, "VEGA_ABS_NORMALIZER")
     buyer_norm = min(max((current["bcv_abs"] + current["bpv_abs"]) / VEGA_ABS_NORMALIZER, 0.0), 3.0)
     seller_norm = min(max((current["scv_abs"] + current["spv_abs"]) / VEGA_ABS_NORMALIZER, 0.0), 3.0)
     total_norm = buyer_norm + seller_norm
@@ -598,7 +631,7 @@ MM_WICK_BIAS_STRENGTH = 0.22
 MM_MINIMUM_OUTCOME_FORCE = 0.08
 
 
-def market_maker_gamma_contest(current, projected_price, band_width, body_confidence_hint, step):
+def market_maker_gamma_contest(current, projected_price, band_width, body_confidence_hint, step, cfg=None):
     """Returns a dict: impulse, upper_wick_boost, lower_wick_boost, plus
     upper_force_total/upper_net_force/lower_force_total/lower_net_force —
     the LOCAL (price-proximity-gated) call/put breakout-vs-pin forces,
@@ -607,7 +640,12 @@ def market_maker_gamma_contest(current, projected_price, band_width, body_confid
     real-candle momentum factors, seller theta/rejection pin context,
     contest detection/outcome labeling) is deferred — this keeps the
     simpler proximity-only weighting the rest of this function already
-    had."""
+    had. `cfg` (optional, see simulate_forecast/_cfg) can override
+    GAMMA_ABS_NORMALIZER — the per-asset dollar-gamma scale; see that
+    constant's own module-level comment. Every other constant here stays
+    nested-helper-private."""
+    GAMMA_ABS_NORMALIZER = _cfg(cfg, "GAMMA_ABS_NORMALIZER")
+
     def norm(v):
         return min(max(v / GAMMA_ABS_NORMALIZER, 0.0), 1.5)
 
@@ -709,11 +747,22 @@ def _smart_band_adjusted_strength(raw_level, band_level, band_width, base_weight
     return base_weight
 
 
-def smart_synthetic_liquidity(current, top, low, band_width, role_close):
+def smart_synthetic_liquidity(current, top, low, band_width, role_close, cfg=None):
     """Returns {lower_liq_price, lower_liq_m, upper_liq_price, upper_liq_m}
     computed purely from `current`'s per-leg Greeks (see per_leg_greeks) —
     no manual data entry needed. `role_close` is the most recent real
-    close, used only to detect a seller-delta "flip" from pin to sweep."""
+    close, used only to detect a seller-delta "flip" from pin to sweep.
+    `cfg` (optional, see simulate_forecast/_cfg) can override
+    GAMMA_ABS_NORMALIZER/DELTA_ABS_NORMALIZER/THETA_ABS_NORMALIZER/
+    VEGA_ABS_NORMALIZER — the per-asset dollar-Greek scale every weight
+    below is built from; see those constants' own module-level comment.
+    Every other constant here (SMART_LIQ_*/SYNTH_LIQ_*) stays
+    nested-helper-private, same "top-level only" rule derive_levels'
+    own cfg parameter already established."""
+    GAMMA_ABS_NORMALIZER = _cfg(cfg, "GAMMA_ABS_NORMALIZER")
+    DELTA_ABS_NORMALIZER = _cfg(cfg, "DELTA_ABS_NORMALIZER")
+    THETA_ABS_NORMALIZER = _cfg(cfg, "THETA_ABS_NORMALIZER")
+    VEGA_ABS_NORMALIZER = _cfg(cfg, "VEGA_ABS_NORMALIZER")
     upper_flip_level = max(top, current["scd_price"])
     lower_flip_level = min(low, current["spd_price"])
     seller_call_flipped = role_close > upper_flip_level + band_width * SMART_LIQ_SELLER_DELTA_FLIP_BUFFER
@@ -957,7 +1006,13 @@ def liquidity_map_engine(lower_liq_price, lower_liq_m, upper_liq_price, upper_li
 # Forecast" section by the "top-level only" scoping rule documented on
 # simulate_forecast/CLAUDE.md; this engine, called the same way those
 # are (once per step, from inside simulate_forecast's loop), follows
-# the same rule rather than becoming a special case.
+# the same rule rather than becoming a special case. The one exception is
+# GREEK_FLOW_IMPULSE_WEIGHT (Greek Flow Priority Hybrid, see its own
+# definition near the other FORECAST_* top-level tunables): a
+# simulate_forecast-body-level multiplier on this function's own
+# `impulse` return value, not a change to anything computed inside this
+# function — so it's cfg-overridable under the same "top-level only" rule
+# that excludes everything else here, not a special case either.
 # ============================================================
 GREEK_FLOW_REF_HOURS = 8.0  # same reference window gamma_band_consensus's slope() extrapolates to — keeps flow rates on the same normalized-per-8h scale as the rest of this file
 # How many prior dankbit.forecast.snapshot rows get_forecast_points() supplies
@@ -985,11 +1040,20 @@ GREEK_FLOW_DECAY = 0.84  # per-step impulse decay, same shape as vega_regime's 0
 
 
 def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step,
-                session_flow_mult=1.0, session_fakeout_mult=1.0):
+                session_flow_mult=1.0, session_fakeout_mult=1.0, cfg=None):
     """See the module-level "Greek Flow Engine" comment block above for
     the full design. `synthetic_liq` is the CURRENT smart_synthetic_liquidity()
     result — already computed once in simulate_forecast and passed in
     here rather than recomputed, same as every other caller of it.
+    `cfg` (optional, see simulate_forecast/_cfg) can override
+    DELTA_ABS_NORMALIZER/VEGA_ABS_NORMALIZER (used directly below by
+    Delta/Vega Flow's own rate() calls) and is also forwarded to the
+    internal smart_synthetic_liquidity() re-evaluation of `prev` (Smart
+    Liquidity Drift), so a historical-moment recomputation never uses a
+    different asset's normalizer than the live one it's compared
+    against. Every other GREEK_FLOW_* constant here stays
+    nested-helper-private, same "top-level only" rule derive_levels'
+    own cfg parameter already established.
     `history` is newest-first; the OLDEST entry available (history[-1],
     up to GREEK_FLOW_LOOKBACK_SNAPSHOTS back) is diffed against `current`
     — matching Thales's own GreekFlowEngine, whose window compares its
@@ -1017,6 +1081,9 @@ def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close
     if not history:
         return empty
 
+    DELTA_ABS_NORMALIZER = _cfg(cfg, "DELTA_ABS_NORMALIZER")
+    VEGA_ABS_NORMALIZER = _cfg(cfg, "VEGA_ABS_NORMALIZER")
+
     prev = history[min(len(history), GREEK_FLOW_LOOKBACK_SNAPSHOTS) - 1]
     coverage = min(len(history) / GREEK_FLOW_LOOKBACK_SNAPSHOTS, 1.0)
     hours_ago = max((current["bucket_epoch"] - prev["bucket_epoch"]) / 3600.0, 1.0)
@@ -1034,7 +1101,7 @@ def greek_flow(current, history, synthetic_liq, top, low, band_width, last_close
     seller_vega_flow = rate("scv_abs", VEGA_ABS_NORMALIZER) + rate("spv_abs", VEGA_ABS_NORMALIZER)
     vega_flow_signal = buyer_vega_flow - seller_vega_flow
 
-    prev_liq = smart_synthetic_liquidity(prev, top, low, band_width, last_close)
+    prev_liq = smart_synthetic_liquidity(prev, top, low, band_width, last_close, cfg=cfg)
     liq_drift_impulse = 0.0
     for side_price, side_prev_price in (
         (synthetic_liq.get("upper_liq_price"), prev_liq.get("upper_liq_price")),
@@ -1319,8 +1386,15 @@ SESSION_ACTIVITY_EXTREME_FLOW_BOOST_MULT = 1.15
 SESSION_ACTIVITY_EXTREME_FAKEOUT_MULT = 0.80
 
 
-def session_activity_score(current, synthetic_liq=None):
-    """Thales's own activity-scoring formula (his `_score`/`f_score`: the
+def session_activity_score(current, synthetic_liq=None, cfg=None):
+    """`cfg` (optional, see simulate_forecast/_cfg) can override
+    GAMMA_ABS_NORMALIZER/DELTA_ABS_NORMALIZER/THETA_ABS_NORMALIZER/
+    VEGA_ABS_NORMALIZER — see those constants' own module-level comment.
+    Every other SESSION_ACTIVITY_* constant here stays nested-helper-
+    private, same "top-level only" rule derive_levels' own cfg parameter
+    already established.
+
+    Thales's own activity-scoring formula (his `_score`/`f_score`: the
     sum of the 16 Abs strength fields plus half the Smart Liquidity
     upper/lower strengths), adapted to Dankbit's own field units: his raw
     BCGAbs/etc. are single-trade amount*OI*|greek| weights (his
@@ -1335,6 +1409,11 @@ def session_activity_score(current, synthetic_liq=None):
     omitted (not zeroed) when unavailable, e.g. a historical row computed
     before this addon tracked Smart Liquidity, so it doesn't artificially
     undercount that row's activity."""
+    GAMMA_ABS_NORMALIZER = _cfg(cfg, "GAMMA_ABS_NORMALIZER")
+    DELTA_ABS_NORMALIZER = _cfg(cfg, "DELTA_ABS_NORMALIZER")
+    THETA_ABS_NORMALIZER = _cfg(cfg, "THETA_ABS_NORMALIZER")
+    VEGA_ABS_NORMALIZER = _cfg(cfg, "VEGA_ABS_NORMALIZER")
+
     def norm(fields, normalizer):
         return sum(min(max((current.get(f) or 0.0) / normalizer, 0.0), 3.0) for f in fields)
 
@@ -1440,6 +1519,30 @@ FORECAST_CURVE_WICK_WEIGHT = 0.42
 FORECAST_DISAGREEMENT_DAMPING = 0.28
 FORECAST_DISAGREEMENT_WICK_BOOST = 0.10
 
+# Greek Flow Priority Hybrid — per user/Thales-dev discussion, Greek Flow
+# (see greek_flow() below) should become the PRIMARY driver of the 4H
+# candle's body direction/close, while every structural engine below
+# (Smart Liquidity, Gamma Band, Curve Engine, Session Activity, Vega
+# Regime) keeps acting as a constraint on that flow rather than being
+# removed — flow says which way the market just leaned; the structural
+# engines say how far that lean is actually allowed to travel before
+# it's absorbed into a wick instead of the body. This is the one
+# top-level lever for that priority: it scales ONLY flow["impulse"]
+# (greek_flow()'s own internal calibration constants stay nested-helper-
+# private and un-cfg-overridable, same "top-level only" rule as
+# vega_regime/market_maker_gamma_contest/smart_synthetic_liquidity's own
+# internals) where it's added into forecast_impulse alongside every
+# other engine's own impulse term — the other engines' impulses, and
+# every body_confidence_mult/wick_mult constraint in the cascade, are
+# untouched, so a strong shock/consensus/liquidity signal can still
+# override a weak or fake-out flow reading. Defaults above 1.0 (unlike
+# every other *_WEIGHT/*_FACTOR constant in this file, which default to
+# an as-ported-from-Thales baseline) specifically to make Greek Flow the
+# dominant additive voice by default, matching the "Priority Hybrid"
+# conclusion of that discussion over the prior "one engine among many"
+# weighting.
+GREEK_FLOW_IMPULSE_WEIGHT = 1.75
+
 GAMMA_BAND_OPPOSITE_WICK_COMPRESSION = 0.18
 GAMMA_BAND_CONFIRMED_TARGET_BOOST = 0.55
 GAMMA_BAND_CONFIDENCE_BOOST = 0.20
@@ -1530,11 +1633,18 @@ def _atr14(candles):
 
 def _cfg(cfg, name):
     """Returns cfg[name] if the caller supplied an override for it, else
-    this module's own hardcoded constant of that name. Used only by
+    this module's own hardcoded constant of that name. Used by
     simulate_forecast's own top-level tunables (see its `cfg` parameter
-    and res.config.settings' "Thales Forecast" section) — constants
-    private to nested helper functions are not overridable this way and
-    keep using their bare module-level name directly."""
+    and res.config.settings' "Thales Forecast" section) and by the small,
+    explicitly-documented set of nested-helper functions that also take
+    their own `cfg=None` parameter (derive_levels' GAMMA_CENTER_WEIGHT/
+    CURVE_CENTER_WEIGHT/THETA_CENTER_WEIGHT; vega_regime/
+    market_maker_gamma_contest/smart_synthetic_liquidity/greek_flow/
+    session_activity_score's GAMMA_ABS_NORMALIZER/DELTA_ABS_NORMALIZER/
+    THETA_ABS_NORMALIZER/VEGA_ABS_NORMALIZER) — every other constant
+    private to a nested helper function is NOT overridable this way and
+    keeps using its bare module-level name directly; see each such
+    function's own docstring for which exception (if any) applies."""
     return cfg[name] if cfg and name in cfg else globals()[name]
 
 
@@ -1592,6 +1702,13 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     FORECAST_WICK_FACTOR = _cfg(cfg, "FORECAST_WICK_FACTOR")
     FORECAST_ATR_FACTOR = _cfg(cfg, "FORECAST_ATR_FACTOR")
     FORECAST_CURVE_WICK_WEIGHT = _cfg(cfg, "FORECAST_CURVE_WICK_WEIGHT")
+    GREEK_FLOW_IMPULSE_WEIGHT = _cfg(cfg, "GREEK_FLOW_IMPULSE_WEIGHT")
+    # Only read directly here for _strength_mult's own use below — every
+    # other consumer of these 4 (vega_regime, market_maker_gamma_contest,
+    # smart_synthetic_liquidity, greek_flow, session_activity_score)
+    # resolves its own copy via cfg=cfg passed straight through, same
+    # pattern derive_levels' own cfg parameter already uses.
+    DELTA_ABS_NORMALIZER = _cfg(cfg, "DELTA_ABS_NORMALIZER")
     GAMMA_BAND_OPPOSITE_WICK_COMPRESSION = _cfg(cfg, "GAMMA_BAND_OPPOSITE_WICK_COMPRESSION")
     GAMMA_BAND_CONFIRMED_TARGET_BOOST = _cfg(cfg, "GAMMA_BAND_CONFIRMED_TARGET_BOOST")
     GAMMA_BAND_CONFIDENCE_BOOST = _cfg(cfg, "GAMMA_BAND_CONFIDENCE_BOOST")
@@ -1733,7 +1850,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
     # Smart Role-Aware Synthetic Liquidity — computed once (all its inputs
     # are step-invariant).
-    synthetic_liq = smart_synthetic_liquidity(current, top, low, band_width, last_close)
+    synthetic_liq = smart_synthetic_liquidity(current, top, low, band_width, last_close, cfg=cfg)
     lower_liq_price, lower_liq_m = synthetic_liq["lower_liq_price"], synthetic_liq["lower_liq_m"]
     upper_liq_price, upper_liq_m = synthetic_liq["upper_liq_price"], synthetic_liq["upper_liq_m"]
 
@@ -1741,7 +1858,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     # baseline are both step-invariant), applied uniformly across every
     # step below, same as his own SessionActivityRegimeEngine feeding one
     # multiplier set into the whole forecast run.
-    activity = session_activity_regime(session_activity_score(current, synthetic_liq), session_activity_history)
+    activity = session_activity_regime(session_activity_score(current, synthetic_liq, cfg=cfg), session_activity_history)
 
     # Gamma-Band Term-Structure Bias — computed once (both points, and thus
     # the slope between them, are step-invariant).
@@ -1817,6 +1934,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
         vega_impulse, vega_wick_mult, vega_body_mult, vega_expansion, vega_compression = vega_regime(
             current, projected_open, band_width, consensus["consensus_direction"], consensus["consensus_strength"], step,
+            cfg=cfg,
         )
 
         delta_impulse, bear_delta_shock, bull_delta_shock = delta_shock_module(
@@ -1839,7 +1957,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         )
         gamma_shock_impulse *= combined_shock_mult
 
-        mm = market_maker_gamma_contest(current, projected_open, band_width, combined_body_mult, step)
+        mm = market_maker_gamma_contest(current, projected_open, band_width, combined_body_mult, step, cfg=cfg)
         mm_impulse = mm["impulse"]
         mm_upper_wick_boost = mm["upper_wick_boost"]
         mm_lower_wick_boost = mm["lower_wick_boost"]
@@ -1856,7 +1974,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             current_body_impulse *= liquidity["sweep_body_boost"]
 
         flow = greek_flow(current, history, synthetic_liq, top, low, band_width, last_close, last_open, step,
-                           session_flow_mult=activity["greek_flow_mult"], session_fakeout_mult=activity["fakeout_mult"])
+                           session_flow_mult=activity["greek_flow_mult"], session_fakeout_mult=activity["fakeout_mult"],
+                           cfg=cfg)
 
         term_slope_impulse = 0.0
         if term_direction != 0:
@@ -1918,7 +2037,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         forecast_impulse = (
             base_pull_impulse + slope_impulse + current_body_impulse + curve_extreme_impulse
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
-            + liquidity["impulse"] + flow["impulse"] + term_slope_impulse
+            + liquidity["impulse"] + flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT + term_slope_impulse
         ) * body_confidence
         if gb_counter_trend_locked:
             allowed_opposite = GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE * max(1.0 - consensus["consensus_strength"], 0.05)

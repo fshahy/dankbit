@@ -72,7 +72,7 @@
                             <field name="eth_monthly_expiry" placeholder="e.g. ETH-26SEP26"/>
                         </setting>
                     </block>
-                    <block title="Thales Forecast" id="dankbit_forecast_settings" groups="base.group_no_one">
+                    <block title="Thales Forecast (BTC)" id="dankbit_forecast_settings" groups="base.group_no_one">
                         <!-- Per-leg extraction method -->
                         <setting help="Use the trade-weighted single-strike per-leg Greek extraction requested directly by Thales's original indicator author, instead of the default Black-Scholes portfolio-curve extraction. Affects the Thales Forecast candle engine only. Validate against real forecast accuracy (Forecast Log) before relying on it.">
                             <field name="forecast_trade_weighted_greeks"/>
@@ -118,6 +118,10 @@
                         </setting>
                         <setting>
                             <field name="forecast_curve_wick_weight" placeholder="Curve Wick Weight"/>
+                        </setting>
+                        <!-- Greek Flow Priority Hybrid -->
+                        <setting help="Multiplier on the Greek Flow engine's own impulse before it's added alongside every other engine's impulse in the base body/close estimate. Higher makes Greek Flow the dominant driver of candle direction while Bands/Smart Liquidity/Session Activity/Vega keep constraining how far the move travels.">
+                            <field name="forecast_greek_flow_impulse_weight" placeholder="Greek Flow Impulse Weight"/>
                         </setting>
                         <!-- Gamma-Band Consensus / Trend Lock -->
                         <setting>
@@ -235,6 +239,19 @@
                         <setting>
                             <field name="forecast_bucket_hours_fallback" placeholder="Bucket Hours Fallback"/>
                         </setting>
+                        <!-- Per-asset dollar-Greek activity scale -->
+                        <setting>
+                            <field name="forecast_gamma_abs_normalizer" placeholder="Gamma Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_delta_abs_normalizer" placeholder="Delta Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_theta_abs_normalizer" placeholder="Theta Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_vega_abs_normalizer" placeholder="Vega Abs Normalizer"/>
+                        </setting>
                         <!-- Session tables (Asia/London/Overlap/NY/PostNY) -->
                         <setting>
                             <field name="forecast_session_body_asia" placeholder="Session Body (Asia)"/>
@@ -308,6 +325,248 @@
                         </setting>
                         <setting>
                             <field name="forecast_wick_down_color" placeholder="Forecast Wick Down Color"/>
+                        </setting>
+                    </block>
+                    <block title="Thales Forecast (ETH)" id="dankbit_forecast_settings_eth" groups="base.group_no_one">
+                        <!-- ETH counterparts of every "Thales Forecast" tunable above (same
+                             unprefixed-is-BTC/eth_-prefixed-is-ETH convention as ETH Settings
+                             above) plus the boolean per-leg-extraction toggle and rendering-only
+                             candle colors, which stay shared across both assets. -->
+                        <!-- Horizon -->
+                        <setting>
+                            <field name="eth_forecast_hours_ahead" placeholder="ETH Hours Ahead"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_step_hours" placeholder="ETH Step Hours"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_start_offset_hours" placeholder="ETH Start Offset Hours"/>
+                        </setting>
+                        <!-- Gamma/curve/theta center-weight blend -->
+                        <setting>
+                            <field name="eth_forecast_gamma_center_weight" placeholder="ETH Gamma Center Weight"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_curve_center_weight" placeholder="ETH Curve Center Weight"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_theta_center_weight" placeholder="ETH Theta Center Weight"/>
+                        </setting>
+                        <!-- Base impulse / wick factors -->
+                        <setting>
+                            <field name="eth_forecast_pull_factor" placeholder="ETH Pull Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_slope_factor" placeholder="ETH Slope Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_body_factor" placeholder="ETH Body Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_curve_extreme_body_weight" placeholder="ETH Curve Extreme Body Weight"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_wick_factor" placeholder="ETH Wick Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_atr_factor" placeholder="ETH ATR Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_curve_wick_weight" placeholder="ETH Curve Wick Weight"/>
+                        </setting>
+                        <!-- Greek Flow Priority Hybrid -->
+                        <setting help="Multiplier on the Greek Flow engine's own impulse before it's added alongside every other engine's impulse in the base body/close estimate. Higher makes Greek Flow the dominant driver of candle direction while Bands/Smart Liquidity/Session Activity/Vega keep constraining how far the move travels.">
+                            <field name="eth_forecast_greek_flow_impulse_weight" placeholder="ETH Greek Flow Impulse Weight"/>
+                        </setting>
+                        <!-- Gamma-Band Consensus / Trend Lock -->
+                        <setting>
+                            <field name="eth_forecast_gb_opposite_wick_compression" placeholder="ETH Gamma-Band Opposite Wick Compression"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_confirmed_target_boost" placeholder="ETH Gamma-Band Confirmed Target Boost"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_confidence_boost" placeholder="ETH Gamma-Band Confidence Boost"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_conflict_body_damping" placeholder="ETH Gamma-Band Conflict Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_conflict_wick_expansion" placeholder="ETH Gamma-Band Conflict Wick Expansion"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_opposing_magnet_damping" placeholder="ETH Gamma-Band Opposing Magnet Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_trend_lock_strength" placeholder="ETH Gamma-Band Trend Lock Strength"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_counter_body_damping" placeholder="ETH Gamma-Band Counter Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_counter_max_opp_impulse" placeholder="ETH Gamma-Band Counter Max Opposite Impulse"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_counter_escape_atr" placeholder="ETH Gamma-Band Counter Escape ATR"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_term_slope_impulse_strength" placeholder="ETH Gamma-Band Term Slope Impulse Strength"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gb_term_slope_max_impulse" placeholder="ETH Gamma-Band Term Slope Max Impulse"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_gamma_confirm_buffer_pct" placeholder="ETH Gamma Confirm Buffer %"/>
+                        </setting>
+                        <!-- Option Cluster Structure Engine -->
+                        <setting>
+                            <field name="eth_forecast_cluster_alignment_threshold" placeholder="ETH Cluster Alignment Threshold"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_cluster_body_confidence_floor" placeholder="ETH Cluster Body Confidence Floor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_cluster_compressed_threshold" placeholder="ETH Cluster Compressed Threshold"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_cluster_compression_body_damping" placeholder="ETH Cluster Compression Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_cluster_compression_wick_compression" placeholder="ETH Cluster Compression Wick Compression"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_cluster_expansion_threshold" placeholder="ETH Cluster Expansion Threshold"/>
+                        </setting>
+                        <!-- Liquidity -->
+                        <setting>
+                            <field name="eth_forecast_liquidity_aligned_wick_compression" placeholder="ETH Liquidity Aligned Wick Compression"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_liquidity_body_confidence_floor" placeholder="ETH Liquidity Body Confidence Floor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_liquidity_opposite_wick_compression" placeholder="ETH Liquidity Opposite Wick Compression"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_liquidity_sweep_wick_compression" placeholder="ETH Liquidity Sweep Wick Compression"/>
+                        </setting>
+                        <!-- Momentum / Gamma Neutral Zone -->
+                        <setting>
+                            <field name="eth_forecast_momentum_body_confidence_floor" placeholder="ETH Momentum Body Confidence Floor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_momentum_wick_compression" placeholder="ETH Momentum Wick Compression"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_near_gamma_body_damping" placeholder="ETH Near-Gamma Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_near_gamma_wick_expansion" placeholder="ETH Near-Gamma Wick Expansion"/>
+                        </setting>
+                        <!-- Regime (low/high-volume, weekday/weekend) -->
+                        <setting>
+                            <field name="eth_forecast_high_vol_pull_factor" placeholder="ETH High-Volume Pull Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_low_vol_pull_factor" placeholder="ETH Low-Volume Pull Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_weekday_pull_factor" placeholder="ETH Weekday Pull Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_high_vol_shock_factor" placeholder="ETH High-Volume Shock Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_low_vol_shock_factor" placeholder="ETH Low-Volume Shock Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_weekday_shock_factor" placeholder="ETH Weekday Shock Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_weekend_atr_factor" placeholder="ETH Weekend ATR Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_weekend_body_factor" placeholder="ETH Weekend Body Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_weekend_shock_factor" placeholder="ETH Weekend Shock Factor"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_bucket_hours_fallback" placeholder="ETH Bucket Hours Fallback"/>
+                        </setting>
+                        <!-- Per-asset dollar-Greek activity scale -->
+                        <setting>
+                            <field name="eth_forecast_gamma_abs_normalizer" placeholder="ETH Gamma Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_delta_abs_normalizer" placeholder="ETH Delta Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_theta_abs_normalizer" placeholder="ETH Theta Abs Normalizer"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_vega_abs_normalizer" placeholder="ETH Vega Abs Normalizer"/>
+                        </setting>
+                        <!-- Session tables (Asia/London/Overlap/NY/PostNY) -->
+                        <setting>
+                            <field name="eth_forecast_session_body_asia" placeholder="ETH Session Body (Asia)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_body_london" placeholder="ETH Session Body (London)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_body_overlap" placeholder="ETH Session Body (Overlap)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_body_ny" placeholder="ETH Session Body (NY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_body_postny" placeholder="ETH Session Body (PostNY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_atr_asia" placeholder="ETH Session ATR (Asia)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_atr_london" placeholder="ETH Session ATR (London)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_atr_overlap" placeholder="ETH Session ATR (Overlap)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_atr_ny" placeholder="ETH Session ATR (NY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_atr_postny" placeholder="ETH Session ATR (PostNY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_shock_asia" placeholder="ETH Session Shock (Asia)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_shock_london" placeholder="ETH Session Shock (London)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_shock_overlap" placeholder="ETH Session Shock (Overlap)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_shock_ny" placeholder="ETH Session Shock (NY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_shock_postny" placeholder="ETH Session Shock (PostNY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_firstmove_asia" placeholder="ETH Session Firstmove (Asia)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_firstmove_london" placeholder="ETH Session Firstmove (London)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_firstmove_overlap" placeholder="ETH Session Firstmove (Overlap)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_firstmove_ny" placeholder="ETH Session Firstmove (NY)"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_session_firstmove_postny" placeholder="ETH Session Firstmove (PostNY)"/>
                         </setting>
                     </block>
                  </app>
