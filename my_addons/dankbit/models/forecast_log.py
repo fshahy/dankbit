@@ -41,6 +41,15 @@ class ForecastLog(models.Model):
     #       ORDER BY b.generated_at ASC LIMIT 1
     #   ) b ON true
     #   WHERE a.target_time <= NOW();
+    #
+    # Beyond the OHLC prediction itself, every row also carries the
+    # per-engine impulse breakdown and regime/context flags active for
+    # that candle (see the field groups below and
+    # forecast.simulate_forecast's own point-dict docstring) — added so a
+    # candle's accuracy can be attributed to a specific engine or regime
+    # after the fact (e.g. "is Greek Flow's own impulse actually
+    # correlated with lower error, now that it's the primary driver?")
+    # instead of relying on `mode`'s free-text label alone.
     asset = fields.Char(required=True, index=True)
     generated_at = fields.Datetime(required=True, index=True)
     index_price = fields.Float(digits=(16, 4))
@@ -52,6 +61,51 @@ class ForecastLog(models.Model):
     low = fields.Float(digits=(16, 4))
     close = fields.Float(digits=(16, 4))
     mode = fields.Char()
+
+    # The dankbit.forecast.snapshot bucket this run's Greeks/bands came
+    # from — lets a row be traced back to the full raw levels (top/low/
+    # bml/smp, all 32 per-leg gamma/delta/theta/vega fields) that produced
+    # it, instead of guessing the nearest bucket by timestamp. None on old
+    # rows logged before this field existed.
+    snapshot_id = fields.Many2one("dankbit.forecast.snapshot", ondelete="set null", index=True)
+
+    # Final net impulse (post every clamp — Gamma-Band Trend Lock,
+    # weekend caps, the ±0.45/±0.85 shock-vs-normal limit) that actually
+    # produced this candle's step_move, plus its per-engine breakdown —
+    # see forecast.simulate_forecast's own `forecast_impulse` sum. Exists
+    # so a bad candle's cause can be attributed to one engine's own
+    # calibration instead of guessed at from `mode`'s free-text label.
+    forecast_impulse = fields.Float(digits=(16, 6))
+    impulse_base_pull = fields.Float(digits=(16, 6))
+    impulse_slope = fields.Float(digits=(16, 6))
+    impulse_current_body = fields.Float(digits=(16, 6))
+    impulse_curve_extreme = fields.Float(digits=(16, 6))
+    impulse_gamma_band = fields.Float(digits=(16, 6))
+    impulse_gamma_band_reclaim = fields.Float(digits=(16, 6))
+    impulse_vega = fields.Float(digits=(16, 6))
+    impulse_delta_shock = fields.Float(digits=(16, 6))
+    impulse_gamma_shock = fields.Float(digits=(16, 6))
+    impulse_mm_contest = fields.Float(digits=(16, 6))
+    impulse_liquidity = fields.Float(digits=(16, 6))
+    impulse_greek_flow = fields.Float(digits=(16, 6))
+    impulse_term_slope = fields.Float(digits=(16, 6))
+
+    # Regime/context flags active when this candle was generated — the
+    # same signals `mode` summarizes as free text, broken out here so they
+    # can be filtered/grouped on directly in list/pivot views instead of
+    # string-parsed.
+    is_weekend = fields.Boolean()
+    session_name = fields.Char()
+    activity_regime = fields.Char()
+    gb_consensus_direction = fields.Integer()
+    gb_consensus_strength = fields.Float(digits=(16, 4))
+    gb_all_aligned = fields.Boolean()
+    gb_trend_locked = fields.Boolean()
+    any_shock_active = fields.Boolean()
+    fakeout_risk = fields.Boolean()
+    gamma_neutral_score = fields.Float(digits=(16, 4))
+    absorption_mode = fields.Char()
+    effective_atr = fields.Float(digits=(16, 4))
 
     # Backfilled by check_accuracy() once target_time has passed — see
     # that method's own docstring for how actual_price is sourced.
@@ -86,10 +140,37 @@ class ForecastLog(models.Model):
                 "generated_at": generated_at,
                 "index_price": result["index_price"],
                 "sigma_annual": result["sigma_annual"],
+                "snapshot_id": result.get("snapshot_id"),
                 "hours_ahead": p["hours"],
                 "target_time": generated_at + timedelta(hours=p["hours"]),
                 "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
                 "mode": p["mode"],
+                "forecast_impulse": p["forecast_impulse"],
+                "impulse_base_pull": p["impulse_base_pull"],
+                "impulse_slope": p["impulse_slope"],
+                "impulse_current_body": p["impulse_current_body"],
+                "impulse_curve_extreme": p["impulse_curve_extreme"],
+                "impulse_gamma_band": p["impulse_gamma_band"],
+                "impulse_gamma_band_reclaim": p["impulse_gamma_band_reclaim"],
+                "impulse_vega": p["impulse_vega"],
+                "impulse_delta_shock": p["impulse_delta_shock"],
+                "impulse_gamma_shock": p["impulse_gamma_shock"],
+                "impulse_mm_contest": p["impulse_mm_contest"],
+                "impulse_liquidity": p["impulse_liquidity"],
+                "impulse_greek_flow": p["impulse_greek_flow"],
+                "impulse_term_slope": p["impulse_term_slope"],
+                "is_weekend": p["is_weekend"],
+                "session_name": p["session_name"],
+                "activity_regime": p["activity_regime"],
+                "gb_consensus_direction": p["gb_consensus_direction"],
+                "gb_consensus_strength": p["gb_consensus_strength"],
+                "gb_all_aligned": p["gb_all_aligned"],
+                "gb_trend_locked": p["gb_trend_locked"],
+                "any_shock_active": p["any_shock_active"],
+                "fakeout_risk": p["fakeout_risk"],
+                "gamma_neutral_score": p["gamma_neutral_score"],
+                "absorption_mode": p["absorption_mode"],
+                "effective_atr": p["effective_atr"],
             } for p in result["points"]]
             self.sudo().create(vals_list)
 

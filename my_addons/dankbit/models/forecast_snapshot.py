@@ -457,14 +457,21 @@ class ForecastSnapshot(models.Model):
         self.env rather than the HTTP request global) so
         dankbit.forecast.log's cron (see that model) can run the exact
         same computation without an HTTP request context. Returns
-        {"generated_at", "index_price", "sigma_annual", "points"} —
-        `points` is forecast.simulate_forecast()'s own {hours, open, high,
-        low, close, mode} dicts, `hours` left as an offset rather than
-        converted to an absolute time, so each caller anchors it to
-        whichever "now" it cares about (forecast_json uses its own
-        request-time now_ms; dankbit.forecast.log uses this method's own
-        `generated_at`, captured once up front so every point in one run
-        shares the same anchor). Empty `points` (and possibly-None
+        {"generated_at", "index_price", "sigma_annual", "snapshot_id",
+        "points"} — `points` is forecast.simulate_forecast()'s own dicts
+        (see that method's own docstring for the full key list, including
+        the diagnostic-only keys forecast_json doesn't surface), `hours`
+        left as an offset rather than converted to an absolute time, so
+        each caller anchors it to whichever "now" it cares about
+        (forecast_json uses its own request-time now_ms; dankbit.forecast.log
+        uses this method's own `generated_at`, captured once up front so
+        every point in one run shares the same anchor). `snapshot_id` is
+        the id of the current_record bucket this run's Greeks/bands came
+        from — None whenever nothing was computable, same as `points`
+        being empty — so dankbit.forecast.log can trace a logged candle
+        back to the exact raw Greek levels (top/low/bml/smp, all 32
+        per-leg fields) that produced it instead of guessing the nearest
+        bucket by timestamp. Empty `points` (and possibly-None
         index_price/sigma_annual) means nothing was computable yet for
         this asset (no index price, no active expiry, or no trades in the
         current 00:00-UTC window — see compute_and_persist)."""
@@ -504,6 +511,7 @@ class ForecastSnapshot(models.Model):
             "generated_at": generated_at,
             "index_price": index_price,
             "sigma_annual": sigma_annual,
+            "snapshot_id": current_record.id if current_record else None,
             "points": points,
         }
 

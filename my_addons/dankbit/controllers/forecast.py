@@ -1672,8 +1672,15 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     random component anywhere in this engine (matching the source script,
     which has none either); every
     candle is a direct function of the current Greeks and recent price
-    action. Returns a list of {hours, open, high, low, close, mode} dicts,
-    one per step_hours-spaced candle out to hours_ahead. `hours_ahead=72`
+    action. Returns a list of dicts, one per step_hours-spaced candle out
+    to hours_ahead: {hours, open, high, low, close, mode} — the only 6 keys
+    forecast_json's public API surfaces — plus a set of diagnostic-only
+    keys (forecast_impulse, the impulse_* per-engine breakdown, and the
+    is_weekend/session_name/activity_regime/gb_*/any_shock_active/
+    fakeout_risk/gamma_neutral_score/absorption_mode/effective_atr regime
+    context) consumed only by dankbit.forecast.log, for attributing a
+    candle's accuracy to a specific engine/regime after the fact rather
+    than guessing from `mode`'s free-text label. `hours_ahead=72`
     (18 candles) — Thales's own `forecastCandleCount` default is 6 (24h),
     widened here since nothing in the engine assumes a specific cutoff
     (the per-step decay terms like `0.75 ** step`/`0.82 ** step`/etc. just
@@ -2184,6 +2191,41 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             "open": float(projected_open), "high": float(projected_high),
             "low": float(projected_low), "close": float(projected_close),
             "mode": " / ".join(mode),
+            # Diagnostic fields, consumed only by dankbit.forecast.log (the
+            # forecast_json API route keeps whitelisting just the 6 keys
+            # above) — the final clamped net impulse that actually produced
+            # step_move, plus its per-engine breakdown, so a bad candle can
+            # be attributed to one engine instead of guessed at from `mode`
+            # alone.
+            "forecast_impulse": float(forecast_impulse),
+            "impulse_base_pull": float(base_pull_impulse),
+            "impulse_slope": float(slope_impulse),
+            "impulse_current_body": float(current_body_impulse),
+            "impulse_curve_extreme": float(curve_extreme_impulse),
+            "impulse_gamma_band": float(gb_impulse),
+            "impulse_gamma_band_reclaim": float(reclaim_impulse),
+            "impulse_vega": float(vega_impulse),
+            "impulse_delta_shock": float(delta_impulse),
+            "impulse_gamma_shock": float(gamma_shock_impulse),
+            "impulse_mm_contest": float(mm_impulse),
+            "impulse_liquidity": float(liquidity["impulse"]),
+            "impulse_greek_flow": float(flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT),
+            "impulse_term_slope": float(term_slope_impulse),
+            # Regime/context flags active for this candle — same signals
+            # `mode` summarizes as free text, broken out here so they can be
+            # filtered/grouped on directly instead of string-parsed.
+            "is_weekend": bool(is_weekend),
+            "session_name": sess,
+            "activity_regime": activity["regime"],
+            "gb_consensus_direction": int(consensus["consensus_direction"]),
+            "gb_consensus_strength": float(consensus["consensus_strength"]),
+            "gb_all_aligned": bool(consensus["all_aligned"]),
+            "gb_trend_locked": bool(gb_counter_trend_locked),
+            "any_shock_active": bool(any_shock_active),
+            "fakeout_risk": bool(flow["fakeout_risk"]),
+            "gamma_neutral_score": float(neutral_score),
+            "absorption_mode": absorption_mode or None,
+            "effective_atr": float(effective_atr),
         })
         projected_open = projected_close
 
