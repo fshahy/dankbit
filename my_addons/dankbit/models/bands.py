@@ -212,19 +212,19 @@ class Bands(models.Model):
         """The active expiry immediately after the nearest one for `asset`
         (expiry_index=1 in _compute_asset's soonest-first ordering), as a
         full Deribit-style instrument string — same cheap standalone lookup
-        as nearest_expiry, for the Gamma Chart's "Gamma Tops" checkbox's
+        as nearest_expiry, for the Gamma Chart's "Top OI(s)" checkbox's
         "Nearest + 1" scope. Returns None if there's no such expiry (e.g.
         only one active expiry left)."""
         return self._nth_active_expiry(asset, 1)
 
     def nearest_expiry_plus_2(self, asset):
         """Same as next_expiry, two expiries out (expiry_index=2) — feeds
-        the Gamma Chart's "Gamma Tops" checkbox's "Nearest + 2" scope."""
+        the Gamma Chart's "Top OI(s)" checkbox's "Nearest + 2" scope."""
         return self._nth_active_expiry(asset, 2)
 
     def nearest_expiry_plus_3(self, asset):
         """Same as next_expiry, three expiries out (expiry_index=3) — feeds
-        the Gamma Chart's "Gamma Tops" checkbox's "Nearest + 3" scope."""
+        the Gamma Chart's "Top OI(s)" checkbox's "Nearest + 3" scope."""
         return self._nth_active_expiry(asset, 3)
 
     def _compute_asset(self, asset, expiry_index=0, hours=None):

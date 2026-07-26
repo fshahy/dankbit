@@ -306,13 +306,13 @@
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
 							<input type="checkbox" id="gamma-tops-toggle" onchange="onToggleGammaTops()"/>
-							Gamma Tops
+							Top OI(s)
 						</label>
 					</t>
 					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
 						<label class="toggle-label">
 							<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
-							Lines
+							S/D
 						</label>
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
@@ -356,14 +356,14 @@
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
-					// Only true on /my/<asset> — /chart/<asset> and
+					// Only true on /oi/<asset> — /chart/<asset> and
 					// /gamma/<instrument> always pass show_gamma_point="false"
 					// (see _build_tv_chart_context).
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
 					// Only true on /gamma/<instrument> — the restored "Strike
 					// Gamma" indicator (see drawStrikeGammaLines below), one
-					// price line per distinct strike rather than /my/<asset>'s
-					// single top-strike-per-scope "Gamma Tops" line set.
+					// price line per distinct strike rather than /oi/<asset>'s
+					// single top-strike-per-scope "Top OI(s)" line set.
 					const SHOW_STRIKE_GAMMA = cfg.showStrikeGamma === 'true';
 					// The instrument /gamma/<instrument> was requested with
 					// (e.g. "BTC-25JUL26") — unrelated to INSTRUMENT above
@@ -371,7 +371,7 @@
 					// specific expiry the URL named, used as the isolated
 					// cutoff for gamma-by-strike-at (see refreshStrikeGamma) —
 					// that one instrument's own trades only, not cumulative
-					// through it the way Gamma Tops' scopes are.
+					// through it the way Top OI(s)' scopes are.
 					const STRIKE_GAMMA_INSTRUMENT = cfg.strikeGammaInstrument || '';
 					const SGI_URL = STRIKE_GAMMA_INSTRUMENT ? '/api/gamma-by-strike-at/' + STRIKE_GAMMA_INSTRUMENT : '';
 					// Thales Forecast candle colors — user-configurable via
@@ -382,16 +382,16 @@
 					const FORECAST_DOWN_COLOR = cfg.forecastDownColor || '#ef9a9a';
 					const FORECAST_WICK_UP_COLOR = cfg.forecastWickUpColor || '#66bb6a';
 					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
-					// /my/<asset> and /gamma/<instrument> are the minimal pages
+					// /oi/<asset> and /gamma/<instrument> are the minimal pages
 					// (candles + exactly one gamma indicator each — no
 					// Weekly/Monthly/All/Daily delta=0 lines, no zones
-					// boxes/extrema, no Lines/Zones/Bands/Thales Forecast
+					// boxes/extrema, no S/D (Lines)/Zones/Bands/Thales Forecast
 					// checkboxes); the footer (trade count/nearest expiry) is
 					// untouched either way.
 					const MINIMAL_CHART = SHOW_GAMMA_POINT || SHOW_STRIKE_GAMMA;
-					// User-toggleable via the "Lines" checkbox next to the Ruler
+					// User-toggleable via the "S/D" checkbox next to the Ruler
 					// button (Delta Chart only — the Gamma Chart has its own,
-					// unrelated "Gamma Tops" checkbox instead) — hides every
+					// unrelated "Top OI(s)" checkbox instead) — hides every
 					// horizontal price-line indicator (delta=0 sets) and, to
 					// actually cut server load rather than just hiding the result
 					// client-side, makes each of their refresh*() functions skip
@@ -402,7 +402,7 @@
 					// default (unchecked) state above.
 					let SHOW_ALL_LINES = false;
 					// User-toggleable via the "Zones" checkbox (Delta Chart only,
-					// right after "Lines") — controls the yellow top/bottom
+					// right after "S/D") — controls the yellow top/bottom
 					// zero-crossing boxes (High Zone/Low Zone) and the teal Seller
 					// Max Profit/Buyer Max Loss box (Middle Zone), i.e. everything
 					// refreshZonesBoxes()/clearZonesBoxes() draw. Checked/on by
@@ -443,7 +443,7 @@
 					// other viewer's default midnight-based view are completely
 					// unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
-					// "Gamma Tops" checkbox (Gamma Chart only) — replaces the
+					// "Top OI(s)" checkbox (Gamma Chart only) — replaces the
 					// old separate "Strike Gamma"/"Strike Gamma Nearest"/
 					// "Strike Gamma Weekly"/"Strike Gamma Monthly" checkboxes
 					// with one: instead of drawing every strike that has
@@ -638,7 +638,7 @@
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
-					// "Gamma Tops" lines (only on /my/<asset>, see
+					// "Top OI(s)" lines (only on /oi/<asset>, see
 					// SHOW_GAMMA_POINT) — one black, lineWidth-2 price line
 					// per scope (Nearest/Nearest+1/Nearest+2/Nearest+3/
 					// Weekly/Monthly/All expiries), marking that scope's own
@@ -681,12 +681,21 @@
 						}));
 					}
 
-					// "Gamma Tops" checkbox (Gamma Chart only) — single
+					// "Top OI(s)" checkbox (Gamma Chart only) — single
 					// checkbox replacing the old separate "Strike Gamma"/
 					// "Strike Gamma Nearest"/"Strike Gamma Weekly"/"Strike
 					// Gamma Monthly" checkboxes; flips SHOW_GAMMA_TOPS and
 					// re-fetches all 7 scopes (or clears, if just turned
 					// off).
+					// Re-checked between every awaited fetch below (see each
+					// `if (gammaTopsOff())` call) — the checkbox may get switched
+					// off mid-sequence, since this function chains 7 sequential
+					// fetches; without re-checking, a toggle-off partway through
+					// would still let the remaining fetches draw their lines a few
+					// seconds later. On a mid-sequence bail, clears whatever this
+					// run had already drawn so far too, not just skips new lines.
+					function gammaTopsOff() { return !SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS; }
+
 					async function refreshGammaTops() {
 						// Re-entrancy guard (see gammaTopsRefreshing's own comment) —
 						// a call that finds one already in flight just skips this
@@ -697,40 +706,51 @@
 						try {
 							gammaTopsLines.forEach(l => series.removePriceLine(l));
 							gammaTopsLines.length = 0;
-							if (!SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS) return;
+							if (gammaTopsOff()) return;
 
 							const allData = await (await fetch(SG_URL)).json();
+							if (gammaTopsOff()) return;
 							drawGammaTopLine(gammaTop(allData), 'All');
 
 							const weeklyData = await (await fetch(SGW_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 							drawGammaTopLine(gammaTop(weeklyData), 'Weekly');
 
 							if (SGM_URL) {
 								const monthlyData = await (await fetch(SGM_URL)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
 							}
 
 							const nearest = await (await fetch(NEAREST_EXPIRY_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 							if (nearest.expiry) {
 								const nearestData = await (await fetch('/api/gamma-by-strike-until/' + nearest.expiry)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(nearestData), 'Nearest');
 							}
 
 							const next = await (await fetch(NEXT_EXPIRY_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 							if (next.expiry) {
 								const nextData = await (await fetch('/api/gamma-by-strike-until/' + next.expiry)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(nextData), 'Nearest + 1');
 							}
 
 							const plus2 = await (await fetch(NEAREST_PLUS_2_EXPIRY_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 							if (plus2.expiry) {
 								const plus2Data = await (await fetch('/api/gamma-by-strike-until/' + plus2.expiry)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(plus2Data), 'Nearest + 2');
 							}
 
 							const plus3 = await (await fetch(NEAREST_PLUS_3_EXPIRY_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 							if (plus3.expiry) {
 								const plus3Data = await (await fetch('/api/gamma-by-strike-until/' + plus3.expiry)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(plus3Data), 'Nearest + 3');
 							}
 						} finally {
@@ -748,7 +768,7 @@
 					// distinct strike that has ever traded, isolated to
 					// STRIKE_GAMMA_INSTRUMENT's own expiry alone (see SGI_URL
 					// — gamma-by-strike-at, not the cumulative
-					// gamma-by-strike-until Gamma Tops uses), unlike Gamma
+					// gamma-by-strike-until Top OI(s) uses), unlike Gamma
 					// Tops' single top-strike-per-scope line. Color is a
 					// light-gray-to-black gradient by
 					// |gamma| magnitude relative to the largest |gamma| in
@@ -761,7 +781,7 @@
 					// by that strike's own dominant leg — whichever of
 					// long_call/long_put/short_call/short_put has the
 					// largest |value| at that strike (same 4-leg split
-					// options.per_leg_greeks()/Gamma Tops use), labeled
+					// options.per_leg_greeks()/Top OI(s) use), labeled
 					// LC/LP/SC/SP — so a glance at the line says not just
 					// how much gamma is at this strike but which position
 					// is driving it.
@@ -818,7 +838,7 @@
 						arr.forEach(pl => series.removePriceLine(pl));
 						arr.length = 0;
 					}
-					// Gamma Chart's own "Gamma Tops" line set (see
+					// Gamma Chart's own "Top OI(s)" line set (see
 					// refreshGammaTops above) — the Delta Chart has no
 					// gamma peak/bottom line indicator of its own; that
 					// indicator lives only on the Gamma Chart.
@@ -960,6 +980,10 @@
 					async function refreshDeltaZero() {
 						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
 						const data = await (await fetch(DZ_URL)).json();
+						// Re-check: "S/D" may have been switched off while this fetch
+						// was in flight — onToggleLines() already cleared priceLines
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_ALL_LINES) return;
 						clearLines(priceLines);
 						if (!SHOW_WEEKLY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
@@ -984,9 +1008,9 @@
 						if (!MDZ_URL) return;
 						const data = await (await fetch(MDZ_URL)).json();
 						clearLines(monthlyLines);
-						// Line drawing is skipped in minimal mode or with the "Lines"
+						// Line drawing is skipped in minimal mode or with the "S/D"
 						// checkbox off, but this fetch still runs — its trade_count
-						// feeds the footer's "N trades", which stays on /my/<asset> too.
+						// feeds the footer's "N trades", which stays on /oi/<asset> too.
 						if (SHOW_MONTHLY_LINES && !MINIMAL_CHART && SHOW_ALL_LINES) {
 							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
@@ -1011,6 +1035,8 @@
 					async function refreshAllDeltaZero() {
 						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
 						const data = await (await fetch(ADZ_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
 						clearLines(allLines);
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => allLines.push(series.createPriceLine({
@@ -1023,6 +1049,8 @@
 					async function refreshTomorrowDeltaZero() {
 						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
 						const data = await (await fetch(DZT_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
 						clearLines(tomorrowLines);
 						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
@@ -1036,6 +1064,8 @@
 					async function refreshDayAfterTomorrowDeltaZero() {
 						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
 						const data = await (await fetch(DZT2_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
 						clearLines(dayAfterTomorrowLines);
 						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
@@ -1046,7 +1076,7 @@
 						})));
 					}
 
-					// "Lines" checkbox (next to Ruler) — hides every horizontal
+					// "S/D" checkbox (next to Ruler) — hides every horizontal
 					// price-line indicator (delta=0 sets) and stops their
 					// refresh*() functions from even fetching (see SHOW_ALL_LINES
 					// above), to actually cut server load rather than just hiding
@@ -1089,6 +1119,10 @@
 					async function refreshBands() {
 						if (MINIMAL_CHART || !SHOW_BANDS) return;
 						const data = await (await fetch(BANDS_URL)).json();
+						// Re-check: "Bands" may have been switched off while this fetch
+						// was in flight — onToggleBands() already cleared everything
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_BANDS) return;
 						const rows = data.bands || [];
 						highResistanceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.high_resistance })));
 						lowSupportSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.low_support })));
@@ -1199,6 +1233,13 @@
 							? ZB_URL + '?hours=' + ZONES_BOX_WINDOW_HOURS
 							: ZB_URL;
 						const data = await (await fetch(url)).json();
+						// Re-check: the "Zones" checkbox may have been switched off
+						// while this fetch was in flight (e.g. a periodic poll or a
+						// timeframe switch) — the guard at the top of this function
+						// only ran before the request started, so without this the
+						// boxes would still get redrawn a few seconds after being
+						// unchecked once this stale response arrives.
+						if (!SHOW_ZONES_BOXES) return;
 						if (!data || data.t === undefined) {
 							clearZonesBoxes();
 							return;
@@ -1221,7 +1262,7 @@
 						setBoxData(smpBmlBoxSeries, smpBmlBoxBottomLine, smpBmlTop, smpBmlBottom, fromTime, toTime);
 					}
 
-					// "Zones" checkbox (Delta Chart only, right after "Lines") —
+					// "Zones" checkbox (Delta Chart only, right after "S/D") —
 					// controls the yellow High Zone/Low Zone boxes and the teal
 					// Middle Zone (Seller Max Profit/Buyer Max Loss) box, i.e.
 					// everything refreshZonesBoxes()/clearZonesBoxes() draw.
@@ -1320,6 +1361,11 @@
 					async function refreshForecast() {
 						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
 						const data = await (await fetch(FORECAST_URL)).json();
+						// Re-check: "Thales Forecast" may have been switched off (or the
+						// timeframe changed away from 4h) while this fetch was in
+						// flight — onToggleForecast() already cleared the series
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_FORECAST || INTERVAL !== '4h') return;
 						const points = data.points || [];
 						if (!points.length) { clearForecastLines(); return; }
 						const intervalSec = INTERVAL_SECONDS[INTERVAL];

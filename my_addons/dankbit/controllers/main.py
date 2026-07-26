@@ -1199,7 +1199,7 @@ class ChartController(http.Controller):
         expiry's). No trailing-hours restriction in any mode. Unlike a
         peak/bottom search over a synthetic price grid, this evaluates
         gamma.portfolio_gamma() directly at each real strike price —
-        feeds the Gamma Chart's "Gamma Tops" checkbox, which fetches
+        feeds the Gamma Chart's "Top OI(s)" checkbox, which fetches
         this via gamma_by_strike_json (no cutoff — "All") and
         gamma_by_strike_until_json 6 more times (expiry_cutoff = that
         asset's own nearest active expiry / the next 3 expiries after that /
@@ -1209,7 +1209,7 @@ class ChartController(http.Controller):
         only the single highest-positive-gamma strike rather than drawing
         every strike; and feeds /gamma/<instrument>'s "Strike Gamma"
         indicator via gamma_by_strike_at_json (expiry_exact — isolated to
-        that one instrument, unlike Gamma Tops' cumulative scopes above),
+        that one instrument, unlike Top OI(s)' cumulative scopes above),
         which draws every strike rather than collapsing to one. Returns
         (strikes, trade_count), strikes a price-sorted list
         of {"price", "gamma", "long_call", "long_put", "short_call",
@@ -1320,7 +1320,7 @@ class ChartController(http.Controller):
     @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def gamma_by_strike_json(self, asset):
         """Per-strike combined portfolio dollar-gamma, every trade through
-        expiry, all active expiries — feeds the Gamma Chart's "Gamma Tops"
+        expiry, all active expiries — feeds the Gamma Chart's "Top OI(s)"
         checkbox's "All" scope (see TradingView Chart Notes). See
         _gamma_by_strike()."""
         asset = asset.upper()
@@ -1350,7 +1350,7 @@ class ChartController(http.Controller):
         expiry>, same day-suffix parsing as the rest of this file. One
         generic route reused for 6 different cutoffs by the caller passing
         a different instrument, not 6 near-duplicate routes. Feeds the
-        Gamma Chart's "Gamma Tops" checkbox's "Nearest" (instrument=that
+        Gamma Chart's "Top OI(s)" checkbox's "Nearest" (instrument=that
         asset's own nearest active expiry, looked up client-side via
         /api/nearest-expiry/<asset> and passed in as the cutoff instrument),
         "Nearest + 1"/"Nearest + 2"/"Nearest + 3" (instrument=that asset's
@@ -1614,7 +1614,7 @@ class ChartController(http.Controller):
         """The active expiry immediately after the nearest one for `asset`,
         as a full instrument string (e.g. "BTC-16JUL26") — same cheap
         standalone lookup as nearest_expiry_json, for the Gamma Chart's
-        "Gamma Tops" checkbox's "Nearest + 1" scope."""
+        "Top OI(s)" checkbox's "Nearest + 1" scope."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1635,7 +1635,7 @@ class ChartController(http.Controller):
     @http.route("/api/nearest-expiry-plus-2/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def nearest_expiry_plus_2_json(self, asset):
         """Same as next_expiry_json, two expiries out — feeds the Gamma
-        Chart's "Gamma Tops" checkbox's "Nearest + 2" scope."""
+        Chart's "Top OI(s)" checkbox's "Nearest + 2" scope."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1656,7 +1656,7 @@ class ChartController(http.Controller):
     @http.route("/api/nearest-expiry-plus-3/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def nearest_expiry_plus_3_json(self, asset):
         """Same as next_expiry_json, three expiries out — feeds the Gamma
-        Chart's "Gamma Tops" checkbox's "Nearest + 3" scope."""
+        Chart's "Top OI(s)" checkbox's "Nearest + 3" scope."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1741,10 +1741,10 @@ class ChartController(http.Controller):
     # ------------------------------------------------------------------
 
     def _build_tv_chart_context(self, asset):
-        """Shared context-building for /chart/<asset>, /my/<asset>, and
+        """Shared context-building for /chart/<asset>, /oi/<asset>, and
         /gamma/<instrument> — all three render the same
-        dankbit_tv_chart_until template; /my/<asset> additionally sets
-        show_gamma_point so the template also draws the Gamma Tops
+        dankbit_tv_chart_until template; /oi/<asset> additionally sets
+        show_gamma_point so the template also draws the "Top OI(s)"
         indicator, and /gamma/<instrument> additionally sets
         show_strike_gamma + strike_gamma_instrument so the template draws
         the restored per-strike "Strike Gamma" lines instead (see
@@ -1826,10 +1826,10 @@ class ChartController(http.Controller):
 
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
 
-    @http.route("/my/<string:asset>", type="http", auth="user", website=True)
-    def my_chart_tv(self, asset):
+    @http.route("/oi/<string:asset>", type="http", auth="user", website=True)
+    def oi_chart_tv(self, asset):
         """Same page as /chart/<asset> (identical template/context), plus the
-        Gamma Tops indicator — /chart/<asset> itself is
+        "Top OI(s)" indicator — /chart/<asset> itself is
         unaffected, it always passes show_gamma_point=false. Every route in
         this addon is auth="user"; a logged-out request to any of them is
         redirected to the login page instead of rendering/responding."""
@@ -1848,19 +1848,19 @@ class ChartController(http.Controller):
     @http.route("/gamma/<string:instrument>", type="http", auth="user", website=True)
     def gamma_by_strike_chart(self, instrument):
         """Minimal TradingView chart (candles only, same template/context as
-        /chart/<asset> and /my/<asset>) plus the restored "Strike Gamma"
+        /chart/<asset> and /oi/<asset>) plus the restored "Strike Gamma"
         indicator — one price line per distinct strike that has ever
         traded, gray-to-black by |gamma| magnitude, signed dollar-gamma
         title plus dominant-leg suffix (see drawStrikeGammaLines in
-        dankbit_templates.xml). Unlike /my/<asset>'s "Gamma Tops" (one line
+        dankbit_templates.xml). Unlike /oi/<asset>'s "Top OI(s)" (one line
         per scope, top strike only), this draws every strike, isolated to
         trades whose expiration exactly matches `instrument`'s own expiry —
         not folded in with any sooner expiry's the way every
-        gamma-by-strike-until scope (Gamma Tops' Nearest/Weekly/Monthly/
+        gamma-by-strike-until scope (Top OI(s)' Nearest/Weekly/Monthly/
         etc.) is. Client-side fetches /api/gamma-by-strike-at/<instrument>
         (gamma_by_strike_at_json -> _gamma_by_strike(..., expiry_exact=...)),
         a sibling of gamma_by_strike_until_json rather than that same route,
-        precisely so this page's isolated scope can't leak into Gamma Tops'
+        precisely so this page's isolated scope can't leak into Top OI(s)'
         intentionally cumulative one. `instrument` is a full Deribit-style
         string, e.g. BTC-25JUL26 — same ASSET-DDMMMYY parsing
         gamma_by_strike_until_json uses."""
