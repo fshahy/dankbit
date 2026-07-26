@@ -200,7 +200,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
         # Despite the "midnight_utc" name, this is actually the most recent
-        # Tehran midnight (see options.day_window_start) — confirmed against
+        # Iran (Asia/Tehran) midnight (see options.day_window_start) — confirmed against
         # Thales's own numbers, whose R/S didn't match ours at all under a
         # literal UTC-midnight window even though GAVG/gamma_band already did.
         midnight_utc = options.day_window_start(
@@ -227,7 +227,7 @@ class ChartController(http.Controller):
 
         ax.text(
             0.01, 0.02,
-            f"{long_count} longs\n{short_count} shorts\n(since 00:00 Tehran)",
+            f"{long_count} longs\n{short_count} shorts\n(since 00:00 Iran)",
             transform=ax.transAxes,
             fontsize=14,
             va="bottom",
@@ -384,7 +384,7 @@ class ChartController(http.Controller):
             }
         )
 
-    # instrument, trades since 00:00 Tehran, single-leg delta/gamma routes
+    # instrument, trades since 00:00 Iran (Asia/Tehran), single-leg delta/gamma routes
     # (/lp, /lc, /sp, /sc) — maps each route's short key to which trades to
     # keep (direction/option_type), which OptionStrat leg method accumulates
     # them, and the delta-saturation fraction/side (see
@@ -463,7 +463,7 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
 
         # Anchored/left-prefix match (not a bare ilike substring) and trades
-        # since the most recent Tehran midnight (options.day_window_start,
+        # since the most recent Iran (Asia/Tehran) midnight (options.day_window_start,
         # despite the "midnight_utc" name) — same domain convention as
         # chart_png_zones, so a query for one expiry can't pull in another
         # instrument's trades.
@@ -518,7 +518,7 @@ class ChartController(http.Controller):
         last_ts = last_trade.deribit_ts.strftime('%Y-%m-%d %H:%M') if last_trade else "—"
         ax.text(
             0.01, 0.04,
-            f"{len(trades)} Trades (since 00:00 Tehran)",
+            f"{len(trades)} Trades (since 00:00 Iran)",
             transform=ax.transAxes,
             fontsize=14,
         )

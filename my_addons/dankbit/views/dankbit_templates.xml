@@ -266,6 +266,24 @@
 						padding: 6px 14px; color: #333; cursor: pointer; white-space: nowrap;
 					}
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
+
+					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
+					   script below) — toggles this class on the body element; the
+					   chart's own background/text/axis colors are switched
+					   separately via chart.applyOptions(), not CSS, since they're
+					   canvas-drawn. */
+					body.dark, body.dark html { background: #000000; }
+					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
+					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-label { color: #ccc; }
+					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
+					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-btn:hover { background: #262626; }
+					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+					body.dark #context-menu .context-menu-item { color: #ddd; }
+					body.dark #context-menu .context-menu-item:hover { background: #333; }
 				</style>
 			</head>
 			<body>
@@ -274,11 +292,17 @@
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="tf-bar">
-					<button class="tf-btn" onclick="setTf('1h')">1h</button>
-					<button class="tf-btn active" onclick="setTf('4h')">4h</button>
-					<button class="tf-btn" onclick="setTf('1d')">1d</button>
-					<button class="tf-btn" onclick="saveChart()">Save PNG</button>
-					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<span class="tf-label">Timeframe:</span>
+					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
+					</select>
+					<span class="tf-label">Theme:</span>
+					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
+						<option value="light">Light</option>
+						<option value="dark">Dark</option>
+					</select>
 					<t t-if="show_gamma_point == 'true'">
 						<label class="toggle-label">
 							<input type="checkbox" id="gamma-tops-toggle" onchange="onToggleGammaTops()"/>
@@ -302,18 +326,13 @@
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
 						</label>
-						<span class="tf-label">Boxes from:</span>
-						<label class="toggle-label">
-							<input type="radio" name="zones-box-window" id="zones-box-window-midnight" checked="checked" onchange="onZonesBoxWindowChange()"/>
-							00:00 Tehran
-						</label>
-						<label class="toggle-label">
-							<input type="radio" name="zones-box-window" id="zones-box-window-hours" onchange="onZonesBoxWindowChange()"/>
-							<t t-esc="zones_box_window_hours"/>h ago
-						</label>
-						<span class="tf-label">UTC Now:</span>
-						<span id="utc-now-label" class="tf-label"/>
+						<span class="tf-label">Zones from:</span>
+						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
+							<option value="midnight">00:00 Iran</option>
+							<option value="hours"><t t-esc="zones_box_window_hours"/>h ago</option>
+						</select>
 					</t>
+					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -414,7 +433,7 @@
 					// computed.
 					let SHOW_BANDS = false;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
-					// only, radio toggle next to "Bands") — 'midnight' is the
+					// only, "Zones from" dropdown next to "Bands") — 'midnight' is the
 					// original since-00:00-UTC-through-now default; 'hours' switches
 					// to the trailing ZONES_BOX_WINDOW_HOURS hours instead (see
 					// dankbit.zones_box_window_hours setting). Only 'hours' is ever
@@ -437,6 +456,35 @@
 					// the old checkboxes used (see refreshGammaTops below).
 					// Unchecked by default.
 					let SHOW_GAMMA_TOPS = false;
+					// "Light"/"Dark" theme dropdown (all 3 TV chart pages — Delta
+					// Chart, Gamma Chart, Strike Gamma) — see onThemeChange()/
+					// applyTheme() further down. Light is the default, matching
+					// this chart's original all-white look, unless the browser
+					// already has a saved preference (THEME_STORAGE_KEY, a plain
+					// localStorage entry — per-browser, not per-account, since
+					// there's no user-settings model this addon writes to for
+					// display prefs) from a previous visit, in which case that
+					// preference is honored immediately (see the createChart call
+					// and the select-sync block below) rather than flashing light
+					// mode first. A few indicators draw their own line stroke
+					// using a fixed black/gray color that would otherwise blend
+					// into a black chart background — axisBlack()/rulerColor()
+					// swap those to a light gray whenever dark mode is active,
+					// used in place of the literal 'black'/'#555' in
+					// drawGammaTopLine(), the delta=0 "supply" line color, and
+					// the ruler lines.
+					const THEME_STORAGE_KEY = 'dankbit_theme';
+					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+					function axisBlack() { return DARK_MODE ? '#e8e8e8' : '#000000'; }
+					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
+					// Sync the theme <select> and the body.dark CSS class to
+					// whatever DARK_MODE resolved to above — the markup always
+					// defaults to the "light" option server-side (there being no
+					// per-user server-side setting to render it from), so a
+					// returning visitor with a saved "dark" preference needs this
+					// corrected client-side before anything is drawn.
+					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
+					document.body.classList.toggle('dark', DARK_MODE);
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
@@ -487,11 +535,18 @@
 
 					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
 						width: window.innerWidth, height: window.innerHeight,
-						layout: { background: { type: 'solid', color: '#ffffff' }, textColor: '#333333' },
-						grid: { vertLines: { color: '#e8e8e8' }, horzLines: { color: '#e8e8e8' } },
+						// Colors already reflect DARK_MODE (a saved localStorage
+						// preference from a prior visit, or the light-mode default)
+						// so a returning dark-mode user doesn't see a light flash
+						// before applyTheme() would otherwise run — see DARK_MODE above.
+						layout: {
+							background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+							textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+						},
+						grid: { vertLines: { visible: false }, horzLines: { visible: false } },
 						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
-						rightPriceScale: { borderColor: '#cccccc' },
-						timeScale: { borderColor: '#cccccc', timeVisible: true, secondsVisible: false },
+						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
 						localization: {
 							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
 								timeZone: 'UTC',
@@ -617,9 +672,9 @@
 					function drawGammaTopLine(top, label) {
 						if (!top) return;
 						gammaTopsLines.push(series.createPriceLine({
-							price: top.price, color: 'black', lineWidth: 2,
+							price: top.price, color: axisBlack(), lineWidth: 2,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black',
+							axisLabelVisible: true, axisLabelColor: axisBlack(),
 							title: label + ' +' + Math.round(top.gamma / 1e6) +
 								'  LC:' + fmtLegGamma(top.long_call) + ' LP:' + fmtLegGamma(top.long_put) +
 								' SC:' + fmtLegGamma(top.short_call) + ' SP:' + fmtLegGamma(top.short_put),
@@ -725,7 +780,13 @@
 						strikes.forEach(item => {
 							const sign = item.gamma >= 0 ? '+' : '-';
 							const intensity = maxAbsGamma > 0 ? Math.abs(item.gamma) / maxAbsGamma : 0;
-							const shade = Math.round(220 - intensity * 220);
+							// Light mode: biggest exposure -> near-black (high contrast
+							// on white), smallest -> light gray, as before. Dark mode
+							// mirrors that same gradient (255 - lightShade) so the
+							// biggest exposure instead lands near-white (high contrast
+							// on black) rather than vanishing into it.
+							const lightShade = Math.round(220 - intensity * 220);
+							const shade = DARK_MODE ? 255 - lightShade : lightShade;
 							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 							strikeGammaLines.push(series.createPriceLine({
 								price: item.price, color, lineWidth: 1,
@@ -773,15 +834,6 @@
 					let gammaTopsRefreshing = false;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
-
-					// "UTC Now:" clock (Delta Chart only — see #utc-now-label's t-if)
-					// — plain wall-clock readout, no fetch involved, ticks every
-					// second independent of any REFRESH poll.
-					function updateUtcNowLabel() {
-						const el = document.getElementById('utc-now-label');
-						if (!el) return;
-						el.textContent = new Date().toISOString().slice(11, 19);
-					}
 
 					function toCandle(k) {
 						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
@@ -899,7 +951,6 @@
 
 					async function setTf(iv) {
 						INTERVAL = iv;
-						document.querySelectorAll('.tf-btn').forEach(b => b.classList.toggle('active', b.textContent === iv));
 						await loadCandles();
 						await refreshBands();
 						await refreshZonesBoxes();
@@ -913,9 +964,9 @@
 						if (!SHOW_WEEKLY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => priceLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'Weekly',
+							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Weekly',
 						})));
 					}
 
@@ -939,9 +990,9 @@
 						if (SHOW_MONTHLY_LINES && !MINIMAL_CHART && SHOW_ALL_LINES) {
 							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
-								price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+								price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Monthly',
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Monthly',
 							})));
 						}
 						lastTradeCount = data.trade_count || 0;
@@ -963,9 +1014,9 @@
 						clearLines(allLines);
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => allLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'black', title: 'All',
+							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'All',
 						})));
 					}
 
@@ -976,7 +1027,7 @@
 						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily (24H)',
 						})));
@@ -989,7 +1040,7 @@
 						if (!SHOW_DAILY_LINES) return;
 						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
 						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : 'black', lineWidth: 1,
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
 							lineStyle: LightweightCharts.LineStyle.Solid,
 							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily+1 (24H)',
 						})));
@@ -1290,12 +1341,50 @@
 						}
 					}
 
-					// 00:00-UTC-vs-trailing-hours radio toggle for the zones boxes
-					// (see ZONES_BOX_WINDOW_MODE above) — re-fetches immediately on
-					// change rather than waiting for the next ZONES_BOX_REFRESH poll.
+					// "Zones from" dropdown — 00:00-Iran-vs-trailing-hours window for
+					// the zones boxes (see ZONES_BOX_WINDOW_MODE above) — re-fetches
+					// immediately on change rather than waiting for the next
+					// ZONES_BOX_REFRESH poll.
 					function onZonesBoxWindowChange() {
-						ZONES_BOX_WINDOW_MODE = document.getElementById('zones-box-window-hours').checked ? 'hours' : 'midnight';
+						ZONES_BOX_WINDOW_MODE = document.getElementById('zones-box-window-select').value;
 						refreshZonesBoxes();
+					}
+
+					// "Light"/"Dark" radio (see DARK_MODE/axisBlack()/rulerColor()
+					// above) — swaps the chart's own canvas-drawn colors via
+					// chart.applyOptions() and toggles body.dark for the fixed HTML
+					// overlays (status bar, toggle labels, exchange label, ruler
+					// info, context menu — see the <style> block). Candle/box/band
+					// series already use saturated colors that read fine on either
+					// background, so only the chart chrome needs swapping here.
+					function applyTheme() {
+						document.body.classList.toggle('dark', DARK_MODE);
+						chart.applyOptions({
+							layout: {
+								background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+								textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+							},
+							rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+							timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						});
+					}
+
+					function onThemeChange() {
+						DARK_MODE = document.getElementById('theme-select').value === 'dark';
+						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
+						applyTheme();
+						// Re-invoke every indicator whose own line stroke color is
+						// theme-dependent (axisBlack()) so the switch takes effect
+						// immediately instead of waiting for the next poll — each
+						// already no-ops (or has already cleared its own lines) if
+						// that indicator isn't currently shown/enabled.
+						refreshDeltaZero();
+						refreshMonthlyDeltaZero();
+						refreshAllDeltaZero();
+						refreshTomorrowDeltaZero();
+						refreshDayAfterTomorrowDeltaZero();
+						refreshGammaTops();
+						refreshStrikeGamma();
 					}
 
 					let rulerActive = false;
@@ -1319,15 +1408,15 @@
 						if (rulerPrice1 === null) {
 							rulerPrice1 = price;
 							rulerLines.push(series.createPriceLine({
-								price, color: '#555', lineWidth: 1,
+								price, color: rulerColor(), lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Dashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: '①',
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: '①',
 							}));
 						} else {
 							rulerLines.push(series.createPriceLine({
-								price, color: '#555', lineWidth: 1,
+								price, color: rulerColor(), lineWidth: 1,
 								lineStyle: LightweightCharts.LineStyle.Dashed,
-								axisLabelVisible: true, axisLabelColor: 'black', title: '②',
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: '②',
 							}));
 							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
 							const sign = pct >= 0 ? '+' : '';
@@ -1342,26 +1431,8 @@
 						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
-					function saveChart() {
-						const canvases = document.getElementById('chart-container').querySelectorAll('canvas');
-						if (!canvases.length) return;
-						const w = canvases[0].width, h = canvases[0].height;
-						const out = document.createElement('canvas');
-						out.width = w; out.height = h;
-						const ctx = out.getContext('2d');
-						ctx.fillStyle = '#ffffff';
-						ctx.fillRect(0, 0, w, h);
-						canvases.forEach(c => ctx.drawImage(c, 0, 0));
-						const a = document.createElement('a');
-						a.href = out.toDataURL('image/png');
-						a.download = (STRIKE_GAMMA_INSTRUMENT || INSTRUMENT) + '_delta_' + new Date().toISOString().slice(0,16).replace('T','_') + '.png';
-						a.click();
-					}
-
-					updateUtcNowLabel();
 					init();
 					setInterval(updateLatestCandle, 5000);
-					setInterval(updateUtcNowLabel, 1000);
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshNearestExpiry, REFRESH);

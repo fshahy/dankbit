@@ -53,7 +53,7 @@ class ResConfigSettings(models.TransientModel):
     zones_box_window_hours = fields.Integer(
         string="Zones Box Trailing Window (h)",
         config_parameter="dankbit.zones_box_window_hours",
-        help="How many trailing hours of trades the yellow/teal zones boxes use when the chart's trade-window toggle is set to \"X hours ago\" instead of \"00:00 Tehran\". Defaults to 8.",
+        help="How many trailing hours of trades the yellow/teal zones boxes use when the chart's trade-window toggle is set to \"X hours ago\" instead of \"00:00 Iran\". Defaults to 8.",
     )
 
     deribit_timeout = fields.Float(

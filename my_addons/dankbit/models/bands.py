@@ -235,7 +235,7 @@ class Bands(models.Model):
         boundaries for `asset` as of now, for one specific active expiry
         only — mirrors the /<instrument>/zones PNG route called with that
         specific instrument, aggregated per-asset. Trades are taken since
-        the most recent Tehran midnight by default (options.day_window_start —
+        the most recent Iran midnight by default (options.day_window_start —
         despite the "00:00 UTC" label this and every other day-windowed
         route in this addon uses, confirmed against Thales's own numbers:
         his R/S didn't match ours at all until this was corrected, even
