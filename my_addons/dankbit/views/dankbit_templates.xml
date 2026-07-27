@@ -448,8 +448,8 @@
 					// "Strike Gamma Weekly"/"Strike Gamma Monthly" checkboxes
 					// with one: instead of drawing every strike that has
 					// traded (the old light-gray-to-black gradient), this
-					// draws exactly one line per scope (Nearest/Weekly/
-					// Monthly/All expiries) — that scope's own single
+					// draws exactly one line per scope (Weekly/Monthly/All
+					// expiries) — that scope's own single
 					// highest-positive-gamma strike, via the same
 					// _gamma_by_strike()-backed
 					// gamma_by_strike_json/gamma_by_strike_until_json routes
@@ -496,9 +496,6 @@
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
-					const NEXT_EXPIRY_URL  = '/api/next-expiry/' + ASSET;
-					const NEAREST_PLUS_2_EXPIRY_URL = '/api/nearest-expiry-plus-2/' + ASSET;
-					const NEAREST_PLUS_3_EXPIRY_URL = '/api/nearest-expiry-plus-3/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
@@ -640,18 +637,14 @@
 
 					// "Top OI(s)" lines (only on /oi/<asset>, see
 					// SHOW_GAMMA_POINT) — one black, lineWidth-2 price line
-					// per scope (Nearest/Nearest+1/Nearest+2/Nearest+3/
-					// Weekly/Monthly/All expiries), marking that scope's own
-					// single highest-positive-gamma strike. A scope with no
-					// strikes at all, or whose highest gamma is <= 0
-					// (nothing to mark), simply contributes no line. All 7
-					// scopes reuse the same _gamma_by_strike()-backed
-					// endpoints: All (SG_URL, no cutoff), Weekly (SGW_URL),
-					// Monthly (SGM_URL, skipped if unconfigured), and
-					// Nearest/Nearest+1/Nearest+2/Nearest+3 each resolved
-					// live via their own *_EXPIRY_URL lookup (skipped if
-					// there's no active expiry at that position) then
-					// gamma-by-strike-until.
+					// per scope (Weekly/Monthly/All expiries), marking that
+					// scope's own single highest-positive-gamma strike. A
+					// scope with no strikes at all, or whose highest gamma
+					// is <= 0 (nothing to mark), simply contributes no
+					// line. All 3 scopes reuse the same
+					// _gamma_by_strike()-backed endpoints: All (SG_URL, no
+					// cutoff), Weekly (SGW_URL), Monthly (SGM_URL, skipped
+					// if unconfigured).
 					function gammaTop(data) {
 						const strikes = data.strikes || [];
 						if (!strikes.length) return null;
@@ -685,11 +678,11 @@
 					// checkbox replacing the old separate "Strike Gamma"/
 					// "Strike Gamma Nearest"/"Strike Gamma Weekly"/"Strike
 					// Gamma Monthly" checkboxes; flips SHOW_GAMMA_TOPS and
-					// re-fetches all 7 scopes (or clears, if just turned
+					// re-fetches all 3 scopes (or clears, if just turned
 					// off).
 					// Re-checked between every awaited fetch below (see each
 					// `if (gammaTopsOff())` call) — the checkbox may get switched
-					// off mid-sequence, since this function chains 7 sequential
+					// off mid-sequence, since this function chains 3 sequential
 					// fetches; without re-checking, a toggle-off partway through
 					// would still let the remaining fetches draw their lines a few
 					// seconds later. On a mid-sequence bail, clears whatever this
@@ -720,38 +713,6 @@
 								const monthlyData = await (await fetch(SGM_URL)).json();
 								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
 								drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
-							}
-
-							const nearest = await (await fetch(NEAREST_EXPIRY_URL)).json();
-							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-							if (nearest.expiry) {
-								const nearestData = await (await fetch('/api/gamma-by-strike-until/' + nearest.expiry)).json();
-								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-								drawGammaTopLine(gammaTop(nearestData), 'Nearest');
-							}
-
-							const next = await (await fetch(NEXT_EXPIRY_URL)).json();
-							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-							if (next.expiry) {
-								const nextData = await (await fetch('/api/gamma-by-strike-until/' + next.expiry)).json();
-								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-								drawGammaTopLine(gammaTop(nextData), 'Nearest + 1');
-							}
-
-							const plus2 = await (await fetch(NEAREST_PLUS_2_EXPIRY_URL)).json();
-							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-							if (plus2.expiry) {
-								const plus2Data = await (await fetch('/api/gamma-by-strike-until/' + plus2.expiry)).json();
-								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-								drawGammaTopLine(gammaTop(plus2Data), 'Nearest + 2');
-							}
-
-							const plus3 = await (await fetch(NEAREST_PLUS_3_EXPIRY_URL)).json();
-							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-							if (plus3.expiry) {
-								const plus3Data = await (await fetch('/api/gamma-by-strike-until/' + plus3.expiry)).json();
-								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-								drawGammaTopLine(gammaTop(plus3Data), 'Nearest + 3');
 							}
 						} finally {
 							gammaTopsRefreshing = false;
@@ -843,7 +804,7 @@
 					// gamma peak/bottom line indicator of its own; that
 					// indicator lives only on the Gamma Chart.
 					let gammaTopsLines = [];
-					// refreshGammaTops does 7 sequential awaited fetches, and is
+					// refreshGammaTops does 3 sequential awaited fetches, and is
 					// itself called from init(), the checkbox's onToggleGammaTops(),
 					// and setInterval(refreshGammaTops, REFRESH) — without this
 					// guard, an overlapping invocation (e.g. a poll tick firing
