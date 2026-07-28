@@ -10,6 +10,17 @@ from . import options
 from . import delta
 from . import gamma
 
+# /y/<asset>'s own trade window — no model/table backs this page at
+# all, everything is recomputed fresh on every request via
+# dankbit.bands._compute_asset(). Both the 3 expiry gammas (nearest/
+# weekly/monthly) and the nearest expiry's Smart Liquidity upper/lower
+# prices use this same trailing-hours window (passed as
+# _compute_asset()'s own `hours` param — not that method's own
+# Iran-midnight default), user-selectable via the page's own "Window"
+# dropdown (?hours= query param on /api/gamma-triple/<asset>).
+Y_CHART_DEFAULT_WINDOW_HOURS = 12
+Y_CHART_WINDOW_HOURS_CHOICES = (4, 8, 12, 16, 24)
+
 
 class _AggTrade:
     """SQL-aggregated trade row — duck-typed for portfolio_delta/gamma."""
@@ -1599,6 +1610,218 @@ class ChartController(http.Controller):
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
+
+    @http.route("/api/live-band/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def live_band_json(self, asset):
+        """/z/<asset>'s own and only endpoint — every persisted
+        dankbit.live.band row for `asset`, oldest-first. Unlike every
+        other snapshot endpoint in this addon, this one is read-only: it
+        never calls compute_and_create() itself — only
+        dankbit.live.band's own hourly cron ever creates a row, so
+        opening/polling this page can never create data, matching "every
+        running of the cron job" literally."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        cr = request.env.cr
+        cr.execute("""
+            SELECT computed_at, instrument, high_resistance, low_support,
+                   gamma_band, smart_liq_upper, smart_liq_lower
+            FROM dankbit_live_band
+            WHERE asset = %s
+            ORDER BY computed_at ASC
+        """, (asset,))
+        points = []
+        for (
+            computed_at, instrument, high_resistance, low_support,
+            gamma_band, smart_liq_upper, smart_liq_lower,
+        ) in cr.fetchall():
+            ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
+            points.append({
+                "t": int(ts.timestamp() * 1000),
+                "instrument": instrument,
+                "high_resistance": float(high_resistance or 0.0),
+                "low_support": float(low_support or 0.0),
+                "gamma_band": float(gamma_band or 0.0),
+                "smart_liq_upper": float(smart_liq_upper or 0.0),
+                "smart_liq_lower": float(smart_liq_lower or 0.0),
+            })
+
+        payload = {
+            "asset": asset,
+            "points": points,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/z/<string:asset>", type="http", auth="user", website=True)
+    def live_band_chart(self, asset):
+        """Minimal TradingView chart — candles plus 5 separate indicators:
+        High/Resistance, Low/Support, Gamma Band, Smart Liquidity Upper,
+        Smart Liquidity Lower, one connected line each, sourced from
+        dankbit.live.band — an hourly append-only log of the nearest
+        expiry's own dankbit.bands._compute_asset() result (reused
+        unmodified), created solely by that model's own cron, never by
+        this route. /chart/<asset>, /oi/<asset>, and /gamma/<instrument>
+        are all completely unaffected — this reads neither dankbit.bands'
+        table nor any of its code paths beyond the one shared pure
+        computation function. Renders its own standalone template
+        (dankbit_live_band_chart)."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_live_band_chart", ctx)
+
+    def _y_chart_expiry_index_for_instrument(self, asset, as_of, instrument):
+        """Ordinal position (0 = nearest) that `instrument`'s own
+        expiration occupies among `asset`'s active expirations as of
+        `as_of` — lets the weekly/monthly configured expiry (a specific
+        instrument string) be passed into
+        dankbit.bands._compute_asset(), which only accepts an ordinal
+        expiry_index, not a target instrument, without changing that
+        method's own interface. Returns None if `instrument` has no
+        matching future-expiring trades at all."""
+        cr = request.env.cr
+        cr.execute(
+            "SELECT expiration FROM dankbit_trade WHERE name ILIKE %s AND expiration >= %s LIMIT 1",
+            (f"{instrument}-%", as_of),
+        )
+        row = cr.fetchone()
+        if not row:
+            return None
+        target_expiration = row[0]
+        cr.execute(
+            """
+            SELECT COUNT(DISTINCT expiration) FROM dankbit_trade
+            WHERE name ILIKE %s AND expiration >= %s AND expiration < %s
+            """,
+            (f"{asset}-%", as_of, target_expiration),
+        )
+        return cr.fetchone()[0]
+
+    def _y_chart_gamma_band_for_instrument(self, asset, as_of, instrument, hours):
+        """(instrument, gamma_band) for the expiry `instrument` names,
+        over the trailing `hours` window — (None, None) if that expiry
+        isn't currently active or had no trades in the window (skip, not
+        a fabricated 0.0)."""
+        expiry_index = self._y_chart_expiry_index_for_instrument(asset, as_of, instrument)
+        if expiry_index is None:
+            return None, None
+        data = request.env["dankbit.bands"]._compute_asset(
+            asset, expiry_index=expiry_index, hours=hours,
+        )
+        if not data:
+            return None, None
+        return data["instrument"], data["gamma_band"]
+
+    @http.route("/api/gamma-triple/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def gamma_triple_json(self, asset):
+        """/y/<asset>'s own and only endpoint — a single current
+        snapshot (not a time series; nothing here is ever persisted),
+        computed fresh on every request straight off
+        dankbit.bands._compute_asset() (reused unmodified), same
+        live-compute-nothing-persisted pattern /api/zones-box/<asset>
+        uses: nearest/weekly/monthly expiry gamma_band, plus the nearest
+        expiry's own Smart Liquidity upper/lower prices (both shown, not
+        collapsed to a single "dominant" one) — all over the same
+        trailing-hours window, user-selectable via the page's own
+        "Window" dropdown: an optional `?hours=` query param, restricted
+        to Y_CHART_WINDOW_HOURS_CHOICES (any other/missing value falls
+        back to Y_CHART_DEFAULT_WINDOW_HOURS, same defensive restriction
+        pattern the dropdown itself enforces client-side). No model/table
+        backs this at all."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            weekly_param, monthly_param = "dankbit.weekly_expiry", "dankbit.monthly_expiry"
+        else:
+            weekly_param, monthly_param = "dankbit.eth_weekly_expiry", "dankbit.eth_monthly_expiry"
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        hours_param = request.httprequest.args.get("hours")
+        try:
+            hours = int(hours_param)
+        except (TypeError, ValueError):
+            hours = None
+        if hours not in Y_CHART_WINDOW_HOURS_CHOICES:
+            hours = Y_CHART_DEFAULT_WINDOW_HOURS
+
+        nearest_data = request.env["dankbit.bands"]._compute_asset(
+            asset, expiry_index=0, hours=hours,
+        )
+        nearest_instrument = nearest_data["instrument"] if nearest_data else None
+        nearest_gamma = nearest_data["gamma_band"] if nearest_data else None
+        smart_liq_upper = nearest_data["smart_liq_upper_price"] if nearest_data else 0.0
+        smart_liq_lower = nearest_data["smart_liq_lower_price"] if nearest_data else 0.0
+
+        weekly_instrument = weekly_gamma = None
+        weekly_cfg = icp.get_param(weekly_param, default="").upper()
+        if weekly_cfg:
+            weekly_instrument, weekly_gamma = self._y_chart_gamma_band_for_instrument(asset, as_of, weekly_cfg, hours)
+
+        monthly_instrument = monthly_gamma = None
+        monthly_cfg = icp.get_param(monthly_param, default="").upper()
+        if monthly_cfg:
+            monthly_instrument, monthly_gamma = self._y_chart_gamma_band_for_instrument(asset, as_of, monthly_cfg, hours)
+
+        payload = {
+            "asset": asset,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "nearest_instrument": nearest_instrument,
+            "nearest_gamma_band": nearest_gamma or 0.0,
+            "weekly_instrument": weekly_instrument,
+            "weekly_gamma_band": weekly_gamma or 0.0,
+            "monthly_instrument": monthly_instrument,
+            "monthly_gamma_band": monthly_gamma or 0.0,
+            "smart_liq_upper_price": smart_liq_upper or 0.0,
+            "smart_liq_lower_price": smart_liq_lower or 0.0,
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/y/<string:asset>", type="http", auth="user", website=True)
+    def gamma_triple_chart(self, asset):
+        """Minimal TradingView chart — candles plus 5 horizontal price
+        lines: nearest/weekly/monthly expiry gamma_band plus the nearest
+        expiry's own Smart Liquidity upper AND lower prices (both shown)
+        — all over the same trailing-hours window, user-selectable via
+        the page's own "Window" dropdown (4/8/12/16/24, default
+        Y_CHART_DEFAULT_WINDOW_HOURS=12 — see gamma_triple_json) via
+        dankbit.bands._compute_asset() (reused unmodified), all 5
+        recomputed live on every poll, nothing persisted, so
+        /chart/<asset>, /oi/<asset>, and /gamma/<instrument> are all
+        completely unaffected. Renders its own standalone template
+        (dankbit_gamma_triple_chart). Polls on the general
+        dankbit.refresh_interval (not zones_box_refresh_interval) so the
+        lines visibly move on the same cadence the user configures for
+        every other page's own refresh rate."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_gamma_triple_chart", ctx)
 
     @http.route("/api/klines/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def klines_proxy(self, asset, interval="4h", limit="500"):

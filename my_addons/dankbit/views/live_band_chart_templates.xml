@@ -1,0 +1,431 @@
+<odoo>
+	<!-- Standalone, minimal TradingView page for /z/<asset> — its own file,
+	     not the shared dankbit_tv_chart_until template /chart/, /oi/,
+	     /gamma/ render. -->
+
+	<template id="dankbit_live_band_chart" name="Dankbit Live Band Chart">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="asset"/> — Live Band</title>
+				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
+					#chart-container { width: 100%; height: 100%; }
+					#status {
+						position: fixed; bottom: 32px; left: 12px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#tf-bar {
+						position: fixed; top: 8px; left: 12px;
+						display: flex; gap: 4px; align-items: center; z-index: 10;
+					}
+					.tf-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; padding: 0 2px;
+					}
+					#ruler-info {
+						position: fixed; top: 40px; left: 12px;
+						font-family: monospace; font-size: 12pt; font-weight: bold;
+						color: #222; background: rgba(255,255,255,0.92);
+						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; display: none;
+					}
+					.tf-btn {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+					}
+					.tf-btn:hover { background: #f0f0f0; }
+					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+
+					/* Legend for the 5 lines — same reasoning as the other
+					   isolated TV chart pages in this addon: a plain
+					   addLineSeries has no on-chart title of its own, so with
+					   5 differently-colored lines a small legend is the
+					   difference between usable and not. */
+					#legend {
+						/* right: 80px, not the 12px every other fixed-right
+						   overlay in this addon uses — the chart's own
+						   rightPriceScale has no fixed width (auto-sized to
+						   the widest visible price label) and renders inside
+						   #chart-container's own right edge, so 12px sits
+						   underneath/over it; 80px clears it for both BTC's
+						   and ETH's typical price-label width, same fix the
+						   exchange label on the other TV chart pages uses. */
+						position: fixed; top: 8px; right: 80px;
+						font-family: monospace; font-size: 11pt;
+						color: #333; background: rgba(255,255,255,0.88);
+						padding: 4px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
+					#legend .legend-row { display: flex; align-items: center; gap: 6px; }
+					#legend .legend-swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+					/* "Light"/"Dark" theme dropdown — same localStorage key
+					   (dankbit_theme) every other TV chart page in this addon
+					   uses, so the preference carries over across all of them. */
+					body.dark, body.dark html { background: #000000; }
+					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
+					body.dark .tf-label { color: #ccc; }
+					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
+					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-btn:hover { background: #262626; }
+					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark #legend { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+				</style>
+			</head>
+			<body>
+				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div id="chart-container"/>
+				<div id="status">Loading…</div>
+				<div id="legend">
+					<div class="legend-row"><span class="legend-swatch" style="background:#2e7d32"/> High/Resistance</div>
+					<div class="legend-row"><span class="legend-swatch" style="background:#c62828"/> Low/Support</div>
+					<div class="legend-row"><span class="legend-swatch" style="background:#c9a0dc"/> Gamma Band</div>
+					<div class="legend-row"><span class="legend-swatch" style="background:#4fc3f7"/> Smart Liq Upper</div>
+					<div class="legend-row"><span class="legend-swatch" style="background:#fb8c00"/> Smart Liq Lower</div>
+				</div>
+				<div id="tf-bar">
+					<span class="tf-label">Timeframe:</span>
+					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
+					</select>
+					<span class="tf-label">Theme:</span>
+					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
+						<option value="light">Light</option>
+						<option value="dark">Dark</option>
+					</select>
+					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+				</div>
+				<div id="ruler-info"/>
+				<script>//<![CDATA[
+					const cfg      = document.getElementById('cfg').dataset;
+					const ASSET    = cfg.asset;
+					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					let   INTERVAL = '4h';
+					const klineUrl = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+					const LIVE_BAND_URL = '/api/live-band/' + ASSET;
+
+					// Same browser-local-timezone shift every other TV chart page
+					// in this addon applies — Lightweight Charts always renders
+					// epoch seconds as UTC wall-clock time, so every timestamp fed
+					// into the chart is pre-shifted by the viewer's own current
+					// UTC offset first.
+					const tzOffset = (() => {
+						let zone;
+						try {
+							zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+						} catch (e) {
+							return 0;
+						}
+						const d = new Date();
+						const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+						const local = new Date(d.toLocaleString('en-US', { timeZone: zone }));
+						return (local - utc) / 1000;
+					})();
+
+					const THEME_STORAGE_KEY = 'dankbit_theme';
+					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
+					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
+					document.body.classList.toggle('dark', DARK_MODE);
+
+					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+						width: window.innerWidth, height: window.innerHeight,
+						layout: {
+							background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+							textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+						},
+						grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
+						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
+						localization: {
+							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
+								timeZone: 'UTC',
+								month: 'short', day: 'numeric',
+								hour: '2-digit', minute: '2-digit',
+							}),
+						},
+					});
+
+					window.addEventListener('resize', () => {
+						chart.resize(window.innerWidth, window.innerHeight);
+					});
+
+					const series = chart.addCandlestickSeries({
+						upColor: '#26a69a', downColor: '#ef5350',
+						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+					});
+
+					// The 5 indicators on this page: one point per persisted
+					// dankbit.live.band row (a genuine append-only hourly log, one
+					// new row per cron tick — not a continuously-refined bucket
+					// like every other snapshot model in this addon), each its own
+					// addLineSeries connecting same-field points across rows as
+					// they accumulate over time. Colors match the same fields'
+					// lines on the Delta Chart's own "Bands" checkbox, for
+					// at-a-glance consistency even though these are fully
+					// separate, isolated series/data.
+					const highResistanceSeries = chart.addLineSeries({
+						color: '#2e7d32', lineWidth: 2,
+						lastValueVisible: true, priceLineVisible: false,
+					});
+					const lowSupportSeries = chart.addLineSeries({
+						color: '#c62828', lineWidth: 2,
+						lastValueVisible: true, priceLineVisible: false,
+					});
+					const gammaBandSeries = chart.addLineSeries({
+						color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed,
+						lastValueVisible: true, priceLineVisible: false,
+					});
+					const smartLiqUpperSeries = chart.addLineSeries({
+						color: '#4fc3f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted,
+						lastValueVisible: true, priceLineVisible: false,
+					});
+					const smartLiqLowerSeries = chart.addLineSeries({
+						color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted,
+						lastValueVisible: true, priceLineVisible: false,
+					});
+
+					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function toCandle(k) {
+						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
+					}
+
+					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 365 };
+					const BARS_PER_DAY = { '1h': 24, '4h': 6, '1d': 1 };
+					// Live Band data arrives hourly; when the chart is switched
+					// to a wider timeframe, every hourly reading that falls
+					// within one of that timeframe's own candles should be
+					// grouped into that candle rather than still plotted at its
+					// own separate hour mark (see bucketTime()/refreshLiveBand()).
+					const BUCKET_SECONDS = { '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
+
+					let realCandles = [];
+
+					function applyVisibleRange() {
+						const days = TF_WINDOW[INTERVAL] || 21;
+						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
+						const lastIndex = realCandles.length - 1;
+						chart.timeScale().setVisibleLogicalRange({
+							from: lastIndex - days * barsPerDay,
+							to:   lastIndex,
+						});
+					}
+
+					async function loadCandles() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						const klines = (resp.result || []).slice().reverse();
+						realCandles = klines.map(toCandle);
+						series.setData(realCandles);
+						applyVisibleRange();
+					}
+
+					async function updateLatestCandle() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const klines = resp.result || [];
+						if (!klines.length) return;
+						const updated = toCandle(klines[0]);
+						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
+							realCandles[realCandles.length - 1] = updated;
+						} else {
+							realCandles.push(updated);
+						}
+						series.setData(realCandles);
+					}
+
+					async function setTf(iv) {
+						INTERVAL = iv;
+						await loadCandles();
+						await refreshLiveBand();
+					}
+
+					// Live Band rows are computed hourly, but points must land
+					// on whatever candle width is currently selected — on 1h
+					// this just floors to the top of the hour (dropping the
+					// minute/second the cron happened to fire at); switched to
+					// 4h, every hourly reading landing before the next 4h candle
+					// collapses into the current one instead of still showing
+					// as 4 separate points spread across it, same idea one more
+					// level up for 1d. Uses the same epoch-aligned bucket
+					// boundaries (multiples of BUCKET_SECONDS[INTERVAL] since
+					// 1970-01-01 00:00 UTC) real candles/klines already sit on.
+					function bucketTime(epochMs) {
+						// Floor to the bucket boundary in real (UTC) time FIRST,
+						// then apply the display shift — not the other way
+						// around. Real candles' own time is
+						// floor(utcOpenTime) + tzOffset, where utcOpenTime is
+						// already a UTC-aligned multiple of the bucket width;
+						// flooring only after adding tzOffset would instead
+						// align to a grid offset by tzOffset mod bucket, which
+						// only coincides with the real candles' own boundaries
+						// when tzOffset happens to be an exact multiple of the
+						// bucket width — true for most timezones at 1h, but
+						// essentially never at 4h (e.g. +3:30, +5:30, and most
+						// whole-hour offsets that aren't 0/4/8/... all miss).
+						const rawSeconds = Math.floor(epochMs / 1000);
+						const bucket = BUCKET_SECONDS[INTERVAL] || 3600;
+						return Math.floor(rawSeconds / bucket) * bucket + tzOffset;
+					}
+
+					// Read-only — this page never creates dankbit.live.band rows
+					// itself (unlike /x/'s or /y/'s own live-refine pattern); only
+					// that model's hourly cron does, so this just displays
+					// whatever has accumulated so far.
+					async function refreshLiveBand() {
+						const data = await (await fetch(LIVE_BAND_URL)).json();
+						const rawPoints = data.points || [];
+						// Collapse to (at most) one point per bucket of the
+						// CURRENT timeframe — e.g. on 4h, every hourly reading
+						// landing before the next 4h candle collapses into the
+						// current one; if more than one row lands in the same
+						// bucket, the later one wins, same "most recent value"
+						// precedence as everywhere else in this addon;
+						// Lightweight Charts also requires strictly increasing,
+						// unique times per series.
+						const byBucket = new Map();
+						rawPoints.forEach(p => byBucket.set(bucketTime(p.t), p));
+						const points = Array.from(byBucket.keys())
+							.sort((a, b) => a - b)
+							.map(time => Object.assign({ time }, byBucket.get(time)));
+
+						highResistanceSeries.setData(points.map(p => ({
+							time: p.time,
+							value: p.high_resistance,
+						})));
+						lowSupportSeries.setData(points.map(p => ({
+							time: p.time,
+							value: p.low_support,
+						})));
+						gammaBandSeries.setData(points.map(p => ({
+							time: p.time,
+							value: p.gamma_band,
+						})));
+						smartLiqUpperSeries.setData(
+							points.filter(p => p.smart_liq_upper).map(p => ({
+								time: p.time,
+								value: p.smart_liq_upper,
+							}))
+						);
+						smartLiqLowerSeries.setData(
+							points.filter(p => p.smart_liq_lower).map(p => ({
+								time: p.time,
+								value: p.smart_liq_lower,
+							}))
+						);
+						// Per-point marker: whichever of smart_liq_upper/
+						// smart_liq_lower has the bigger VALUE at that same row
+						// gets a small marker (size 1); the non-dominant side
+						// gets size 0 — hidden entirely, so it reads as a plain
+						// connected line, exactly like the High/Resistance/
+						// Low/Support/Gamma Band lines above, which have no
+						// per-point marker of their own at all. A lone value
+						// (the other side absent/filtered out) counts as
+						// dominant by default.
+						const upperMarkers = [];
+						const lowerMarkers = [];
+						points.forEach(p => {
+							const hasUpper = !!p.smart_liq_upper;
+							const hasLower = !!p.smart_liq_lower;
+							if (!hasUpper && !hasLower) return;
+							let upperSize = 0, lowerSize = 0;
+							if (hasUpper && hasLower) {
+								if (p.smart_liq_upper > p.smart_liq_lower) upperSize = 1;
+								else if (p.smart_liq_lower > p.smart_liq_upper) lowerSize = 1;
+							} else if (hasUpper) {
+								upperSize = 1;
+							} else {
+								lowerSize = 1;
+							}
+							if (hasUpper) upperMarkers.push({ time: p.time, position: 'inBar', color: '#4fc3f7', shape: 'circle', size: upperSize });
+							if (hasLower) lowerMarkers.push({ time: p.time, position: 'inBar', color: '#fb8c00', shape: 'circle', size: lowerSize });
+						});
+						smartLiqUpperSeries.setMarkers(upperMarkers);
+						smartLiqLowerSeries.setMarkers(lowerMarkers);
+					}
+
+					function applyTheme() {
+						document.body.classList.toggle('dark', DARK_MODE);
+						chart.applyOptions({
+							layout: {
+								background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+								textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+							},
+							rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+							timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						});
+					}
+
+					function onThemeChange() {
+						DARK_MODE = document.getElementById('theme-select').value === 'dark';
+						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
+						applyTheme();
+					}
+
+					let rulerActive = false;
+					let rulerPrice1 = null;
+					let rulerLines  = [];
+
+					function toggleRuler() {
+						rulerActive = !rulerActive;
+						document.getElementById('ruler-btn').classList.toggle('active', rulerActive);
+						rulerLines.forEach(l => series.removePriceLine(l));
+						rulerLines = [];
+						rulerPrice1 = null;
+						const info = document.getElementById('ruler-info');
+						info.style.display = 'none';
+						info.textContent = '';
+					}
+
+					chart.subscribeClick(param => {
+						if (!rulerActive || !param.point) return;
+						const price = series.coordinateToPrice(param.point.y);
+						if (rulerPrice1 === null) {
+							rulerPrice1 = price;
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: DARK_MODE ? '#e8e8e8' : '#000000', title: '①',
+							}));
+						} else {
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: DARK_MODE ? '#e8e8e8' : '#000000', title: '②',
+							}));
+							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
+							const sign = pct >= 0 ? '+' : '';
+							const info = document.getElementById('ruler-info');
+							info.style.display = 'block';
+							info.textContent = rulerPrice1.toFixed(0) + ' → ' + price.toFixed(0) + '   ' + sign + pct.toFixed(2) + '%';
+							rulerPrice1 = null;
+						}
+					});
+
+					async function init() {
+						try {
+							await loadCandles();
+							await refreshLiveBand();
+							setStatus(ASSET + ' · Live Band (hourly, nearest expiry)');
+						}
+						catch (e) { setStatus('Error: ' + e.message); }
+					}
+					init();
+					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshLiveBand, REFRESH);
+				//]]></script>
+			</body>
+		</html>
+	</template>
+</odoo>
