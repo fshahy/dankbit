@@ -267,6 +267,36 @@
 					}
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
+					/* "Settings" button/dialog (see openSettingsModal() below) —
+					   color pickers for the Zones boxes and Bands lines. Plain
+					   centered overlay + box, no library, matching this page's
+					   existing hand-rolled context-menu approach. */
+					.modal-overlay {
+						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+						background: rgba(0,0,0,0.4);
+						z-index: 30;
+						display: flex; align-items: center; justify-content: center;
+					}
+					.modal-box {
+						background: #fff; border-radius: 6px; padding: 16px 20px;
+						font-family: monospace; font-size: 11pt; color: #333;
+						min-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+					}
+					.modal-header {
+						display: flex; justify-content: space-between; align-items: center;
+						font-weight: bold; margin-bottom: 12px; font-size: 12pt;
+					}
+					.modal-close { cursor: pointer; padding: 0 4px; }
+					.modal-close:hover { color: #c00; }
+					.modal-section { margin-bottom: 12px; }
+					.modal-section-title { font-weight: bold; margin-bottom: 6px; color: #555; }
+					.color-row {
+						display: flex; align-items: center; justify-content: space-between;
+						gap: 8px; padding: 3px 0;
+					}
+					.color-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
 					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
 					   script below) — toggles this class on the body element; the
 					   chart's own background/text/axis colors are switched
@@ -284,6 +314,9 @@
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
+					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
+					body.dark .modal-section-title { color: #aaa; }
+					body.dark .modal-close:hover { color: #f66; }
 				</style>
 			</head>
 			<body>
@@ -333,10 +366,36 @@
 						</select>
 					</t>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
 					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
+				<div id="settings-modal" class="modal-overlay" style="display:none" onclick="if (event.target === this) closeSettingsModal()">
+					<div class="modal-box">
+						<div class="modal-header">
+							<span>Chart Colors</span>
+							<span class="modal-close" onclick="closeSettingsModal()">&#10005;</span>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Zones</div>
+							<label class="color-row">High/Low Zone Box <input type="color" id="color-zonesBox"/></label>
+							<label class="color-row">Middle Zone (SMP/BML) <input type="color" id="color-middleZone"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Bands</div>
+							<label class="color-row">High/Resistance <input type="color" id="color-highResistance"/></label>
+							<label class="color-row">Low/Support <input type="color" id="color-lowSupport"/></label>
+							<label class="color-row">Gamma Band <input type="color" id="color-gammaBand"/></label>
+							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-smartLiqUpper"/></label>
+							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-smartLiqLower"/></label>
+						</div>
+						<div class="modal-actions">
+							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
+							<button class="tf-btn" onclick="saveChartColors()">Save</button>
+						</div>
+					</div>
 				</div>
 				<script>//<![CDATA[
 					const cfg              = document.getElementById('cfg').dataset;
@@ -485,6 +544,37 @@
 					// corrected client-side before anything is drawn.
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
+
+					// "Settings" button/dialog (all 3 TV chart pages, after Ruler) —
+					// user-pickable colors for the Zones boxes and Bands lines,
+					// persisted per-browser via localStorage (same pattern as
+					// THEME_STORAGE_KEY above), not a server-side setting. Applies
+					// on every page even though Zones/Bands only ever draw data on
+					// the Delta Chart (MINIMAL_CHART suppresses them elsewhere) —
+					// harmless no-op there since the series just never get data.
+					const COLOR_STORAGE_KEY = 'dankbit_chart_colors';
+					const DEFAULT_COLORS = {
+						zonesBox: '#fbc02d',
+						middleZone: '#008080',
+						highResistance: '#2e7d32',
+						lowSupport: '#c62828',
+						gammaBand: '#c9a0dc',
+						smartLiqUpper: '#4fc3f7',
+						smartLiqLower: '#fb8c00',
+					};
+					let chartColors = Object.assign({}, DEFAULT_COLORS);
+					try {
+						Object.assign(chartColors, JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}'));
+					} catch (e) { /* malformed/legacy stored value — fall back to defaults */ }
+
+					function hexToRgba(hex, alpha) {
+						const h = hex.replace('#', '');
+						const r = parseInt(h.substring(0, 2), 16);
+						const g = parseInt(h.substring(2, 4), 16);
+						const b = parseInt(h.substring(4, 6), 16);
+						return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+					}
+
 					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
 					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
@@ -576,17 +666,16 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					const highResistanceSeries    = chart.addLineSeries({ color: '#2e7d32', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const lowSupportSeries = chart.addLineSeries({ color: '#c62828', lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const gammaBandSeries          = chart.addLineSeries({ color: '#c9a0dc', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					const highResistanceSeries    = chart.addLineSeries({ color: chartColors.highResistance, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const lowSupportSeries = chart.addLineSeries({ color: chartColors.lowSupport, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const gammaBandSeries          = chart.addLineSeries({ color: chartColors.gammaBand, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
 					// Smart Role-Aware Synthetic Liquidity term-structure lines
 					// (dankbit.bands.smart_liq_upper_price/smart_liq_lower_price)
 					// — part of the "Bands" checkbox/refreshBands(), not a
-					// separate toggle, same orange used for this indicator
-					// before, dotted to stay distinct from the solid/dashed
-					// lines already on this chart.
-					const smartLiqUpperSeries = chart.addLineSeries({ color: '#4fc3f7', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
-					const smartLiqLowerSeries = chart.addLineSeries({ color: '#fb8c00', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					// separate toggle, dotted to stay distinct from the
+					// solid/dashed lines already on this chart.
+					const smartLiqUpperSeries = chart.addLineSeries({ color: chartColors.smartLiqUpper, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					const smartLiqLowerSeries = chart.addLineSeries({ color: chartColors.smartLiqLower, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -595,20 +684,20 @@
 					// has no native primitive for.
 					const aboveBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.25)', topFillColor2: 'rgba(251, 192, 45, 0.25)',
-						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.25)', bottomFillColor2: 'rgba(251, 192, 45, 0.25)',
+						topLineColor: chartColors.zonesBox, topFillColor1: hexToRgba(chartColors.zonesBox, 0.25), topFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						bottomLineColor: chartColors.zonesBox, bottomFillColor1: hexToRgba(chartColors.zonesBox, 0.25), bottomFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					const belowBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: '#fbc02d', topFillColor1: 'rgba(251, 192, 45, 0.25)', topFillColor2: 'rgba(251, 192, 45, 0.25)',
-						bottomLineColor: '#fbc02d', bottomFillColor1: 'rgba(251, 192, 45, 0.25)', bottomFillColor2: 'rgba(251, 192, 45, 0.25)',
+						topLineColor: chartColors.zonesBox, topFillColor1: hexToRgba(chartColors.zonesBox, 0.25), topFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						bottomLineColor: chartColors.zonesBox, bottomFillColor1: hexToRgba(chartColors.zonesBox, 0.25), bottomFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					// addBaselineSeries only strokes its top edge; add a plain line series
 					// for the bottom edge so both edges get the same visible border.
-					const aboveBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
-					const belowBoxBottomLine = chart.addLineSeries({ color: '#fbc02d', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const aboveBoxBottomLine = chart.addLineSeries({ color: chartColors.zonesBox, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const belowBoxBottomLine = chart.addLineSeries({ color: chartColors.zonesBox, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
 					// Seller Max Profit / Buyer Max Loss box — same left/right time edges as the yellow
 					// box above (both come from the same get_box() call for the nearest
@@ -617,11 +706,11 @@
 					// when top and bottom coincide (or only one is available).
 					const smpBmlBoxSeries = chart.addBaselineSeries({
 						baseValue: { type: 'price', price: 0 },
-						topLineColor: 'teal', topFillColor1: 'rgba(0, 128, 128, 0.25)', topFillColor2: 'rgba(0, 128, 128, 0.25)',
-						bottomLineColor: 'teal', bottomFillColor1: 'rgba(0, 128, 128, 0.25)', bottomFillColor2: 'rgba(0, 128, 128, 0.25)',
+						topLineColor: chartColors.middleZone, topFillColor1: hexToRgba(chartColors.middleZone, 0.25), topFillColor2: hexToRgba(chartColors.middleZone, 0.25),
+						bottomLineColor: chartColors.middleZone, bottomFillColor1: hexToRgba(chartColors.middleZone, 0.25), bottomFillColor2: hexToRgba(chartColors.middleZone, 0.25),
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
-					const smpBmlBoxBottomLine = chart.addLineSeries({ color: 'teal', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const smpBmlBoxBottomLine = chart.addLineSeries({ color: chartColors.middleZone, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
 					// Thales Forecast candles ("Thales Forecast" checkbox) —
 					// Thales's deterministic forecast-candle engine (see
@@ -1112,14 +1201,14 @@
 						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'inBar',
-							color: '#4fc3f7',
+							color: chartColors.smartLiqUpper,
 							shape: 'circle',
 							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
 						})));
 						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'inBar',
-							color: '#fb8c00',
+							color: chartColors.smartLiqLower,
 							shape: 'circle',
 							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
 						})));
@@ -1131,7 +1220,7 @@
 						highResistanceSeries.setMarkers(rows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
-							color: '#2e7d32',
+							color: chartColors.highResistance,
 							shape: 'circle',
 							size: 0,
 							text: r.high_resistance_positive ? '+' : '-',
@@ -1139,7 +1228,7 @@
 						lowSupportSeries.setMarkers(rows.map(r => ({
 							time: Math.floor(r.t / 1000) + tzOffset,
 							position: 'aboveBar',
-							color: '#c62828',
+							color: chartColors.lowSupport,
 							shape: 'circle',
 							size: 0,
 							text: r.low_support_positive ? '+' : '-',
@@ -1392,6 +1481,68 @@
 						refreshDayAfterTomorrowDeltaZero();
 						refreshGammaTops();
 						refreshStrikeGamma();
+					}
+
+					// "Settings" button/dialog (after Ruler, all 3 TV chart pages) —
+					// re-applies the current chartColors to every already-created
+					// series/line via applyOptions() rather than needing a
+					// server round-trip or a full chart rebuild.
+					function applyChartColors() {
+						const c = chartColors;
+						const zonesRgba = hexToRgba(c.zonesBox, 0.25);
+						aboveBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
+						belowBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
+						aboveBoxBottomLine.applyOptions({ color: c.zonesBox });
+						belowBoxBottomLine.applyOptions({ color: c.zonesBox });
+
+						const middleRgba = hexToRgba(c.middleZone, 0.25);
+						smpBmlBoxSeries.applyOptions({ topLineColor: c.middleZone, topFillColor1: middleRgba, topFillColor2: middleRgba, bottomLineColor: c.middleZone, bottomFillColor1: middleRgba, bottomFillColor2: middleRgba });
+						smpBmlBoxBottomLine.applyOptions({ color: c.middleZone });
+
+						highResistanceSeries.applyOptions({ color: c.highResistance });
+						lowSupportSeries.applyOptions({ color: c.lowSupport });
+						gammaBandSeries.applyOptions({ color: c.gammaBand });
+						smartLiqUpperSeries.applyOptions({ color: c.smartLiqUpper });
+						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower });
+
+						// The +/- and dominance markers bake their color in at draw
+						// time (see refreshBands() above) rather than reading a
+						// series-level option, so they need a redraw to pick up a
+						// changed color immediately — harmless no-op if Bands is
+						// currently off/not fetched yet.
+						if (SHOW_BANDS) refreshBands();
+					}
+
+					function openSettingsModal() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						document.getElementById('settings-modal').style.display = 'flex';
+					}
+
+					function closeSettingsModal() {
+						document.getElementById('settings-modal').style.display = 'none';
+					}
+
+					function saveChartColors() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) chartColors[key] = input.value;
+						});
+						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
+						applyChartColors();
+						closeSettingsModal();
+					}
+
+					function resetChartColors() {
+						chartColors = Object.assign({}, DEFAULT_COLORS);
+						localStorage.removeItem(COLOR_STORAGE_KEY);
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						applyChartColors();
 					}
 
 					let rulerActive = false;
