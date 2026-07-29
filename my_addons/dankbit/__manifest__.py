@@ -22,7 +22,6 @@
         "views/http_log_views.xml",
         "views/dankbit_templates.xml",
         "views/gamma_triple_chart_templates.xml",
-        "views/live_band_chart_templates.xml",
         "wizard/plot_wizard_view.xml",
         "wizard/zones_wizard_view.xml",
     ],

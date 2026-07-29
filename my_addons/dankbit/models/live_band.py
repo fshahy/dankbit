@@ -18,8 +18,8 @@ class LiveBand(models.Model):
     completely differently: dankbit.bands keeps ONE
     continuously-refined-then-frozen row per INSTRUMENT (a term structure
     across expiries); this model instead creates a brand NEW row every
-    time its own cron runs (a real point-in-time reading), so a chart can
-    show how these numbers actually moved hour to hour for one asset, not
+    time its own cron runs (a real point-in-time reading), so this history
+    shows how these numbers actually moved hour to hour for one asset, not
     just their final value per expiry. Each reading uses the plain
     since-00:00-Iran default window (Asia/Tehran, via
     options.day_window_start() — same as dankbit.bands' own cron), not a
@@ -30,7 +30,8 @@ class LiveBand(models.Model):
     computation, called fresh) rather than reading dankbit.bands' own
     persisted table or touching its compute_snapshot()/cron in any way,
     so /chart/<asset>, /oi/<asset>, and /gamma/<instrument> are all
-    completely unaffected. Feeds /z/<asset> alone.
+    completely unaffected. Data-collection only — no route/chart/checkbox
+    reads this model; it's browsable via the backend "Live Band" menu.
     """
 
     asset = fields.Char(required=True, index=True)

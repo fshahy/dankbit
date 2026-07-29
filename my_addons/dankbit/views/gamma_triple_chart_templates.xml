@@ -55,11 +55,29 @@
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+
+					/* Shown while refreshGammaTriple() is fetching/computing the
+					   5 price lines (a fresh dankbit.bands._compute_asset() call
+					   server-side each time — no persisted history behind this
+					   page, so this can take noticeably longer than a plain
+					   klines poll). Hidden as soon as that fetch resolves,
+					   success or error. */
+					#spinner {
+						position: fixed; top: 50%; left: 50%;
+						width: 32px; height: 32px; margin: -16px 0 0 -16px;
+						border: 3px solid rgba(0,0,0,0.15); border-top-color: #555;
+						border-radius: 50%;
+						animation: dankbit-spin 0.8s linear infinite;
+						z-index: 20; display: none; pointer-events: none;
+					}
+					body.dark #spinner { border-color: rgba(255,255,255,0.15); border-top-color: #ccc; }
+					@keyframes dankbit-spin { to { transform: rotate(360deg); } }
 				</style>
 			</head>
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
@@ -174,6 +192,9 @@
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
+					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
+					function hideSpinner() { document.getElementById('spinner').style.display = 'none'; }
+
 					function toCandle(k) {
 						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
@@ -229,57 +250,68 @@
 						await refreshGammaTriple();
 					}
 
+					// Shows #spinner for the duration of the fetch — this endpoint
+					// recomputes the whole curve fresh server-side on every call
+					// (no persisted history behind this page), so it can take
+					// noticeably longer than the plain klines poll. Hidden in a
+					// finally so a fetch error still clears it rather than
+					// leaving it spinning forever.
 					async function refreshGammaTriple() {
-						const data = await (await fetch(gammaTripleUrl())).json();
+						showSpinner();
+						try {
+							const data = await (await fetch(gammaTripleUrl())).json();
 
-						if (nearestPriceLine)       { series.removePriceLine(nearestPriceLine);       nearestPriceLine       = null; }
-						if (weeklyPriceLine)        { series.removePriceLine(weeklyPriceLine);        weeklyPriceLine        = null; }
-						if (monthlyPriceLine)       { series.removePriceLine(monthlyPriceLine);       monthlyPriceLine       = null; }
-						if (smartLiqUpperPriceLine) { series.removePriceLine(smartLiqUpperPriceLine); smartLiqUpperPriceLine = null; }
-						if (smartLiqLowerPriceLine) { series.removePriceLine(smartLiqLowerPriceLine); smartLiqLowerPriceLine = null; }
+							if (nearestPriceLine)       { series.removePriceLine(nearestPriceLine);       nearestPriceLine       = null; }
+							if (weeklyPriceLine)        { series.removePriceLine(weeklyPriceLine);        weeklyPriceLine        = null; }
+							if (monthlyPriceLine)       { series.removePriceLine(monthlyPriceLine);       monthlyPriceLine       = null; }
+							if (smartLiqUpperPriceLine) { series.removePriceLine(smartLiqUpperPriceLine); smartLiqUpperPriceLine = null; }
+							if (smartLiqLowerPriceLine) { series.removePriceLine(smartLiqLowerPriceLine); smartLiqLowerPriceLine = null; }
 
-						if (data.nearest_gamma_band) {
-							nearestPriceLine = series.createPriceLine({
-								price: data.nearest_gamma_band, color: '#42a5f5', lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black',
-								title: 'Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : ''),
-							});
-						}
-						if (data.weekly_gamma_band) {
-							weeklyPriceLine = series.createPriceLine({
-								price: data.weekly_gamma_band, color: '#fbc02d', lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black',
-								title: 'Weekly' + (data.weekly_instrument ? ' ' + data.weekly_instrument : ''),
-							});
-						}
-						if (data.monthly_gamma_band) {
-							monthlyPriceLine = series.createPriceLine({
-								price: data.monthly_gamma_band, color: '#c9a0dc', lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black',
-								title: 'Monthly' + (data.monthly_instrument ? ' ' + data.monthly_instrument : ''),
-							});
-						}
-						// 0.0 means absent (see smart_liq_upper_price/
-						// smart_liq_lower_price) — no line drawn rather than a
-						// spurious price-0 line, same principle the Delta Chart's
-						// own Smart Liquidity lines use. Both sides are shown
-						// (not collapsed to a single "dominant" one).
-						if (data.smart_liq_upper_price) {
-							smartLiqUpperPriceLine = series.createPriceLine({
-								price: data.smart_liq_upper_price, color: SMART_LIQ_UPPER_COLOR, lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Dotted,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Upper',
-							});
-						}
-						if (data.smart_liq_lower_price) {
-							smartLiqLowerPriceLine = series.createPriceLine({
-								price: data.smart_liq_lower_price, color: SMART_LIQ_LOWER_COLOR, lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Dotted,
-								axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Lower',
-							});
+							if (data.nearest_gamma_band) {
+								nearestPriceLine = series.createPriceLine({
+									price: data.nearest_gamma_band, color: '#42a5f5', lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: 'black',
+									title: 'Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : ''),
+								});
+							}
+							if (data.weekly_gamma_band) {
+								weeklyPriceLine = series.createPriceLine({
+									price: data.weekly_gamma_band, color: '#fbc02d', lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: 'black',
+									title: 'Weekly' + (data.weekly_instrument ? ' ' + data.weekly_instrument : ''),
+								});
+							}
+							if (data.monthly_gamma_band) {
+								monthlyPriceLine = series.createPriceLine({
+									price: data.monthly_gamma_band, color: '#c9a0dc', lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: 'black',
+									title: 'Monthly' + (data.monthly_instrument ? ' ' + data.monthly_instrument : ''),
+								});
+							}
+							// 0.0 means absent (see smart_liq_upper_price/
+							// smart_liq_lower_price) — no line drawn rather than a
+							// spurious price-0 line, same principle the Delta Chart's
+							// own Smart Liquidity lines use. Both sides are shown
+							// (not collapsed to a single "dominant" one).
+							if (data.smart_liq_upper_price) {
+								smartLiqUpperPriceLine = series.createPriceLine({
+									price: data.smart_liq_upper_price, color: SMART_LIQ_UPPER_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dotted,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Upper',
+								});
+							}
+							if (data.smart_liq_lower_price) {
+								smartLiqLowerPriceLine = series.createPriceLine({
+									price: data.smart_liq_lower_price, color: SMART_LIQ_LOWER_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dotted,
+									axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Lower',
+								});
+							}
+						} finally {
+							hideSpinner();
 						}
 					}
 

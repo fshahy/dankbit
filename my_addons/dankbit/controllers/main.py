@@ -1613,13 +1613,12 @@ class ChartController(http.Controller):
 
     @http.route("/api/live-band/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def live_band_json(self, asset):
-        """/z/<asset>'s own and only endpoint — every persisted
-        dankbit.live.band row for `asset`, oldest-first. Unlike every
-        other snapshot endpoint in this addon, this one is read-only: it
-        never calls compute_and_create() itself — only
-        dankbit.live.band's own hourly cron ever creates a row, so
-        opening/polling this page can never create data, matching "every
-        running of the cron job" literally."""
+        """Every persisted dankbit.live.band row for `asset`, oldest-first
+        — feeds the Delta Chart's per-hour Smart Liquidity dominance dots
+        (see dankbit_templates.xml's "Bands" checkbox). Read-only, like
+        every other endpoint reading a cron-fed snapshot model: it never
+        calls compute_and_create() itself — only dankbit.live.band's own
+        hourly cron ever creates a row."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1668,28 +1667,6 @@ class ChartController(http.Controller):
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
-
-    @http.route("/z/<string:asset>", type="http", auth="user", website=True)
-    def live_band_chart(self, asset):
-        """Minimal TradingView chart — candles plus 5 separate indicators:
-        High/Resistance, Low/Support, Gamma Band, Smart Liquidity Upper,
-        Smart Liquidity Lower, one connected line each, sourced from
-        dankbit.live.band — an hourly append-only log of the nearest
-        expiry's own dankbit.bands._compute_asset() result (reused
-        unmodified), created solely by that model's own cron, never by
-        this route. /chart/<asset>, /oi/<asset>, and /gamma/<instrument>
-        are all completely unaffected — this reads neither dankbit.bands'
-        table nor any of its code paths beyond the one shared pure
-        computation function. Renders its own standalone template
-        (dankbit_live_band_chart)."""
-        asset = asset.upper()
-        if not (asset.startswith("BTC") or asset.startswith("ETH")):
-            return request.not_found()
-
-        icp = request.env["ir.config_parameter"].sudo()
-        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        ctx = {"asset": asset, "refresh_interval": refresh_interval}
-        return request.render("dankbit.dankbit_live_band_chart", ctx)
 
     def _y_chart_expiry_index_for_instrument(self, asset, as_of, instrument):
         """Ordinal position (0 = nearest) that `instrument`'s own
