@@ -157,36 +157,26 @@
 						lastValueVisible: true, priceLineVisible: false,
 					});
 					// Smart Liq Upper/Lower are deliberately NOT connected into a
-					// line (lineVisible: false) — each row only ever contributes
-					// a point to WHICHEVER of these two series is the stronger
-					// side that row (see refreshLiveBand()'s dominance split), so
+					// line — each row only ever contributes a point to
+					// WHICHEVER of these two series is the stronger side that
+					// row (see refreshLiveBand()'s dominance split), so
 					// consecutive points across rows can flip sides entirely;
 					// drawing a line through them would visually connect
 					// unrelated upper/lower readings. The point itself is drawn
-					// via setMarkers() instead.
+					// via setMarkers() instead. `lineVisible: false` alone
+					// still let a visible connecting line through, so the line
+					// color is also forced fully transparent (same
+					// belt-and-suspenders technique futureAxisSeries below
+					// uses) — the only visible pixels these two series produce
+					// are the setMarkers() circles.
 					const smartLiqUpperSeries = chart.addLineSeries({
-						color: '#2e7d32', lineWidth: 2, lineVisible: false,
-						lastValueVisible: true, priceLineVisible: false,
+						color: 'rgba(0,0,0,0)', lineWidth: 1, lineVisible: false,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 					const smartLiqLowerSeries = chart.addLineSeries({
-						color: '#c62828', lineWidth: 2, lineVisible: false,
-						lastValueVisible: true, priceLineVisible: false,
+						color: 'rgba(0,0,0,0)', lineWidth: 1, lineVisible: false,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
-					// Smart Liq Upper/Lower Avg — average of that side's raw
-					// smart-liq level and its corresponding High/Resistance
-					// (upper) or Low/Support (lower) point, one per row,
-					// connected as a normal trend line (unlike the raw points
-					// above, this isn't a "which side won" split — both sides
-					// are computed and plotted every row they're available).
-					const smartLiqUpperAvgSeries = chart.addLineSeries({
-						color: '#00897b', lineWidth: 2,
-						lastValueVisible: true, priceLineVisible: false,
-					});
-					const smartLiqLowerAvgSeries = chart.addLineSeries({
-						color: '#d84315', lineWidth: 2,
-						lastValueVisible: true, priceLineVisible: false,
-					});
-
 					// Smart Liq Upper/Lower (Expiry) — the same term-structure
 					// indicator the Delta Chart's "Bands" checkbox draws: one
 					// point per dankbit.bands instrument-row (nearest expiry
@@ -265,6 +255,13 @@
 					// covers whatever's currently tracked regardless of how far out
 					// it is. A few bars of extra margin are added past that point
 					// so it doesn't sit flush against the chart's right edge.
+					// Deliberately does NOT touch the visible range itself
+					// (see applyVisibleRange()) — this runs on every periodic
+					// refreshBandsTerm() poll too, and resetting the time/price
+					// scale on every poll would undo the user's own zoom/pan;
+					// callers that actually want the view reset (initial load,
+					// timeframe switch) call applyVisibleRange() themselves
+					// afterward.
 					function rebuildFutureAxis(maxFutureTimeSec) {
 						const intervalSec = BUCKET_SECONDS[INTERVAL] || 3600;
 						const lastClose = realCandles.length ? realCandles[realCandles.length - 1].close : 0;
@@ -280,7 +277,6 @@
 						}
 						futureTickCount = futureTicks.length;
 						futureAxisSeries.setData(futureTicks);
-						applyVisibleRange();
 					}
 
 					async function loadCandles() {
@@ -309,6 +305,7 @@
 						await loadCandles();
 						await refreshLiveBand();
 						await refreshBandsTerm();
+						applyVisibleRange();
 					}
 
 					// Live Band rows are computed hourly, but points must land
@@ -372,18 +369,6 @@
 							time: p.time,
 							value: p.gamma_band,
 						})));
-						smartLiqUpperAvgSeries.setData(
-							points.filter(p => p.smart_liq_upper_avg).map(p => ({
-								time: p.time,
-								value: p.smart_liq_upper_avg,
-							}))
-						);
-						smartLiqLowerAvgSeries.setData(
-							points.filter(p => p.smart_liq_lower_avg).map(p => ({
-								time: p.time,
-								value: p.smart_liq_lower_avg,
-							}))
-						);
 						// Per row, plot only the raw smart-liq point of
 						// WHICHEVER side is stronger that row — compared via
 						// smart_liq_upper_strength/smart_liq_lower_strength (NOT
@@ -542,6 +527,7 @@
 							await loadCandles();
 							await refreshLiveBand();
 							await refreshBandsTerm();
+							applyVisibleRange();
 							setStatus(ASSET + ' · Live Band (hourly, nearest expiry)');
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
