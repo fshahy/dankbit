@@ -400,6 +400,7 @@
 							<label class="color-row">High/Resistance <input type="color" id="color-liveHighResistance"/></label>
 							<label class="color-row">Low/Support <input type="color" id="color-liveLowSupport"/></label>
 							<label class="color-row">Gamma Band <input type="color" id="color-liveGammaBand"/></label>
+							<label class="color-row">Gamma Band (Expiry) <input type="color" id="color-liveGammaBandTerm"/></label>
 							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-liveSmartLiqUpper"/></label>
 							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-liveSmartLiqLower"/></label>
 						</div>
@@ -602,6 +603,14 @@
 						liveHighResistance: '#2e7d32',
 						liveLowSupport: '#c62828',
 						liveGammaBand: '#c9a0dc',
+						// Gamma Band (Expiry) term structure — same field
+						// (dankbit.bands.gamma_band) as liveGammaBand above, but a
+						// separate color key since it's a different series
+						// (liveGammaBandTermSeries, connecting nearest/nearest+1/
+						// nearest+2's future gamma_band points, same as the Smart
+						// Liq (Expiry) term lines below) rather than the hourly
+						// nearest-expiry-only line liveGammaBand colors.
+						liveGammaBandTerm: '#c9a0dc',
 						liveSmartLiqUpper: '#4fc3f7',
 						liveSmartLiqLower: '#fb8c00',
 					};
@@ -761,6 +770,13 @@
 					// structure including already-expired frozen rows.
 					const liveSmartLiqUpperTermSeries = chart.addLineSeries({ color: chartColors.liveSmartLiqUpper, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 					const liveSmartLiqLowerTermSeries = chart.addLineSeries({ color: chartColors.liveSmartLiqLower, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					// Gamma Band (Expiry) term structure — same dankbit.bands.gamma_band
+					// field as the "Bands" checkbox's own gammaBandSeries and this
+					// checkbox's own liveGammaBandSeries (hourly, nearest expiry only),
+					// but connecting nearest/nearest+1/nearest+2's future gamma_band
+					// points instead — same future-only restriction (r.t >= now) as
+					// the Smart Liq (Expiry) term lines above.
+					const liveGammaBandTermSeries = chart.addLineSeries({ color: chartColors.liveGammaBandTerm, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -1345,6 +1361,7 @@
 						liveSmartLiqLowerTermSeries.setData([]);
 						liveSmartLiqUpperTermSeries.setMarkers([]);
 						liveSmartLiqLowerTermSeries.setMarkers([]);
+						liveGammaBandTermSeries.setData([]);
 					}
 
 					// Smart Liq (Expiry) term structure for "Live Bands" — mirrors
@@ -1359,6 +1376,16 @@
 						if (!SHOW_LIVE_BANDS) return;
 						const now = Date.now();
 						const rows = (data.bands || []).filter(r => r.t >= now);
+						// Gamma Band (Expiry) — nearest/nearest+1/nearest+2's future
+						// gamma_band points connected point-to-point, same as
+						// "Bands"' own gammaBandSeries reads (no 0.0-means-absent
+						// convention on this field, unlike the smart-liq prices
+						// below — see dankbit.bands._compute_asset), just restricted
+						// to future rows like every other Live Bands term line.
+						liveGammaBandTermSeries.setData(rows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							value: r.gamma_band,
+						})));
 						// 0.0 means absent (see dankbit.bands' smart_liq_upper_price/
 						// smart_liq_lower_price) — filtered out rather than plotted,
 						// same principle refreshLiveBands() above applies.
@@ -1741,6 +1768,7 @@
 						liveHighResistanceSeries.applyOptions({ color: c.liveHighResistance });
 						liveLowSupportSeries.applyOptions({ color: c.liveLowSupport });
 						liveGammaBandSeries.applyOptions({ color: c.liveGammaBand });
+						liveGammaBandTermSeries.applyOptions({ color: c.liveGammaBandTerm });
 						liveSmartLiqUpperTermSeries.applyOptions({ color: c.liveSmartLiqUpper });
 						liveSmartLiqLowerTermSeries.applyOptions({ color: c.liveSmartLiqLower });
 						// liveSmartLiqUpperSeries/LowerSeries themselves are NOT
