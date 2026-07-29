@@ -355,6 +355,10 @@
 							<input type="checkbox" id="bands-toggle" onchange="onToggleBands()"/>
 							Bands
 						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="live-bands-toggle" onchange="onToggleLiveBands()"/>
+							Live Bands
+						</label>
 						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
@@ -390,6 +394,14 @@
 							<label class="color-row">Gamma Band <input type="color" id="color-gammaBand"/></label>
 							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-smartLiqUpper"/></label>
 							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-smartLiqLower"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Live Bands</div>
+							<label class="color-row">High/Resistance <input type="color" id="color-liveHighResistance"/></label>
+							<label class="color-row">Low/Support <input type="color" id="color-liveLowSupport"/></label>
+							<label class="color-row">Gamma Band <input type="color" id="color-liveGammaBand"/></label>
+							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-liveSmartLiqUpper"/></label>
+							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-liveSmartLiqLower"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -491,6 +503,25 @@
 					// checked, or polling while it's open — causes new extrema to be
 					// computed.
 					let SHOW_BANDS = false;
+					// "Live Bands" checkbox (Delta Chart only, next to "Bands") —
+					// a separate indicator from "Bands" above: instead of
+					// dankbit.bands' per-instrument term structure
+					// (/api/bands/<asset>), this reads dankbit.live.band's
+					// hourly append-only log for the nearest expiry only
+					// (/api/live-band/<asset>) — the same data/rendering the
+					// standalone /z/<asset> page shows (see
+					// live_band_chart_templates.xml): connected High/Resistance
+					// + Low/Support + Gamma Band lines, plus one point per row
+					// for whichever side (upper/lower) Smart Liquidity is
+					// dominant that row — never a connected line for that last
+					// part (see liveSmartLiqUpperSeries/LowerSeries below).
+					// Unchecked by default, same server-load-reducing pattern
+					// as every other optional indicator here — refreshLiveBands()
+					// stops fetching entirely while off. /api/live-band/<asset>
+					// is read-only (see main.py) — this checkbox, checked or
+					// not, never triggers a new dankbit.live.band row; only that
+					// model's own hourly compute_snapshot() cron does.
+					let SHOW_LIVE_BANDS = false;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
 					// only, "Zones from" dropdown next to "Bands") — 'midnight' is the
 					// original since-00:00-UTC-through-now default; 'hours' switches
@@ -561,6 +592,18 @@
 						gammaBand: '#c9a0dc',
 						smartLiqUpper: '#4fc3f7',
 						smartLiqLower: '#fb8c00',
+						// "Live Bands" checkbox — same default colors as /z/<asset>
+						// used (which in turn matched "Bands" above, since both
+						// draw the same High/Resistance/Low/Support/Gamma Band
+						// concept, just from a different data source). Kept as a
+						// separate set of keys, not shared with the "Bands" ones
+						// above, so the two checkboxes' lines can be recolored
+						// independently.
+						liveHighResistance: '#2e7d32',
+						liveLowSupport: '#c62828',
+						liveGammaBand: '#c9a0dc',
+						liveSmartLiqUpper: '#4fc3f7',
+						liveSmartLiqLower: '#fb8c00',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -584,6 +627,7 @@
 					const SGW_URL          = '/api/gamma-by-strike-until/' + INSTRUMENT;
 					const SGM_URL          = MONTHLY_INST ? '/api/gamma-by-strike-until/' + MONTHLY_INST : '';
 					const BANDS_URL        = '/api/bands/' + ASSET;
+					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
@@ -676,6 +720,47 @@
 					// solid/dashed lines already on this chart.
 					const smartLiqUpperSeries = chart.addLineSeries({ color: chartColors.smartLiqUpper, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 					const smartLiqLowerSeries = chart.addLineSeries({ color: chartColors.smartLiqLower, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+
+					// "Live Bands" checkbox series — ported from /z/<asset>
+					// (live_band_chart_templates.xml), same colors, reading
+					// dankbit.live.band's hourly nearest-expiry-only history
+					// rather than dankbit.bands' per-instrument term structure
+					// the plain "Bands" series above read. Kept as entirely
+					// separate series/variables (not reusing highResistanceSeries
+					// etc.) so both checkboxes can be shown at once without
+					// clobbering each other's data.
+					const liveHighResistanceSeries = chart.addLineSeries({ color: chartColors.liveHighResistance, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const liveLowSupportSeries     = chart.addLineSeries({ color: chartColors.liveLowSupport, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const liveGammaBandSeries      = chart.addLineSeries({ color: chartColors.liveGammaBand, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					// Smart Liq dominant-point markers — deliberately NOT
+					// connected into a line (see /z/<asset>'s own fix for this
+					// exact issue): each row only ever contributes a point to
+					// WHICHEVER side is stronger that row, so consecutive
+					// points can flip sides entirely; a connecting line would
+					// visually join unrelated upper/lower readings. `lineVisible:
+					// false` alone still let a real line render through on
+					// /z/<asset>, so the line color is also forced fully
+					// transparent here — the only visible pixels these two
+					// series produce are the setMarkers() circles below.
+					const liveSmartLiqUpperSeries  = chart.addLineSeries({
+						color: 'rgba(0,0,0,0)', lineWidth: 1, lineVisible: false,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					const liveSmartLiqLowerSeries  = chart.addLineSeries({
+						color: 'rgba(0,0,0,0)', lineWidth: 1, lineVisible: false,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					// Smart Liq (Expiry) term structure — same underlying data
+					// (dankbit.bands.smart_liq_upper_price/smart_liq_lower_price,
+					// /api/bands/<asset>) as the "Bands" checkbox's own
+					// smartLiqUpperSeries/LowerSeries above, but a separate pair
+					// of series/variables gated by "Live Bands" instead, and
+					// restricted to future points only (r.t >= now) — matching
+					// /z/<asset>'s own smartLiqUpperTermSeries/LowerTermSeries,
+					// unlike "Bands" which plots the full historical term
+					// structure including already-expired frozen rows.
+					const liveSmartLiqUpperTermSeries = chart.addLineSeries({ color: chartColors.liveSmartLiqUpper, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					const liveSmartLiqLowerTermSeries = chart.addLineSeries({ color: chartColors.liveSmartLiqLower, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
 
 					// Zones boxes: filled rectangles marking the above-price and below-price
 					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
@@ -1023,6 +1108,8 @@
 						INTERVAL = iv;
 						await loadCandles();
 						await refreshBands();
+						await refreshLiveBands();
+						await refreshLiveBandsTerm();
 						await refreshZonesBoxes();
 						await updateForecastVisibility();
 					}
@@ -1235,6 +1322,136 @@
 						})));
 					}
 
+					// Live Band rows are computed hourly, but points must land on
+					// whatever candle width is currently selected — ported from
+					// /z/<asset>'s own bucketTime(), using this chart's own
+					// INTERVAL_SECONDS table in place of that page's
+					// BUCKET_SECONDS (same values, different name on this page).
+					function liveBandBucketTime(epochMs) {
+						const rawSeconds = Math.floor(epochMs / 1000);
+						const bucket = INTERVAL_SECONDS[INTERVAL] || 3600;
+						return Math.floor(rawSeconds / bucket) * bucket + tzOffset;
+					}
+
+					function clearLiveBandsLines() {
+						liveHighResistanceSeries.setData([]);
+						liveLowSupportSeries.setData([]);
+						liveGammaBandSeries.setData([]);
+						liveSmartLiqUpperSeries.setData([]);
+						liveSmartLiqLowerSeries.setData([]);
+						liveSmartLiqUpperSeries.setMarkers([]);
+						liveSmartLiqLowerSeries.setMarkers([]);
+						liveSmartLiqUpperTermSeries.setData([]);
+						liveSmartLiqLowerTermSeries.setData([]);
+						liveSmartLiqUpperTermSeries.setMarkers([]);
+						liveSmartLiqLowerTermSeries.setMarkers([]);
+					}
+
+					// Smart Liq (Expiry) term structure for "Live Bands" — mirrors
+					// /z/<asset>'s own refreshBandsTerm(): same /api/bands/<asset>
+					// data the "Bands" checkbox's smartLiqUpperSeries/LowerSeries
+					// read, but restricted to future points only (r.t >= now,
+					// compared against real un-tz-shifted wall-clock time) rather
+					// than the full historical term structure "Bands" shows.
+					async function refreshLiveBandsTerm() {
+						if (MINIMAL_CHART || !SHOW_LIVE_BANDS) return;
+						const data = await (await fetch(BANDS_URL)).json();
+						if (!SHOW_LIVE_BANDS) return;
+						const now = Date.now();
+						const rows = (data.bands || []).filter(r => r.t >= now);
+						// 0.0 means absent (see dankbit.bands' smart_liq_upper_price/
+						// smart_liq_lower_price) — filtered out rather than plotted,
+						// same principle refreshLiveBands() above applies.
+						const upperRows = rows.filter(r => r.smart_liq_upper_price);
+						const lowerRows = rows.filter(r => r.smart_liq_lower_price);
+						liveSmartLiqUpperTermSeries.setData(upperRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							value: r.smart_liq_upper_price,
+						})));
+						liveSmartLiqLowerTermSeries.setData(lowerRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							value: r.smart_liq_lower_price,
+						})));
+						// Per-point dominance emphasis, same convention as "Bands":
+						// each row compared only against its own counterpart at
+						// that same expiry, not some single reference row.
+						liveSmartLiqUpperTermSeries.setMarkers(upperRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar', color: chartColors.liveSmartLiqUpper, shape: 'circle',
+							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
+						})));
+						liveSmartLiqLowerTermSeries.setMarkers(lowerRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar', color: chartColors.liveSmartLiqLower, shape: 'circle',
+							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
+						})));
+					}
+
+					// Read-only — mirrors /z/<asset>'s refreshLiveBand(). Never
+					// creates dankbit.live.band rows itself; only that model's
+					// hourly cron does, so this just displays whatever has
+					// accumulated so far for the nearest expiry.
+					async function refreshLiveBands() {
+						if (MINIMAL_CHART || !SHOW_LIVE_BANDS) return;
+						const data = await (await fetch(LIVE_BAND_URL)).json();
+						// Re-check: "Live Bands" may have been switched off while this
+						// fetch was in flight — onToggleLiveBands() already cleared
+						// everything synchronously in that case, so just bail
+						// without redrawing.
+						if (!SHOW_LIVE_BANDS) return;
+						const rawPoints = data.points || [];
+						// Collapse to (at most) one point per bucket of the CURRENT
+						// timeframe — if more than one row lands in the same bucket,
+						// the later one wins, same "most recent value" precedence as
+						// everywhere else in this addon; Lightweight Charts also
+						// requires strictly increasing, unique times per series.
+						const byBucket = new Map();
+						rawPoints.forEach(p => byBucket.set(liveBandBucketTime(p.t), p));
+						const points = Array.from(byBucket.keys())
+							.sort((a, b) => a - b)
+							.map(time => Object.assign({ time }, byBucket.get(time)));
+
+						liveHighResistanceSeries.setData(points.map(p => ({ time: p.time, value: p.high_resistance })));
+						liveLowSupportSeries.setData(points.map(p => ({ time: p.time, value: p.low_support })));
+						liveGammaBandSeries.setData(points.map(p => ({ time: p.time, value: p.gamma_band })));
+
+						// Per row, plot only the raw smart-liq point of WHICHEVER
+						// side is stronger that row — compared via
+						// smart_liq_upper_strength/smart_liq_lower_strength (NOT the
+						// raw upper/lower prices: upper is, by construction, always
+						// a higher PRICE than lower since it's anchored to the top
+						// of the band, so comparing prices would always pick
+						// "upper" and never reflect actual dominance). A lone value
+						// (the other side absent that row) counts as dominant by
+						// default.
+						const upperDominant = [];
+						const lowerDominant = [];
+						points.forEach(p => {
+							const hasUpper = !!p.smart_liq_upper;
+							const hasLower = !!p.smart_liq_lower;
+							if (!hasUpper && !hasLower) return;
+							let upperWins = false, lowerWins = false;
+							if (hasUpper && hasLower) {
+								if (p.smart_liq_upper_strength > p.smart_liq_lower_strength) upperWins = true;
+								else if (p.smart_liq_lower_strength > p.smart_liq_upper_strength) lowerWins = true;
+							} else if (hasUpper) {
+								upperWins = true;
+							} else {
+								lowerWins = true;
+							}
+							if (upperWins) upperDominant.push({ time: p.time, value: p.smart_liq_upper });
+							if (lowerWins) lowerDominant.push({ time: p.time, value: p.smart_liq_lower });
+						});
+						liveSmartLiqUpperSeries.setData(upperDominant);
+						liveSmartLiqLowerSeries.setData(lowerDominant);
+						liveSmartLiqUpperSeries.setMarkers(
+							upperDominant.map(p => ({ time: p.time, position: 'inBar', color: chartColors.liveHighResistance, shape: 'circle', size: 1 }))
+						);
+						liveSmartLiqLowerSeries.setMarkers(
+							lowerDominant.map(p => ({ time: p.time, position: 'inBar', color: chartColors.liveLowSupport, shape: 'circle', size: 1 }))
+						);
+					}
+
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
 						// 0.0 is the "no crossing at all" sentinel (see
 						// dankbit.bands) — nothing real to draw on that edge.
@@ -1355,6 +1572,22 @@
 							refreshBands();
 						} else {
 							clearBandsLines();
+						}
+					}
+
+					// "Live Bands" checkbox (Delta Chart only, next to "Bands") —
+					// see SHOW_LIVE_BANDS above for how this differs from "Bands".
+					// Clears the lines immediately when switched off
+					// (refreshLiveBands() returns before clearing when
+					// SHOW_LIVE_BANDS is false) and re-fetches immediately when
+					// switched back on.
+					function onToggleLiveBands() {
+						SHOW_LIVE_BANDS = document.getElementById('live-bands-toggle').checked;
+						if (SHOW_LIVE_BANDS) {
+							refreshLiveBands();
+							refreshLiveBandsTerm();
+						} else {
+							clearLiveBandsLines();
 						}
 					}
 
@@ -1505,12 +1738,25 @@
 						smartLiqUpperSeries.applyOptions({ color: c.smartLiqUpper });
 						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower });
 
+						liveHighResistanceSeries.applyOptions({ color: c.liveHighResistance });
+						liveLowSupportSeries.applyOptions({ color: c.liveLowSupport });
+						liveGammaBandSeries.applyOptions({ color: c.liveGammaBand });
+						liveSmartLiqUpperTermSeries.applyOptions({ color: c.liveSmartLiqUpper });
+						liveSmartLiqLowerTermSeries.applyOptions({ color: c.liveSmartLiqLower });
+						// liveSmartLiqUpperSeries/LowerSeries themselves are NOT
+						// recolored here — their line color must stay fully
+						// transparent (see their creation above); only the
+						// setMarkers() circles they draw are user-colorable, via
+						// the refreshLiveBands() redraw below.
+
 						// The +/- and dominance markers bake their color in at draw
-						// time (see refreshBands() above) rather than reading a
+						// time (see refreshBands()/refreshLiveBands()/
+						// refreshLiveBandsTerm() above) rather than reading a
 						// series-level option, so they need a redraw to pick up a
-						// changed color immediately — harmless no-op if Bands is
-						// currently off/not fetched yet.
+						// changed color immediately — harmless no-op if Bands/Live
+						// Bands is currently off/not fetched yet.
 						if (SHOW_BANDS) refreshBands();
+						if (SHOW_LIVE_BANDS) { refreshLiveBands(); refreshLiveBandsTerm(); }
 					}
 
 					function openSettingsModal() {
@@ -1586,7 +1832,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBands(); await refreshLiveBandsTerm(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
@@ -1597,14 +1843,17 @@
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
-					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
-					// underlying dankbit.bands rows only ever change once per
-					// hourly compute_snapshot() cron tick, so polling any faster
-					// just re-fetches identical data; syncing it to the same
-					// (slower) interval Zones already uses cuts wasted requests
-					// with zero loss of real freshness, which matters more now
-					// that this addon is heading toward more concurrent users.
+					// Bands/Live Bands both poll on ZONES_BOX_REFRESH (not
+					// REFRESH) — their own underlying rows (dankbit.bands /
+					// dankbit.live.band respectively) only ever change once per
+					// hourly cron tick, so polling any faster just re-fetches
+					// identical data; syncing both to the same (slower) interval
+					// Zones already uses cuts wasted requests with zero loss of
+					// real freshness, which matters more now that this addon is
+					// heading toward more concurrent users.
 					setInterval(refreshBands, ZONES_BOX_REFRESH);
+					setInterval(refreshLiveBands, ZONES_BOX_REFRESH);
+					setInterval(refreshLiveBandsTerm, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);
