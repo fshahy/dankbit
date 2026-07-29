@@ -1,0 +1,177 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_forecast_log_view_form" model="ir.ui.view">
+        <field name="name">dankbit_forecast_log.view.form</field>
+        <field name="model">dankbit.forecast.log</field>
+        <field name="arch" type="xml">
+            <form string="Forecast Log">
+                <sheet>
+                    <group>
+                        <field name="asset" />
+                        <field name="generated_at" />
+                        <field name="snapshot_id" />
+                        <field name="index_price" />
+                        <field name="sigma_annual" />
+                        <field name="hours_ahead" />
+                        <field name="target_time" />
+                        <field name="open" />
+                        <field name="high" />
+                        <field name="low" />
+                        <field name="close" />
+                        <field name="mode" />
+                    </group>
+                    <group string="Accuracy">
+                        <field name="actual_price" />
+                        <field name="error" />
+                        <field name="error_pct" />
+                        <field name="checked_at" />
+                    </group>
+                    <group string="Engine Impulse Breakdown">
+                        <field name="forecast_impulse" />
+                        <field name="impulse_base_pull" />
+                        <field name="impulse_slope" />
+                        <field name="impulse_current_body" />
+                        <field name="impulse_curve_extreme" />
+                        <field name="impulse_gamma_band" />
+                        <field name="impulse_gamma_band_reclaim" />
+                        <field name="impulse_vega" />
+                        <field name="impulse_delta_shock" />
+                        <field name="impulse_gamma_shock" />
+                        <field name="impulse_mm_contest" />
+                        <field name="impulse_liquidity" />
+                        <field name="impulse_greek_flow" />
+                        <field name="impulse_term_slope" />
+                    </group>
+                    <group string="Regime Context">
+                        <field name="is_weekend" />
+                        <field name="session_name" />
+                        <field name="activity_regime" />
+                        <field name="gb_consensus_direction" />
+                        <field name="gb_consensus_strength" />
+                        <field name="gb_all_aligned" />
+                        <field name="gb_trend_locked" />
+                        <field name="any_shock_active" />
+                        <field name="fakeout_risk" />
+                        <field name="gamma_neutral_score" />
+                        <field name="absorption_mode" />
+                        <field name="effective_atr" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_log_view_list" model="ir.ui.view">
+        <field name="name">dankbit_forecast_log.view.list</field>
+        <field name="model">dankbit.forecast.log</field>
+        <field name="arch" type="xml">
+            <list string="Forecast Log">
+                <field name="asset" />
+                <field name="generated_at" />
+                <field name="hours_ahead" />
+                <field name="target_time" />
+                <field name="index_price" />
+                <field name="open" />
+                <field name="high" />
+                <field name="low" />
+                <field name="close" />
+                <field name="actual_price" optional="show" />
+                <field name="error" optional="show" />
+                <field name="error_pct" optional="show" />
+                <field name="mode" optional="hide" />
+                <field name="sigma_annual" optional="hide" />
+                <field name="checked_at" optional="hide" />
+                <field name="snapshot_id" optional="hide" />
+                <field name="forecast_impulse" optional="hide" />
+                <field name="impulse_base_pull" optional="hide" />
+                <field name="impulse_slope" optional="hide" />
+                <field name="impulse_current_body" optional="hide" />
+                <field name="impulse_curve_extreme" optional="hide" />
+                <field name="impulse_gamma_band" optional="hide" />
+                <field name="impulse_gamma_band_reclaim" optional="hide" />
+                <field name="impulse_vega" optional="hide" />
+                <field name="impulse_delta_shock" optional="hide" />
+                <field name="impulse_gamma_shock" optional="hide" />
+                <field name="impulse_mm_contest" optional="hide" />
+                <field name="impulse_liquidity" optional="hide" />
+                <field name="impulse_greek_flow" optional="hide" />
+                <field name="impulse_term_slope" optional="hide" />
+                <field name="is_weekend" optional="hide" />
+                <field name="session_name" optional="hide" />
+                <field name="activity_regime" optional="hide" />
+                <field name="gb_consensus_direction" optional="hide" />
+                <field name="gb_consensus_strength" optional="hide" />
+                <field name="gb_all_aligned" optional="hide" />
+                <field name="gb_trend_locked" optional="hide" />
+                <field name="any_shock_active" optional="hide" />
+                <field name="fakeout_risk" optional="hide" />
+                <field name="gamma_neutral_score" optional="hide" />
+                <field name="absorption_mode" optional="hide" />
+                <field name="effective_atr" optional="hide" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_log_view_pivot" model="ir.ui.view">
+        <field name="name">dankbit_forecast_log.view.pivot</field>
+        <field name="model">dankbit.forecast.log</field>
+        <field name="arch" type="xml">
+            <pivot string="Forecast Accuracy">
+                <field name="asset" type="row"/>
+                <field name="hours_ahead" type="row"/>
+                <field name="mode" type="col"/>
+                <field name="error" type="measure"/>
+                <field name="error_pct" type="measure"/>
+                <field name="forecast_impulse" type="measure"/>
+                <field name="impulse_greek_flow" type="measure"/>
+                <field name="impulse_gamma_band" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_log_view_search" model="ir.ui.view">
+        <field name="name">dankbit.forecast.log.view.search</field>
+        <field name="model">dankbit.forecast.log</field>
+        <field name="arch" type="xml">
+            <search string="Search Forecast Log">
+                <field name="asset" string="Asset"/>
+                <field name="generated_at" string="Generated At"/>
+                <field name="target_time" string="Target Time"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('asset', '=', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('asset', '=', 'ETH')]"/>
+                <filter name="target_past" string="Target Time Passed" domain="[('target_time', '&lt;=', datetime.datetime.now())]"/>
+                <filter name="checked" string="Checked" domain="[('checked_at', '!=', False)]"/>
+                <filter name="unchecked" string="Unchecked" domain="[('checked_at', '=', False)]"/>
+                <filter name="is_weekend" string="Weekend" domain="[('is_weekend', '=', True)]"/>
+                <filter name="any_shock_active" string="Shock Active" domain="[('any_shock_active', '=', True)]"/>
+                <filter name="fakeout_risk" string="Fakeout Risk" domain="[('fakeout_risk', '=', True)]"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                    <filter string="Generated At" name="generated_at" context="{'group_by':'generated_at'}"/>
+                    <filter string="Hours Ahead" name="hours_ahead" context="{'group_by':'hours_ahead'}"/>
+                    <filter string="Mode" name="mode" context="{'group_by':'mode'}"/>
+                    <filter string="Session" name="session_name" context="{'group_by':'session_name'}"/>
+                    <filter string="Activity Regime" name="activity_regime" context="{'group_by':'activity_regime'}"/>
+                    <filter string="Gamma-Band Consensus Direction" name="gb_consensus_direction" context="{'group_by':'gb_consensus_direction'}"/>
+                    <filter string="Weekend" name="group_is_weekend" context="{'group_by':'is_weekend'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_log_action" model="ir.actions.act_window">
+        <field name="name">Forecast Log</field>
+        <field name="res_model">dankbit.forecast.log</field>
+        <field name="view_mode">list,pivot,form</field>
+    </record>
+
+    <menuitem id="dankbit_forecast_log_menu" name="Forecast Log"
+        action="dankbit_forecast_log_action"
+        parent="dankbit_root_menu"
+        sequence="70"/>
+</odoo>

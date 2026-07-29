@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <data noupdate="1">
+
+        <record id="dankbit_get_last_btc_trades_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Get Last Trades</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">minutes</field>
+            <field name="state">code</field>
+            <field name="code">model.get_last_trades()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_deleted_expired_trades_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Delete Expired Trades</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="state">code</field>
+            <field name="code">model._delete_expired_trades()</field>
+            <field name="priority">10</field>
+        </record>
+
+        <record id="dankbit_compute_bands_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Bands Snapshot</field>
+            <field name="model_id" ref="model_dankbit_bands"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_snapshot()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_compute_live_band_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Live Band (/z/)</field>
+            <field name="model_id" ref="model_dankbit_live_band"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_snapshot()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_compute_forecast_snapshot_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Forecast Snapshot</field>
+            <field name="model_id" ref="model_dankbit_forecast_snapshot"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_snapshot()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_log_forecast_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Log Forecast Candles</field>
+            <field name="model_id" ref="model_dankbit_forecast_log"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.log_forecast()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_check_forecast_accuracy_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Check Forecast Accuracy</field>
+            <field name="model_id" ref="model_dankbit_forecast_log"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.check_accuracy()</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_delete_old_http_logs_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Delete Old HTTP Logs</field>
+            <field name="model_id" ref="model_dankbit_http_log"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="state">code</field>
+            <field name="code">model._delete_old_logs()</field>
+            <field name="priority">10</field>
+        </record>
+
+    </data>
+</odoo>

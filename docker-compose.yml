@@ -1,0 +1,54 @@
+services:
+  web:
+    user: "${UID}:${GID}"
+    build:
+      context: .
+    container_name: odoo_18
+    depends_on:
+      - db
+    ports:
+      - "8069:8069"
+    volumes:
+      # Persist the full Odoo Odoo data directory (includes filestore and meta)
+      # Use a named volume for durability across restarts and rebuilds.
+      # Use a host bind so files live on your project tree and are easy to inspect/backup.
+      # WARNING: binding a host directory will hide any content that lived in the image
+      # at this path. If you have an existing named volume, migrate it first (see README).
+      - ./odoo_filestore:/var/lib/odoo/.local/share/Odoo
+      # Mount your config file and custom addons
+      - ./config/odoo.conf:/etc/odoo/odoo.conf
+      - ./my_addons:/mnt/my_addons
+    restart: always
+    # Ensure the filestore volume is writable by the container user when
+    # the container starts. This runs a quick chown (no-op if ownership is
+    # already correct) and then executes the image entrypoint.
+    command: bash -c "chown -R ${UID:-1000}:${GID:-1000} /var/lib/odoo/.local/share/Odoo || true; /entrypoint.sh odoo"
+
+  db:
+    image: postgres:14.11
+    container_name: postgres_14
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=odoo
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    restart: always
+    volumes:
+      - odoo-db-data:/var/lib/postgresql/data/pgdata
+
+  dankbit_ws:
+    build: ./dankbit_ws_service
+    container_name: dankbit_ws_service
+    restart: unless-stopped
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_DB=${DANKBIT_POSTGRES_DB:-db1}
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - DERIBIT_KEY=${DERIBIT_KEY}
+      - DERIBIT_SECRET=${DERIBIT_SECRET}
+    depends_on:
+      - db
+
+volumes:
+  odoo-db-data:

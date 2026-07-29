@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_live_band_view_form" model="ir.ui.view">
+        <field name="name">dankbit_live_band.view.form</field>
+        <field name="model">dankbit.live.band</field>
+        <field name="arch" type="xml">
+            <form string="Live Band">
+                <sheet>
+                    <group>
+                        <field name="computed_at" />
+                        <field name="asset" />
+                        <field name="instrument" />
+                        <field name="high_resistance" />
+                        <field name="low_support" />
+                        <field name="gamma_band" />
+                        <field name="smart_liq_upper" />
+                        <field name="smart_liq_lower" />
+                        <field name="smart_liq_upper_strength" />
+                        <field name="smart_liq_lower_strength" />
+                        <field name="smart_liq_upper_avg" />
+                        <field name="smart_liq_lower_avg" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_live_band_view_list" model="ir.ui.view">
+        <field name="name">dankbit_live_band.view.list</field>
+        <field name="model">dankbit.live.band</field>
+        <field name="arch" type="xml">
+            <list string="Live Band">
+                <field name="computed_at" />
+                <field name="asset" />
+                <field name="instrument" />
+                <field name="high_resistance" />
+                <field name="low_support" />
+                <field name="gamma_band" />
+                <field name="smart_liq_upper" />
+                <field name="smart_liq_lower" />
+                <field name="smart_liq_upper_strength" optional="hide" />
+                <field name="smart_liq_lower_strength" optional="hide" />
+                <field name="smart_liq_upper_avg" optional="hide" />
+                <field name="smart_liq_lower_avg" optional="hide" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_live_band_view_search" model="ir.ui.view">
+        <field name="name">dankbit.live_band.view.search</field>
+        <field name="model">dankbit.live.band</field>
+        <field name="arch" type="xml">
+            <search string="Search Live Band">
+                <field name="asset" string="Asset"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('asset', '=', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('asset', '=', 'ETH')]"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_live_band_action" model="ir.actions.act_window">
+        <field name="name">Live Band</field>
+        <field name="res_model">dankbit.live.band</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_live_band_menu" name="Live Band"
+        action="dankbit_live_band_action"
+        parent="dankbit_root_menu"
+        sequence="55"/>
+</odoo>

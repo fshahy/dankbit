@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <data>
+
+        <record id="dankbit_trade_public_rule" model="ir.rule">
+            <field name="name">Public read on dankbit.trade</field>
+            <field name="model_id" ref="model_dankbit_trade"/>
+            <field name="groups" eval="[(4, ref('base.group_public'))]"/>
+            <field name="perm_read" eval="True"/>
+        </record>
+
+    </data>
+</odoo>

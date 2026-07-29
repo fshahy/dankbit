@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_http_log_view_form" model="ir.ui.view">
+        <field name="name">dankbit_http_log.view.form</field>
+        <field name="model">dankbit.http.log</field>
+        <field name="arch" type="xml">
+            <form string="HTTP Log">
+                <sheet>
+                    <group>
+                        <field name="request_datetime" />
+                        <field name="ip_address" />
+                        <field name="user_agent" />
+                        <field name="url" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_http_log_view_list" model="ir.ui.view">
+        <field name="name">dankbit_http_log.view.list</field>
+        <field name="model">dankbit.http.log</field>
+        <field name="arch" type="xml">
+            <list string="HTTP Logs" default_order="request_datetime desc">
+                <field name="request_datetime" />
+                <field name="ip_address" />
+                <field name="user_agent" />
+                <field name="url" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_http_log_view_search" model="ir.ui.view">
+        <field name="name">dankbit.http.log.view.search</field>
+        <field name="model">dankbit.http.log</field>
+        <field name="arch" type="xml">
+            <search string="Search HTTP Logs">
+                <field name="ip_address" string="IP Address"/>
+                <field name="user_agent" string="Browser"/>
+                <field name="url" string="URL"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="IP Address" name="ip_address" context="{'group_by':'ip_address'}"/>
+                    <filter string="URL" name="url" context="{'group_by':'url'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_http_log_action" model="ir.actions.act_window">
+        <field name="name">HTTP Logs</field>
+        <field name="res_model">dankbit.http.log</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_http_log_menu" name="HTTP Logs"
+        action="dankbit_http_log_action"
+        parent="dankbit_root_menu"
+        sequence="60"/>
+</odoo>

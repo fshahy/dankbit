@@ -1,0 +1,138 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_trade_view_form" model="ir.ui.view">
+        <field name="name">dankbit_trade.view.form</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <form string="Trade">
+                <sheet>
+                    <group>
+                        <field name="name" />
+                        <field name="option_type" />
+                        <field name="strike" />
+                        <field name="expiration" />
+                        <field name="days_to_expiry" />
+                        <field name="index_price" />
+                        <field name="direction" />
+                        <field name="amount" />
+                        <field name="iv" />
+                        <field name="deribit_ts" />
+                        <field name="price" />
+                        <field name="mark_price" />
+                        <field name="trade_seq" />
+                        <field name="deribit_trade_identifier" />
+                        <field name="is_block_trade" />
+                        <field name="block_trade_id" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_view_list" model="ir.ui.view">
+        <field name="name">dankbit_trade.view.list</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <list string="Trades">
+                <field name="name" />
+                <field name="deribit_ts" />
+                <field name="strike" />
+                <field name="amount" />
+                <field name="direction" />
+                <field name="option_type" />
+                <field name="days_to_expiry" />
+                <field name="iv" />
+                <field name="index_price" />
+                <field name="is_block_trade" />
+                <field name="block_trade_id" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_view_search" model="ir.ui.view">
+        <field name="name">dankbit.trade.view.search</field>
+        <field name="model">dankbit.trade</field>
+        <field name="arch" type="xml">
+            <search string="Search Trades">
+                <field name="name" string="Name"/>
+                <field name="strike" string="Strike"/>
+                
+                <separator/>
+
+                <filter name="only_calls" string="Calls" domain="[('option_type', '=', 'call')]"/>
+                <filter name="only_puts" string="Puts" domain="[('option_type', '=', 'put')]"/>
+
+                <separator/>
+
+                <filter name="only_longs" string="Buys" domain="[('direction', '=', 'buy')]"/>
+                <filter name="only_sells" string="Sells" domain="[('direction', '=', 'sell')]"/>
+
+                <separator/>
+
+                <filter name="only_block_trades" string="Only Block Trades" domain="[('is_block_trade', '=', True)]"/>
+                <filter name="is_not_block_trade" string="Is Not Block Trade" domain="[('is_block_trade', '=', False)]"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('name', 'ilike', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('name', 'ilike', 'ETH')]"/>
+
+                <separator/>
+
+                <!-- "Created" here means deribit_ts (the trade's own Deribit
+                     timestamp), the field every other "last N hours" feature
+                     in this addon windows on — not Odoo's create_date (DB
+                     insertion time, which can lag deribit_ts during REST
+                     backfill). Each also requires expiration >= now, i.e.
+                     not (yet) expired: active=False only reflects the daily
+                     _delete_expired_trades() cron, which can lag up to a day
+                     behind a trade's real expiry.
+
+                     The NOW / LAST-N-HOURS domain values below are literal
+                     placeholder tokens, not python expressions — the
+                     client's own domain evaluator
+                     only knows browser-local wall-clock time (no UTC-aware
+                     "now"), which would silently skew these by the viewing
+                     user's UTC offset against the naive-UTC deribit_ts/
+                     expiration columns. dankbit.trade.get_views() replaces
+                     these tokens with the server's real UTC clock before
+                     this arch ever reaches the browser. -->
+                <filter name="last_2_hours" string="Last 2 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_2H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_4_hours" string="Last 4 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_4H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_8_hours" string="Last 8 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_8H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+                <filter name="last_24_hours" string="Last 24 Hours"
+                        domain="[('deribit_ts', '&gt;=', '__LAST_24H__'), ('expiration', '&gt;=', '__NOW__')]"/>
+
+                <separator/>
+
+                <filter name="only_expired_trades" string="Expired" domain="[('active', '=', False)]"/>
+                
+                <group expand="0" string="Group By">
+                    <filter string="Direction" name="direction" context="{'group_by':'direction'}"/>
+                    <filter string="Option Type" name="option_type" context="{'group_by':'option_type'}"/>
+
+                    <separator/>
+
+                    <filter string="Block Trade" name="is_block_trade" context="{'group_by':'block_trade_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_trade_action" model="ir.actions.act_window">
+        <field name="name">Trades</field>
+        <field name="res_model">dankbit.trade</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_root_menu" name="Dankbit" sequence="10"/>
+
+    <menuitem id="dankbit_trade_menu" name="Trades" 
+        action="dankbit_trade_action"
+        parent="dankbit_root_menu" 
+        sequence="30"/>
+</odoo>

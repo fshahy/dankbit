@@ -1,0 +1,359 @@
+<odoo>
+	<!-- Standalone, minimal TradingView page for /y/<asset> — its own file,
+	     not the shared dankbit_tv_chart_until template /chart/, /oi/,
+	     /gamma/ render. -->
+
+	<template id="dankbit_gamma_triple_chart" name="Dankbit Gamma Triple Chart">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="asset"/> — Gamma Triple</title>
+				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
+					#chart-container { width: 100%; height: 100%; }
+					#status {
+						position: fixed; bottom: 32px; left: 12px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#tf-bar {
+						position: fixed; top: 8px; left: 12px;
+						display: flex; gap: 4px; align-items: center; z-index: 10;
+					}
+					.tf-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; padding: 0 2px;
+					}
+					#ruler-info {
+						position: fixed; top: 40px; left: 12px;
+						font-family: monospace; font-size: 12pt; font-weight: bold;
+						color: #222; background: rgba(255,255,255,0.92);
+						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; display: none;
+					}
+					.tf-btn {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+					}
+					.tf-btn:hover { background: #f0f0f0; }
+					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+
+					/* "Light"/"Dark" theme dropdown — same localStorage key
+					   (dankbit_theme) every other TV chart page in this addon
+					   uses, so the preference carries over across all of them. */
+					body.dark, body.dark html { background: #000000; }
+					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
+					body.dark .tf-label { color: #ccc; }
+					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
+					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-btn:hover { background: #262626; }
+					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+				</style>
+			</head>
+			<body>
+				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div id="chart-container"/>
+				<div id="status">Loading…</div>
+				<div id="tf-bar">
+					<span class="tf-label">Timeframe:</span>
+					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
+						<option value="15m" selected="selected">15m</option>
+						<option value="1h">1h</option>
+						<option value="4h">4h</option>
+						<option value="1d">1d</option>
+					</select>
+					<span class="tf-label">Window:</span>
+					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
+						<option value="4">4h</option>
+						<option value="8">8h</option>
+						<option value="12" selected="selected">12h</option>
+						<option value="16">16h</option>
+						<option value="24">24h</option>
+					</select>
+					<span class="tf-label">Theme:</span>
+					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
+						<option value="light">Light</option>
+						<option value="dark">Dark</option>
+					</select>
+					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+				</div>
+				<div id="ruler-info"/>
+				<script>//<![CDATA[
+					const cfg      = document.getElementById('cfg').dataset;
+					const ASSET    = cfg.asset;
+					// Recomputed from scratch on every request (no persisted
+					// history behind this page at all — see
+					// ChartController.gamma_triple_json) — polls on the same
+					// general dankbit.refresh_interval every other page's
+					// own refresh rate uses, so the lines visibly move on
+					// the cadence the user actually configures.
+					const REFRESH = parseInt(cfg.refresh, 10) * 1000;
+					let   INTERVAL = '15m';
+					// Trade window (hours) the 3 gamma_band lines + Smart
+					// Liquidity upper/lower are computed over — the "Window"
+					// dropdown, mirrored server-side by
+					// ChartController.gamma_triple_json's own ?hours= handling.
+					let   WINDOW_HOURS = 12;
+					const klineUrl = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+					const gammaTripleUrl = () => '/api/gamma-triple/' + ASSET + '?hours=' + WINDOW_HOURS;
+
+					// Same browser-local-timezone shift every other TV chart page
+					// in this addon applies — Lightweight Charts always renders
+					// epoch seconds as UTC wall-clock time, so every timestamp fed
+					// into the chart is pre-shifted by the viewer's own current
+					// UTC offset first.
+					const tzOffset = (() => {
+						let zone;
+						try {
+							zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+						} catch (e) {
+							return 0;
+						}
+						const d = new Date();
+						const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+						const local = new Date(d.toLocaleString('en-US', { timeZone: zone }));
+						return (local - utc) / 1000;
+					})();
+
+					const THEME_STORAGE_KEY = 'dankbit_theme';
+					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
+					// Same Smart Liquidity upper/lower colors the Delta Chart's own
+					// Bands checkbox uses — saturated enough to read on either a
+					// light or dark chart background, so no dark-mode swap needed.
+					const SMART_LIQ_UPPER_COLOR = '#4fc3f7';
+					const SMART_LIQ_LOWER_COLOR = '#fb8c00';
+					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
+					document.body.classList.toggle('dark', DARK_MODE);
+
+					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+						width: window.innerWidth, height: window.innerHeight,
+						layout: {
+							background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+							textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+						},
+						grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
+						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
+						localization: {
+							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
+								timeZone: 'UTC',
+								month: 'short', day: 'numeric',
+								hour: '2-digit', minute: '2-digit',
+							}),
+						},
+					});
+
+					window.addEventListener('resize', () => {
+						chart.resize(window.innerWidth, window.innerHeight);
+					});
+
+					const series = chart.addCandlestickSeries({
+						upColor: '#26a69a', downColor: '#ef5350',
+						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+					});
+
+					// The 4 indicators on this page are horizontal price lines,
+					// not connected time-series points — nothing is persisted
+					// anywhere (see ChartController.gamma_triple_json), each
+					// poll just recomputes the 4 current values fresh and
+					// redraws the lines at their new levels.
+					let nearestPriceLine       = null;
+					let weeklyPriceLine        = null;
+					let monthlyPriceLine       = null;
+					let smartLiqUpperPriceLine = null;
+					let smartLiqLowerPriceLine = null;
+
+					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function toCandle(k) {
+						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
+					}
+
+					// 500 bars is the flat fetch size loadCandles() always
+					// uses regardless of timeframe (see below) — 15m's own
+					// window is capped under that (500 * 15m ≈ 5.2 days)
+					// rather than the wider defaults 1h/4h/1d use.
+					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
+					const BARS_PER_DAY = { '15m': 96, '1h': 24, '4h': 6, '1d': 1 };
+
+					let realCandles = [];
+
+					function applyVisibleRange() {
+						const days = TF_WINDOW[INTERVAL] || 21;
+						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
+						const lastIndex = realCandles.length - 1;
+						chart.timeScale().setVisibleLogicalRange({
+							from: lastIndex - days * barsPerDay,
+							to:   lastIndex,
+						});
+					}
+
+					async function loadCandles() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						const klines = (resp.result || []).slice().reverse();
+						realCandles = klines.map(toCandle);
+						series.setData(realCandles);
+						applyVisibleRange();
+					}
+
+					async function updateLatestCandle() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const klines = resp.result || [];
+						if (!klines.length) return;
+						const updated = toCandle(klines[0]);
+						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
+							realCandles[realCandles.length - 1] = updated;
+						} else {
+							realCandles.push(updated);
+						}
+						series.setData(realCandles);
+					}
+
+					async function setTf(iv) {
+						INTERVAL = iv;
+						await loadCandles();
+					}
+
+					async function setWindow(h) {
+						WINDOW_HOURS = parseInt(h, 10);
+						setStatus(ASSET + ' · Gamma Triple (' + WINDOW_HOURS + 'h trailing window, live)');
+						await refreshGammaTriple();
+					}
+
+					async function refreshGammaTriple() {
+						const data = await (await fetch(gammaTripleUrl())).json();
+
+						if (nearestPriceLine)       { series.removePriceLine(nearestPriceLine);       nearestPriceLine       = null; }
+						if (weeklyPriceLine)        { series.removePriceLine(weeklyPriceLine);        weeklyPriceLine        = null; }
+						if (monthlyPriceLine)       { series.removePriceLine(monthlyPriceLine);       monthlyPriceLine       = null; }
+						if (smartLiqUpperPriceLine) { series.removePriceLine(smartLiqUpperPriceLine); smartLiqUpperPriceLine = null; }
+						if (smartLiqLowerPriceLine) { series.removePriceLine(smartLiqLowerPriceLine); smartLiqLowerPriceLine = null; }
+
+						if (data.nearest_gamma_band) {
+							nearestPriceLine = series.createPriceLine({
+								price: data.nearest_gamma_band, color: '#42a5f5', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: 'Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : ''),
+							});
+						}
+						if (data.weekly_gamma_band) {
+							weeklyPriceLine = series.createPriceLine({
+								price: data.weekly_gamma_band, color: '#fbc02d', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: 'Weekly' + (data.weekly_instrument ? ' ' + data.weekly_instrument : ''),
+							});
+						}
+						if (data.monthly_gamma_band) {
+							monthlyPriceLine = series.createPriceLine({
+								price: data.monthly_gamma_band, color: '#c9a0dc', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: 'Monthly' + (data.monthly_instrument ? ' ' + data.monthly_instrument : ''),
+							});
+						}
+						// 0.0 means absent (see smart_liq_upper_price/
+						// smart_liq_lower_price) — no line drawn rather than a
+						// spurious price-0 line, same principle the Delta Chart's
+						// own Smart Liquidity lines use. Both sides are shown
+						// (not collapsed to a single "dominant" one).
+						if (data.smart_liq_upper_price) {
+							smartLiqUpperPriceLine = series.createPriceLine({
+								price: data.smart_liq_upper_price, color: SMART_LIQ_UPPER_COLOR, lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Dotted,
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Upper',
+							});
+						}
+						if (data.smart_liq_lower_price) {
+							smartLiqLowerPriceLine = series.createPriceLine({
+								price: data.smart_liq_lower_price, color: SMART_LIQ_LOWER_COLOR, lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Dotted,
+								axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Lower',
+							});
+						}
+					}
+
+					function applyTheme() {
+						document.body.classList.toggle('dark', DARK_MODE);
+						chart.applyOptions({
+							layout: {
+								background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+								textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+							},
+							rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+							timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						});
+					}
+
+					function onThemeChange() {
+						DARK_MODE = document.getElementById('theme-select').value === 'dark';
+						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
+						applyTheme();
+					}
+
+					let rulerActive = false;
+					let rulerPrice1 = null;
+					let rulerLines  = [];
+
+					function toggleRuler() {
+						rulerActive = !rulerActive;
+						document.getElementById('ruler-btn').classList.toggle('active', rulerActive);
+						rulerLines.forEach(l => series.removePriceLine(l));
+						rulerLines = [];
+						rulerPrice1 = null;
+						const info = document.getElementById('ruler-info');
+						info.style.display = 'none';
+						info.textContent = '';
+					}
+
+					chart.subscribeClick(param => {
+						if (!rulerActive || !param.point) return;
+						const price = series.coordinateToPrice(param.point.y);
+						if (rulerPrice1 === null) {
+							rulerPrice1 = price;
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: DARK_MODE ? '#e8e8e8' : '#000000', title: '①',
+							}));
+						} else {
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: DARK_MODE ? '#e8e8e8' : '#000000', title: '②',
+							}));
+							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
+							const sign = pct >= 0 ? '+' : '';
+							const info = document.getElementById('ruler-info');
+							info.style.display = 'block';
+							info.textContent = rulerPrice1.toFixed(0) + ' → ' + price.toFixed(0) + '   ' + sign + pct.toFixed(2) + '%';
+							rulerPrice1 = null;
+						}
+					});
+
+					async function init() {
+						try {
+							await loadCandles();
+							await refreshGammaTriple();
+							setStatus(ASSET + ' · Gamma Triple (' + WINDOW_HOURS + 'h trailing window, live)');
+						}
+						catch (e) { setStatus('Error: ' + e.message); }
+					}
+					init();
+					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshGammaTriple, REFRESH);
+				//]]></script>
+			</body>
+		</html>
+	</template>
+</odoo>

@@ -1,0 +1,143 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_forecast_snapshot_view_form" model="ir.ui.view">
+        <field name="name">dankbit_forecast_snapshot.view.form</field>
+        <field name="model">dankbit.forecast.snapshot</field>
+        <field name="arch" type="xml">
+            <form string="Forecast Snapshot">
+                <sheet>
+                    <group>
+                        <field name="asset" />
+                        <field name="bucket_start" />
+                        <field name="index_price" />
+                        <field name="top" />
+                        <field name="low" />
+                        <field name="bml" />
+                        <field name="smp" />
+                    </group>
+                    <group string="Gamma">
+                        <field name="bcg_price" />
+                        <field name="bcg_abs" />
+                        <field name="bpg_price" />
+                        <field name="bpg_abs" />
+                        <field name="scg_price" />
+                        <field name="scg_abs" />
+                        <field name="spg_price" />
+                        <field name="spg_abs" />
+                    </group>
+                    <group string="Delta">
+                        <field name="bcd_price" />
+                        <field name="bcd_abs" />
+                        <field name="bpd_price" />
+                        <field name="bpd_abs" />
+                        <field name="scd_price" />
+                        <field name="scd_abs" />
+                        <field name="spd_price" />
+                        <field name="spd_abs" />
+                    </group>
+                    <group string="Theta">
+                        <field name="bct_price" />
+                        <field name="bct_abs" />
+                        <field name="bpt_price" />
+                        <field name="bpt_abs" />
+                        <field name="sct_price" />
+                        <field name="sct_abs" />
+                        <field name="spt_price" />
+                        <field name="spt_abs" />
+                    </group>
+                    <group string="Vega">
+                        <field name="bcv_price" />
+                        <field name="bcv_abs" />
+                        <field name="bpv_price" />
+                        <field name="bpv_abs" />
+                        <field name="scv_price" />
+                        <field name="scv_abs" />
+                        <field name="spv_price" />
+                        <field name="spv_abs" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_snapshot_view_list" model="ir.ui.view">
+        <field name="name">dankbit_forecast_snapshot.view.list</field>
+        <field name="model">dankbit.forecast.snapshot</field>
+        <field name="arch" type="xml">
+            <list string="Forecast Snapshot">
+                <field name="asset" />
+                <field name="bucket_start" />
+                <field name="index_price" />
+                <field name="top" />
+                <field name="low" />
+                <field name="bml" />
+                <field name="smp" />
+                <!-- Hidden by default (too many columns to show all at once) —
+                     available via the list view's column-picker dropdown. -->
+                <field name="bcg_price" optional="hide" />
+                <field name="bcg_abs" optional="hide" />
+                <field name="bpg_price" optional="hide" />
+                <field name="bpg_abs" optional="hide" />
+                <field name="scg_price" optional="hide" />
+                <field name="scg_abs" optional="hide" />
+                <field name="spg_price" optional="hide" />
+                <field name="spg_abs" optional="hide" />
+                <field name="bcd_price" optional="hide" />
+                <field name="bcd_abs" optional="hide" />
+                <field name="bpd_price" optional="hide" />
+                <field name="bpd_abs" optional="hide" />
+                <field name="scd_price" optional="hide" />
+                <field name="scd_abs" optional="hide" />
+                <field name="spd_price" optional="hide" />
+                <field name="spd_abs" optional="hide" />
+                <field name="bct_price" optional="hide" />
+                <field name="bct_abs" optional="hide" />
+                <field name="bpt_price" optional="hide" />
+                <field name="bpt_abs" optional="hide" />
+                <field name="sct_price" optional="hide" />
+                <field name="sct_abs" optional="hide" />
+                <field name="spt_price" optional="hide" />
+                <field name="spt_abs" optional="hide" />
+                <field name="bcv_price" optional="hide" />
+                <field name="bcv_abs" optional="hide" />
+                <field name="bpv_price" optional="hide" />
+                <field name="bpv_abs" optional="hide" />
+                <field name="scv_price" optional="hide" />
+                <field name="scv_abs" optional="hide" />
+                <field name="spv_price" optional="hide" />
+                <field name="spv_abs" optional="hide" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_snapshot_view_search" model="ir.ui.view">
+        <field name="name">dankbit.forecast.snapshot.view.search</field>
+        <field name="model">dankbit.forecast.snapshot</field>
+        <field name="arch" type="xml">
+            <search string="Search Forecast Snapshot">
+                <field name="asset" string="Asset"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('asset', '=', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('asset', '=', 'ETH')]"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_snapshot_action" model="ir.actions.act_window">
+        <field name="name">Forecast Snapshot</field>
+        <field name="res_model">dankbit.forecast.snapshot</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="dankbit_forecast_snapshot_menu" name="Forecast Snapshot"
+        action="dankbit_forecast_snapshot_action"
+        parent="dankbit_root_menu"
+        sequence="60"/>
+</odoo>

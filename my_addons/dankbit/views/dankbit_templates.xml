@@ -1,0 +1,1617 @@
+<odoo>
+	<template id="dankbit_help" name="Dankbit Help">
+		<t t-call="website.layout">
+			<div class="container my-5">
+				<div class="row text-center">
+					<!-- Row 1: Long -->
+					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Long Call</p>
+						<img src="/dankbit/static/src/img/LC.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Long Call" />
+					</div>
+					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Long Put</p>
+						<img src="/dankbit/static/src/img/LP.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Long Put" />
+					</div>
+
+					<!-- Row 2: Short -->
+					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Short Call</p>
+						<img src="/dankbit/static/src/img/SC.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Short Call" />
+					</div>
+					<div class="col-md-6 mb-4">
+						<p class="fw-bold fs-5">Short Put</p>
+						<img src="/dankbit/static/src/img/SP.png"
+							class="img-fluid rounded shadow-sm"
+							alt="Short Put" />
+					</div>
+				</div>
+			</div>
+		</t>
+	</template>
+
+	<template id="dankbit_page" name="Dankbit Plot">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta http-equiv="refresh" t-att-content="refresh_interval"/>
+				<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+				<meta http-equiv="Pragma" content="no-cache"/>
+				<meta http-equiv="Expires" content="0"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="plot_title"/></title>
+
+				<style>
+					html, body {
+						margin: 0;
+						padding: 0;
+						background: white;
+					}
+
+					.wrap {
+						display: flex;
+						justify-content: center;
+						align-items: center;
+					}
+
+					img {
+						display: block;
+						max-width: 100vw;
+						height: auto;
+					}
+
+					.zone-info {
+						position: fixed;
+						top: 8px;
+						left: 12px;
+						font-family: sans-serif;
+						font-size: 14pt;
+						font-weight: bold;
+						color: #000;
+						background: rgba(255,255,255,0.88);
+						padding: 4px 10px;
+						border-radius: 4px;
+						z-index: 10;
+						user-select: text;
+					}
+
+					.zone-info-right {
+						position: fixed;
+						top: 8px;
+						right: 12px;
+						font-family: sans-serif;
+						font-size: 14pt;
+						font-weight: bold;
+						color: #000;
+						background: rgba(255,255,255,0.88);
+						padding: 4px 10px;
+						border-radius: 4px;
+						z-index: 10;
+						user-select: text;
+						text-align: left;
+					}
+				</style>
+			</head>
+
+			<body>
+				<div t-if="zone_info_lines" class="zone-info">
+					<t t-foreach="zone_info_lines" t-as="line">
+						<div t-att-style="'color: %s' % line['color'] if line['color'] else None"><t t-esc="line['text']"/></div>
+					</t>
+				</div>
+				<div t-if="theta_info_lines" class="zone-info-right">
+					<t t-foreach="theta_info_lines" t-as="line">
+						<div t-att-style="'color: %s' % line['color'] if line['color'] else None"><t t-esc="line['text']"/></div>
+					</t>
+				</div>
+				<div class="wrap">
+					<img
+						t-att-src="'data:image/png;base64,%s' % image_b64"
+						alt="Dankbit plot"
+					/>
+				</div>
+
+			</body>
+		</html>
+	</template>
+
+
+	<template id="dankbit_slideshow" name="Dankbit Slideshow">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="instrument"/> — Slideshow</title>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: white; }
+					.slide { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+					.slide.active { display: block; }
+					.slide iframe { width: 100%; height: 100%; border: none; }
+					.indicator {
+						position: fixed; top: 8px; right: 12px;
+						font-family: monospace; font-size: 14pt;
+						color: #333; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#swipe-overlay {
+						position: fixed; top: 0; left: 0;
+						width: 100%; height: 100%;
+						z-index: 5;
+					}
+				</style>
+			</head>
+			<body>
+				<div class="indicator" id="ind"/>
+				<div id="swipe-overlay"/>
+				<t t-foreach="hours_list" t-as="h">
+					<div class="slide"
+						t-att-data-src="'/%s' % instrument if h == 0 else '/%s/%d' % (instrument, h)"
+						t-att-data-label="'All' if h == 0 else str(h) + 'h'">
+						<iframe/>
+					</div>
+				</t>
+				<script>//<![CDATA[
+					const slides = document.querySelectorAll('.slide');
+					const ind = document.getElementById('ind');
+					let cur = 0;
+
+					function show(i) {
+						slides[cur].classList.remove('active');
+						cur = ((i % slides.length) + slides.length) % slides.length;
+						const slide = slides[cur];
+						const iframe = slide.querySelector('iframe');
+						if (!iframe.dataset.loaded) {
+							iframe.src = slide.dataset.src;
+							iframe.dataset.loaded = '1';
+						}
+						slide.classList.add('active');
+						ind.textContent = slide.dataset.label;
+					}
+
+					show(0);
+
+					document.addEventListener('keydown', e => {
+						if (e.key === 'ArrowRight') show(cur + 1);
+						else if (e.key === 'ArrowLeft') show(cur - 1);
+					});
+
+					let touchX = null;
+					const overlay = document.getElementById('swipe-overlay');
+					overlay.addEventListener('touchstart', e => {
+						touchX = e.touches[0].clientX;
+					}, { passive: true });
+					overlay.addEventListener('touchend', e => {
+						if (touchX === null) return;
+						const dx = e.changedTouches[0].clientX - touchX;
+						touchX = null;
+						if (Math.abs(dx) < 40) return;
+						show(dx < 0 ? cur + 1 : cur - 1);
+					}, { passive: true });
+				//]]></script>
+			</body>
+		</html>
+	</template>
+
+	<template id="dankbit_tv_chart_until" name="Dankbit TV Chart Until Expiry">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title><t t-esc="asset"/> <t t-esc="expiry"/> — <t t-if="show_gamma_point == 'true'">Gamma Chart</t><t t-elif="show_strike_gamma == 'true'">Strike Gamma</t><t t-else="">Delta Chart</t></title>
+				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
+				<style>
+					* { margin: 0; padding: 0; box-sizing: border-box; }
+					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
+					#chart-container { width: 100%; height: 100%; }
+					#status {
+						position: fixed; bottom: 32px; left: 12px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						z-index: 10; pointer-events: none;
+					}
+					#tf-bar {
+						position: fixed; top: 8px; left: 12px;
+						display: flex; gap: 4px; align-items: center; z-index: 10;
+					}
+					#exchange-label {
+						position: fixed; top: 8px; right: 80px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
+					.toggle-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+						display: flex; align-items: center; gap: 4px;
+					}
+					.tf-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; padding: 0 2px;
+					}
+					#ruler-info {
+						position: fixed; top: 40px; left: 12px;
+						font-family: monospace; font-size: 12pt; font-weight: bold;
+						color: #222; background: rgba(255,255,255,0.92);
+						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; display: none;
+					}
+					.tf-btn {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+					}
+					.tf-btn:hover { background: #f0f0f0; }
+					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+					#context-menu {
+						position: fixed;
+						font-family: monospace; font-size: 11pt;
+						background: #fff; border: 1px solid #ccc; border-radius: 4px;
+						box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+						padding: 4px 0; z-index: 20; display: none;
+						min-width: 160px;
+					}
+					#context-menu .context-menu-item {
+						padding: 6px 14px; color: #333; cursor: pointer; white-space: nowrap;
+					}
+					#context-menu .context-menu-item:hover { background: #f0f0f0; }
+
+					/* "Settings" button/dialog (see openSettingsModal() below) —
+					   color pickers for the Zones boxes and Bands lines. Plain
+					   centered overlay + box, no library, matching this page's
+					   existing hand-rolled context-menu approach. */
+					.modal-overlay {
+						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+						background: rgba(0,0,0,0.4);
+						z-index: 30;
+						display: flex; align-items: center; justify-content: center;
+					}
+					.modal-box {
+						background: #fff; border-radius: 6px; padding: 16px 20px;
+						font-family: monospace; font-size: 11pt; color: #333;
+						min-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+					}
+					.modal-header {
+						display: flex; justify-content: space-between; align-items: center;
+						font-weight: bold; margin-bottom: 12px; font-size: 12pt;
+					}
+					.modal-close { cursor: pointer; padding: 0 4px; }
+					.modal-close:hover { color: #c00; }
+					.modal-section { margin-bottom: 12px; }
+					.modal-section-title { font-weight: bold; margin-bottom: 6px; color: #555; }
+					.color-row {
+						display: flex; align-items: center; justify-content: space-between;
+						gap: 8px; padding: 3px 0;
+					}
+					.color-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
+					   script below) — toggles this class on the body element; the
+					   chart's own background/text/axis colors are switched
+					   separately via chart.applyOptions(), not CSS, since they're
+					   canvas-drawn. */
+					body.dark, body.dark html { background: #000000; }
+					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
+					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-label { color: #ccc; }
+					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
+					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-btn:hover { background: #262626; }
+					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+					body.dark #context-menu .context-menu-item { color: #ddd; }
+					body.dark #context-menu .context-menu-item:hover { background: #333; }
+					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
+					body.dark .modal-section-title { color: #aaa; }
+					body.dark .modal-close:hover { color: #f66; }
+				</style>
+			</head>
+			<body>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
+				<div id="chart-container"/>
+				<div id="status">Loading…</div>
+				<div id="exchange-label"/>
+				<div id="tf-bar">
+					<span class="tf-label">Timeframe:</span>
+					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
+					</select>
+					<span class="tf-label">Theme:</span>
+					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
+						<option value="light">Light</option>
+						<option value="dark">Dark</option>
+					</select>
+					<t t-if="show_gamma_point == 'true'">
+						<label class="toggle-label">
+							<input type="checkbox" id="gamma-tops-toggle" onchange="onToggleGammaTops()"/>
+							Top OI(s)
+						</label>
+					</t>
+					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+						<label class="toggle-label">
+							<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
+							S/D
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
+							Zones
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="bands-toggle" onchange="onToggleBands()"/>
+							Bands
+						</label>
+						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
+							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
+							Thales Forecast
+						</label>
+						<span class="tf-label">Zones from:</span>
+						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
+							<option value="midnight">00:00 Iran</option>
+							<option value="hours"><t t-esc="zones_box_window_hours"/>h ago</option>
+						</select>
+					</t>
+					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+				</div>
+				<div id="ruler-info"/>
+				<div id="context-menu">
+					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
+				<div id="settings-modal" class="modal-overlay" style="display:none" onclick="if (event.target === this) closeSettingsModal()">
+					<div class="modal-box">
+						<div class="modal-header">
+							<span>Chart Colors</span>
+							<span class="modal-close" onclick="closeSettingsModal()">&#10005;</span>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Zones</div>
+							<label class="color-row">High/Low Zone Box <input type="color" id="color-zonesBox"/></label>
+							<label class="color-row">Middle Zone (SMP/BML) <input type="color" id="color-middleZone"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Bands</div>
+							<label class="color-row">High/Resistance <input type="color" id="color-highResistance"/></label>
+							<label class="color-row">Low/Support <input type="color" id="color-lowSupport"/></label>
+							<label class="color-row">Gamma Band <input type="color" id="color-gammaBand"/></label>
+							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-smartLiqUpper"/></label>
+							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-smartLiqLower"/></label>
+						</div>
+						<div class="modal-actions">
+							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
+							<button class="tf-btn" onclick="saveChartColors()">Save</button>
+						</div>
+					</div>
+				</div>
+				<script>//<![CDATA[
+					const cfg              = document.getElementById('cfg').dataset;
+					const INSTRUMENT       = cfg.instrument;
+					const ASSET            = cfg.asset;
+					// Candles are Binance spot (see dankbit.trade.get_candles) —
+					// BTC/ETH are the only assets this addon ever serves a chart
+					// for, so this string concat mirrors the server-side
+					// _BINANCE_SYMBOL_MAP without needing a new cfg field.
+					document.getElementById('exchange-label').textContent = 'Binance Spot · ' + ASSET + 'USDT';
+					const MONTHLY_INST     = cfg.monthly || '';
+					const REFRESH          = parseInt(cfg.refresh, 10) * 1000;
+					// Also drives Bands' own poll interval (see setInterval(refreshBands, ...)
+					// below) — not just the Zones boxes despite the name/setting.
+					const ZONES_BOX_REFRESH = parseInt(cfg.zonesBoxRefresh, 10) * 1000;
+					const ZONES_BOX_WINDOW_HOURS = parseInt(cfg.zonesBoxWindowHours, 10);
+					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
+					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
+					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
+					// Only true on /oi/<asset> — /chart/<asset> and
+					// /gamma/<instrument> always pass show_gamma_point="false"
+					// (see _build_tv_chart_context).
+					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
+					// Only true on /gamma/<instrument> — the restored "Strike
+					// Gamma" indicator (see drawStrikeGammaLines below), one
+					// price line per distinct strike rather than /oi/<asset>'s
+					// single top-strike-per-scope "Top OI(s)" line set.
+					const SHOW_STRIKE_GAMMA = cfg.showStrikeGamma === 'true';
+					// The instrument /gamma/<instrument> was requested with
+					// (e.g. "BTC-25JUL26") — unrelated to INSTRUMENT above
+					// (the configured *weekly* expiry), this is whatever
+					// specific expiry the URL named, used as the isolated
+					// cutoff for gamma-by-strike-at (see refreshStrikeGamma) —
+					// that one instrument's own trades only, not cumulative
+					// through it the way Top OI(s)' scopes are.
+					const STRIKE_GAMMA_INSTRUMENT = cfg.strikeGammaInstrument || '';
+					const SGI_URL = STRIKE_GAMMA_INSTRUMENT ? '/api/gamma-by-strike-at/' + STRIKE_GAMMA_INSTRUMENT : '';
+					// Thales Forecast candle colors — user-configurable via
+					// Settings → Dankbit → Thales Forecast (res.config.settings),
+					// defaults are light red/green so forecast candles stay
+					// easily distinguishable from the real teal/red candle series.
+					const FORECAST_UP_COLOR = cfg.forecastUpColor || '#a5d6a7';
+					const FORECAST_DOWN_COLOR = cfg.forecastDownColor || '#ef9a9a';
+					const FORECAST_WICK_UP_COLOR = cfg.forecastWickUpColor || '#66bb6a';
+					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
+					// /oi/<asset> and /gamma/<instrument> are the minimal pages
+					// (candles + exactly one gamma indicator each — no
+					// Weekly/Monthly/All/Daily delta=0 lines, no zones
+					// boxes/extrema, no S/D (Lines)/Zones/Bands/Thales Forecast
+					// checkboxes); the footer (trade count/nearest expiry) is
+					// untouched either way.
+					const MINIMAL_CHART = SHOW_GAMMA_POINT || SHOW_STRIKE_GAMMA;
+					// User-toggleable via the "S/D" checkbox next to the Ruler
+					// button (Delta Chart only — the Gamma Chart has its own,
+					// unrelated "Top OI(s)" checkbox instead) — hides every
+					// horizontal price-line indicator (delta=0 sets) and, to
+					// actually cut server load rather than just hiding the result
+					// client-side, makes each of their refresh*() functions skip
+					// the fetch entirely while off (see onToggleLines() below).
+					// refreshMonthlyDeltaZero() is the one exception — it always
+					// fetches regardless, since its trade_count feeds the footer.
+					// Unchecked/off by default, matching the checkbox's own
+					// default (unchecked) state above.
+					let SHOW_ALL_LINES = false;
+					// User-toggleable via the "Zones" checkbox (Delta Chart only,
+					// right after "S/D") — controls the yellow top/bottom
+					// zero-crossing boxes (High Zone/Low Zone) and the teal Seller
+					// Max Profit/Buyer Max Loss box (Middle Zone), i.e. everything
+					// refreshZonesBoxes()/clearZonesBoxes() draw. Checked/on by
+					// default (matching the checkbox's own default-checked state
+					// above), since these boxes were always-on before this flag
+					// existed — unchecking it stops refreshZonesBoxes() from
+					// calling the server at all, purely to reduce server load.
+					// This has no effect on dankbit.bands either way: get_box()
+					// (which /api/zones-box/<asset> calls) never persists,
+					// checked or not — only the 4-hourly compute_snapshot() cron
+					// ever writes to that model.
+					let SHOW_ZONES_BOXES = true;
+					// User-toggleable via the "Bands" checkbox (Delta Chart
+					// only — this indicator is already suppressed on DG Chart via
+					// MINIMAL_CHART, so this control isn't shown there at all, see the
+					// t-if on its markup). Controls only the High/Resistance + Low/Support +
+					// Gamma Band lines (green/red/dashed violet) — deliberately NOT
+					// the yellow/teal zones boxes, which have their own separate
+					// "Zones" checkbox instead (SHOW_ZONES_BOXES above). Stops
+					// refreshBands() from calling the server at all while off.
+					// refreshBands() only ever reads the already-persisted
+					// dankbit.bands rows (/api/bands/<asset>) — it
+					// never triggers a new computation, for any expiry_index. Every
+					// tracked expiry's row (see TRACKED_EXPIRY_COUNT) is computed and
+					// refreshed solely by the 4-hourly compute_snapshot() cron;
+					// nothing this browser does — checking this box, leaving it
+					// checked, or polling while it's open — causes new extrema to be
+					// computed.
+					let SHOW_BANDS = false;
+					// Trade window used by the yellow/teal zones boxes (Delta Chart
+					// only, "Zones from" dropdown next to "Bands") — 'midnight' is the
+					// original since-00:00-UTC-through-now default; 'hours' switches
+					// to the trailing ZONES_BOX_WINDOW_HOURS hours instead (see
+					// dankbit.zones_box_window_hours setting). Only 'hours' is ever
+					// sent as a query param (see refreshZonesBoxes()) — a live,
+					// non-persisted override on the server side (see get_box()'s
+					// hours param); the 4-hourly compute_snapshot() cron and every
+					// other viewer's default midnight-based view are completely
+					// unaffected either way.
+					let ZONES_BOX_WINDOW_MODE = 'midnight';
+					// "Top OI(s)" checkbox (Gamma Chart only) — replaces the
+					// old separate "Strike Gamma"/"Strike Gamma Nearest"/
+					// "Strike Gamma Weekly"/"Strike Gamma Monthly" checkboxes
+					// with one: instead of drawing every strike that has
+					// traded (the old light-gray-to-black gradient), this
+					// draws exactly one line per scope (Weekly/Monthly/All
+					// expiries) — that scope's own single
+					// highest-positive-gamma strike, via the same
+					// _gamma_by_strike()-backed
+					// gamma_by_strike_json/gamma_by_strike_until_json routes
+					// the old checkboxes used (see refreshGammaTops below).
+					// Unchecked by default.
+					let SHOW_GAMMA_TOPS = false;
+					// "Light"/"Dark" theme dropdown (all 3 TV chart pages — Delta
+					// Chart, Gamma Chart, Strike Gamma) — see onThemeChange()/
+					// applyTheme() further down. Light is the default, matching
+					// this chart's original all-white look, unless the browser
+					// already has a saved preference (THEME_STORAGE_KEY, a plain
+					// localStorage entry — per-browser, not per-account, since
+					// there's no user-settings model this addon writes to for
+					// display prefs) from a previous visit, in which case that
+					// preference is honored immediately (see the createChart call
+					// and the select-sync block below) rather than flashing light
+					// mode first. A few indicators draw their own line stroke
+					// using a fixed black/gray color that would otherwise blend
+					// into a black chart background — axisBlack()/rulerColor()
+					// swap those to a light gray whenever dark mode is active,
+					// used in place of the literal 'black'/'#555' in
+					// drawGammaTopLine(), the delta=0 "supply" line color, and
+					// the ruler lines.
+					const THEME_STORAGE_KEY = 'dankbit_theme';
+					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
+					function axisBlack() { return DARK_MODE ? '#e8e8e8' : '#000000'; }
+					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
+					// Sync the theme <select> and the body.dark CSS class to
+					// whatever DARK_MODE resolved to above — the markup always
+					// defaults to the "light" option server-side (there being no
+					// per-user server-side setting to render it from), so a
+					// returning visitor with a saved "dark" preference needs this
+					// corrected client-side before anything is drawn.
+					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
+					document.body.classList.toggle('dark', DARK_MODE);
+
+					// "Settings" button/dialog (all 3 TV chart pages, after Ruler) —
+					// user-pickable colors for the Zones boxes and Bands lines,
+					// persisted per-browser via localStorage (same pattern as
+					// THEME_STORAGE_KEY above), not a server-side setting. Applies
+					// on every page even though Zones/Bands only ever draw data on
+					// the Delta Chart (MINIMAL_CHART suppresses them elsewhere) —
+					// harmless no-op there since the series just never get data.
+					const COLOR_STORAGE_KEY = 'dankbit_chart_colors';
+					const DEFAULT_COLORS = {
+						zonesBox: '#fbc02d',
+						middleZone: '#008080',
+						highResistance: '#2e7d32',
+						lowSupport: '#c62828',
+						gammaBand: '#c9a0dc',
+						smartLiqUpper: '#4fc3f7',
+						smartLiqLower: '#fb8c00',
+					};
+					let chartColors = Object.assign({}, DEFAULT_COLORS);
+					try {
+						Object.assign(chartColors, JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}'));
+					} catch (e) { /* malformed/legacy stored value — fall back to defaults */ }
+
+					function hexToRgba(hex, alpha) {
+						const h = hex.replace('#', '');
+						const r = parseInt(h.substring(0, 2), 16);
+						const g = parseInt(h.substring(2, 4), 16);
+						const b = parseInt(h.substring(4, 6), 16);
+						return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+					}
+
+					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
+					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
+					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
+					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
+					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
+					const SG_URL           = '/api/gamma-by-strike/' + ASSET;
+					const SGW_URL          = '/api/gamma-by-strike-until/' + INSTRUMENT;
+					const SGM_URL          = MONTHLY_INST ? '/api/gamma-by-strike-until/' + MONTHLY_INST : '';
+					const BANDS_URL        = '/api/bands/' + ASSET;
+					const ZB_URL           = '/api/zones-box/' + ASSET;
+					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
+					const FORECAST_URL    = '/api/forecast/' + ASSET;
+					// "Thales Forecast" checkbox (Delta Chart only — after
+					// "Bands"; the Gamma Chart no longer has this
+					// checkbox at all, so SHOW_FORECAST simply never gets
+					// set true there) — unchecked by default, same server-
+					// load-reducing pattern as every other optional indicator on
+					// this chart.
+					// Draws a fully deterministic path (see FORECAST_URL) ported
+					// from Thales's own forecast-candle engine — see forecast.py.
+					let SHOW_FORECAST = false;
+					let   INTERVAL         = '4h';
+					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+
+					// Lightweight Charts has no native IANA-timezone support — it always
+					// renders epoch seconds as UTC wall-clock time. To display any other
+					// zone, every timestamp fed into the chart is pre-shifted by that
+					// zone's current UTC offset (DST-aware, since it's computed against
+					// "now"), and localization.timeFormatter below formats with
+					// timeZone: 'UTC' so the shifted epoch reads as real wall-clock time.
+					// The zone itself is auto-detected from the browser rather than
+					// hardcoded, falling back to UTC (offset 0) if detection ever fails.
+					const tzOffset = (() => {
+						let zone;
+						try {
+							zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+						} catch (e) {
+							return 0;
+						}
+						const d = new Date();
+						const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+						const local = new Date(d.toLocaleString('en-US', { timeZone: zone }));
+						return (local - utc) / 1000;
+					})();
+
+					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
+						width: window.innerWidth, height: window.innerHeight,
+						// Colors already reflect DARK_MODE (a saved localStorage
+						// preference from a prior visit, or the light-mode default)
+						// so a returning dark-mode user doesn't see a light flash
+						// before applyTheme() would otherwise run — see DARK_MODE above.
+						layout: {
+							background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+							textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+						},
+						grid: { vertLines: { visible: false }, horzLines: { visible: false } },
+						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
+						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
+						localization: {
+							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
+								timeZone: 'UTC',
+								month: 'short', day: 'numeric',
+								hour: '2-digit', minute: '2-digit',
+							}),
+						},
+					});
+
+					window.addEventListener('resize', () => {
+						chart.resize(window.innerWidth, window.innerHeight);
+					});
+
+					const series = chart.addCandlestickSeries({
+						upColor: '#26a69a', downColor: '#ef5350',
+						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+					});
+
+					// Invisible helper series solely to extend the shared time axis
+					// FUTURE_MARGIN_DAYS past the last real candle, with labeled tick
+					// marks. Candlestick setData() silently drops OHLC-less
+					// "whitespace" points (confirmed empirically — a 30-point future
+					// whitespace array passed alongside real candles left
+					// series.data().length unchanged), so a real, fully-valued (if
+					// invisible) line series is used instead; all series on a chart
+					// share one time scale, so its future points extend the same axis
+					// the candlesticks are drawn on.
+					const futureAxisSeries = chart.addLineSeries({
+						color: 'rgba(0,0,0,0)', lineWidth: 1,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+
+					const highResistanceSeries    = chart.addLineSeries({ color: chartColors.highResistance, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const lowSupportSeries = chart.addLineSeries({ color: chartColors.lowSupport, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const gammaBandSeries          = chart.addLineSeries({ color: chartColors.gammaBand, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					// Smart Role-Aware Synthetic Liquidity term-structure lines
+					// (dankbit.bands.smart_liq_upper_price/smart_liq_lower_price)
+					// — part of the "Bands" checkbox/refreshBands(), not a
+					// separate toggle, dotted to stay distinct from the
+					// solid/dashed lines already on this chart.
+					const smartLiqUpperSeries = chart.addLineSeries({ color: chartColors.smartLiqUpper, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+					const smartLiqLowerSeries = chart.addLineSeries({ color: chartColors.smartLiqLower, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dotted, lastValueVisible: false, priceLineVisible: false });
+
+					// Zones boxes: filled rectangles marking the above-price and below-price
+					// zero-crossing zones, using addBaselineSeries's flat top-line + baseValue
+					// fill (the "line" is a constant top price, filled down to a constant
+					// baseValue bottom price) to fake a bounded rectangle Lightweight Charts
+					// has no native primitive for.
+					const aboveBoxSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: chartColors.zonesBox, topFillColor1: hexToRgba(chartColors.zonesBox, 0.25), topFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						bottomLineColor: chartColors.zonesBox, bottomFillColor1: hexToRgba(chartColors.zonesBox, 0.25), bottomFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					const belowBoxSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: chartColors.zonesBox, topFillColor1: hexToRgba(chartColors.zonesBox, 0.25), topFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						bottomLineColor: chartColors.zonesBox, bottomFillColor1: hexToRgba(chartColors.zonesBox, 0.25), bottomFillColor2: hexToRgba(chartColors.zonesBox, 0.25),
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					// addBaselineSeries only strokes its top edge; add a plain line series
+					// for the bottom edge so both edges get the same visible border.
+					const aboveBoxBottomLine = chart.addLineSeries({ color: chartColors.zonesBox, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const belowBoxBottomLine = chart.addLineSeries({ color: chartColors.zonesBox, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+
+					// Seller Max Profit / Buyer Max Loss box — same left/right time edges as the yellow
+					// box above (both come from the same get_box() call for the nearest
+					// expiry), teal so it stays visually distinct from yellow/violet/
+					// green. setBoxData() already draws a single line instead of a box
+					// when top and bottom coincide (or only one is available).
+					const smpBmlBoxSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: chartColors.middleZone, topFillColor1: hexToRgba(chartColors.middleZone, 0.25), topFillColor2: hexToRgba(chartColors.middleZone, 0.25),
+						bottomLineColor: chartColors.middleZone, bottomFillColor1: hexToRgba(chartColors.middleZone, 0.25), bottomFillColor2: hexToRgba(chartColors.middleZone, 0.25),
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					const smpBmlBoxBottomLine = chart.addLineSeries({ color: chartColors.middleZone, lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+
+					// Thales Forecast candles ("Thales Forecast" checkbox) —
+					// Thales's deterministic forecast-candle engine (see
+					// forecast.py), sourced from /api/forecast/<asset>. Light
+					// red/green (user-configurable, see FORECAST_UP_COLOR etc.
+					// above) so it stays easily distinguishable from the real
+					// candles' own teal/red at a glance.
+					const forecastSeries = chart.addCandlestickSeries({
+						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
+						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
+						lastValueVisible: false, priceLineVisible: false,
+					});
+
+					// "Top OI(s)" lines (only on /oi/<asset>, see
+					// SHOW_GAMMA_POINT) — one black, lineWidth-2 price line
+					// per scope (Weekly/Monthly/All expiries), marking that
+					// scope's own single highest-positive-gamma strike. A
+					// scope with no strikes at all, or whose highest gamma
+					// is <= 0 (nothing to mark), simply contributes no
+					// line. All 3 scopes reuse the same
+					// _gamma_by_strike()-backed endpoints: All (SG_URL, no
+					// cutoff), Weekly (SGW_URL), Monthly (SGM_URL, skipped
+					// if unconfigured).
+					function gammaTop(data) {
+						const strikes = data.strikes || [];
+						if (!strikes.length) return null;
+						const top = strikes.reduce((best, item) => (item.gamma > best.gamma ? item : best), strikes[0]);
+						return top.gamma > 0 ? top : null;
+					}
+
+					// Signed leg contribution, /1e6 like the combined value —
+					// unlike the Abs. lines elsewhere in this addon, sign is
+					// kept (not abs()'d) here since the whole point of the
+					// breakdown is showing which legs pushed gamma up vs
+					// down at this strike, not just how big each one is.
+					function fmtLegGamma(v) {
+						const r = Math.round(v / 1e6);
+						return (r >= 0 ? '+' : '') + r;
+					}
+
+					function drawGammaTopLine(top, label) {
+						if (!top) return;
+						gammaTopsLines.push(series.createPriceLine({
+							price: top.price, color: axisBlack(), lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: axisBlack(),
+							title: label + ' +' + Math.round(top.gamma / 1e6) +
+								'  LC:' + fmtLegGamma(top.long_call) + ' LP:' + fmtLegGamma(top.long_put) +
+								' SC:' + fmtLegGamma(top.short_call) + ' SP:' + fmtLegGamma(top.short_put),
+						}));
+					}
+
+					// "Top OI(s)" checkbox (Gamma Chart only) — single
+					// checkbox replacing the old separate "Strike Gamma"/
+					// "Strike Gamma Nearest"/"Strike Gamma Weekly"/"Strike
+					// Gamma Monthly" checkboxes; flips SHOW_GAMMA_TOPS and
+					// re-fetches all 3 scopes (or clears, if just turned
+					// off).
+					// Re-checked between every awaited fetch below (see each
+					// `if (gammaTopsOff())` call) — the checkbox may get switched
+					// off mid-sequence, since this function chains 3 sequential
+					// fetches; without re-checking, a toggle-off partway through
+					// would still let the remaining fetches draw their lines a few
+					// seconds later. On a mid-sequence bail, clears whatever this
+					// run had already drawn so far too, not just skips new lines.
+					function gammaTopsOff() { return !SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS; }
+
+					async function refreshGammaTops() {
+						// Re-entrancy guard (see gammaTopsRefreshing's own comment) —
+						// a call that finds one already in flight just skips this
+						// tick entirely rather than racing it; the next poll or
+						// toggle will pick up fresh data anyway.
+						if (gammaTopsRefreshing) return;
+						gammaTopsRefreshing = true;
+						try {
+							gammaTopsLines.forEach(l => series.removePriceLine(l));
+							gammaTopsLines.length = 0;
+							if (gammaTopsOff()) return;
+
+							const allData = await (await fetch(SG_URL)).json();
+							if (gammaTopsOff()) return;
+							drawGammaTopLine(gammaTop(allData), 'All');
+
+							const weeklyData = await (await fetch(SGW_URL)).json();
+							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
+							drawGammaTopLine(gammaTop(weeklyData), 'Weekly');
+
+							if (SGM_URL) {
+								const monthlyData = await (await fetch(SGM_URL)).json();
+								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
+								drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
+							}
+						} finally {
+							gammaTopsRefreshing = false;
+						}
+					}
+
+					function onToggleGammaTops() {
+						SHOW_GAMMA_TOPS = document.getElementById('gamma-tops-toggle').checked;
+						refreshGammaTops();
+					}
+
+					// "Strike Gamma" lines (/gamma/<instrument> only) — the
+					// restored per-strike indicator: one price line per
+					// distinct strike that has ever traded, isolated to
+					// STRIKE_GAMMA_INSTRUMENT's own expiry alone (see SGI_URL
+					// — gamma-by-strike-at, not the cumulative
+					// gamma-by-strike-until Top OI(s) uses), unlike Gamma
+					// Tops' single top-strike-per-scope line. Color is a
+					// light-gray-to-black gradient by
+					// |gamma| magnitude relative to the largest |gamma| in
+					// this same response — the strike with the biggest
+					// exposure is always pure black, the smallest is light
+					// gray. Title is signed dollar-gamma (abs/1e6, rounded,
+					// '+' for net buy-side/taker-dominant, '-' for net
+					// sell-side, same raw buy/sell convention every other
+					// Buyer/Seller-labeled line in this app uses), followed
+					// by that strike's own dominant leg — whichever of
+					// long_call/long_put/short_call/short_put has the
+					// largest |value| at that strike (same 4-leg split
+					// options.per_leg_greeks()/Top OI(s) use), labeled
+					// LC/LP/SC/SP — so a glance at the line says not just
+					// how much gamma is at this strike but which position
+					// is driving it.
+					let strikeGammaLines = [];
+
+					function dominantLeg(item) {
+						const legs = { LC: item.long_call, LP: item.long_put, SC: item.short_call, SP: item.short_put };
+						return Object.keys(legs).reduce((best, k) => Math.abs(legs[k]) > Math.abs(legs[best]) ? k : best, 'LC');
+					}
+
+					function drawStrikeGammaLines(data) {
+						strikeGammaLines.forEach(l => series.removePriceLine(l));
+						strikeGammaLines.length = 0;
+						const strikes = data.strikes || [];
+						const maxAbsGamma = strikes.reduce((m, item) => Math.max(m, Math.abs(item.gamma)), 0);
+						strikes.forEach(item => {
+							const sign = item.gamma >= 0 ? '+' : '-';
+							const intensity = maxAbsGamma > 0 ? Math.abs(item.gamma) / maxAbsGamma : 0;
+							// Light mode: biggest exposure -> near-black (high contrast
+							// on white), smallest -> light gray, as before. Dark mode
+							// mirrors that same gradient (255 - lightShade) so the
+							// biggest exposure instead lands near-white (high contrast
+							// on black) rather than vanishing into it.
+							const lightShade = Math.round(220 - intensity * 220);
+							const shade = DARK_MODE ? 255 - lightShade : lightShade;
+							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
+							strikeGammaLines.push(series.createPriceLine({
+								price: item.price, color, lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: color,
+								title: 'Γ ' + sign + Math.round(Math.abs(item.gamma) / 1e6) + ' ' + dominantLeg(item),
+							}));
+						});
+					}
+
+					// No checkbox — this is /gamma/<instrument>'s sole
+					// purpose, so it's always on (gated only by
+					// SHOW_STRIKE_GAMMA/SGI_URL themselves being set at all,
+					// same as every other minimal-page indicator's
+					// MINIMAL_CHART gating elsewhere on this page).
+					async function refreshStrikeGamma() {
+						if (!SHOW_STRIKE_GAMMA || !SGI_URL) return;
+						const data = await (await fetch(SGI_URL)).json();
+						drawStrikeGammaLines(data);
+					}
+
+					let priceLines    = [];
+					let monthlyLines  = [];
+					let allLines      = [];
+					let tomorrowLines = [];
+					let dayAfterTomorrowLines = [];
+
+					function clearLines(arr) {
+						arr.forEach(pl => series.removePriceLine(pl));
+						arr.length = 0;
+					}
+					// Gamma Chart's own "Top OI(s)" line set (see
+					// refreshGammaTops above) — the Delta Chart has no
+					// gamma peak/bottom line indicator of its own; that
+					// indicator lives only on the Gamma Chart.
+					let gammaTopsLines = [];
+					// refreshGammaTops does 3 sequential awaited fetches, and is
+					// itself called from init(), the checkbox's onToggleGammaTops(),
+					// and setInterval(refreshGammaTops, REFRESH) — without this
+					// guard, an overlapping invocation (e.g. a poll tick firing
+					// while a previous run is still mid-flight) races on the
+					// shared gammaTopsLines array: each clears what the other
+					// already drew and pushes its own lines on top, leaving
+					// duplicated/orphaned price lines behind.
+					let gammaTopsRefreshing = false;
+
+					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function toCandle(k) {
+						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
+					}
+
+					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 365 };
+					const BARS_PER_DAY = { '1h': 24, '4h': 6, '1d': 1 };
+					const INTERVAL_SECONDS = { '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
+
+					const FUTURE_MARGIN_DAYS = 5;
+
+					// realCandles.length + futureTickCount is the current total
+					// logical bar count across both series sharing the time axis —
+					// tracked directly rather than re-derived from series.data(),
+					// since the candlestick series' own data() only ever reflects
+					// realCandles (see futureAxisSeries above).
+					let realCandles = [];
+					let futureTickCount = 0;
+
+					function applyVisibleRange() {
+						const days = TF_WINDOW[INTERVAL] || 21;
+						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
+						const lastIndex = realCandles.length + futureTickCount - 1;
+						chart.timeScale().setVisibleLogicalRange({
+							from: lastIndex - days * barsPerDay,
+							to:   lastIndex,
+						});
+					}
+
+					// Right-click "Reset chart view" — mirrors original TradingView's
+					// context-menu item: re-autoscales the price axis (undoes any
+					// manual drag-zoom on the price scale) and restores the default
+					// time-scale window for the current timeframe (undoes any
+					// pan/zoom on the time axis), without touching series data or any
+					// indicator toggle state.
+					function resetChartView() {
+						chart.priceScale('right').applyOptions({ autoScale: true });
+						applyVisibleRange();
+					}
+
+					// Custom context menu (Lightweight Charts has no built-in one) —
+					// right-clicking the chart area shows a single "Reset chart view"
+					// item at the cursor, clamped so it never renders off-screen.
+					const contextMenu = document.getElementById('context-menu');
+
+					function hideContextMenu() {
+						contextMenu.style.display = 'none';
+					}
+
+					function showContextMenu(x, y) {
+						contextMenu.style.display = 'block';
+						const maxX = window.innerWidth - contextMenu.offsetWidth - 4;
+						const maxY = window.innerHeight - contextMenu.offsetHeight - 4;
+						contextMenu.style.left = Math.min(x, maxX) + 'px';
+						contextMenu.style.top = Math.min(y, maxY) + 'px';
+					}
+
+					function onResetChartViewClick() {
+						resetChartView();
+						hideContextMenu();
+					}
+
+					const chartContainerEl = document.getElementById('chart-container');
+					chartContainerEl.addEventListener('contextmenu', e => {
+						e.preventDefault();
+						showContextMenu(e.clientX, e.clientY);
+					});
+					// Right-clicking outside the chart area (e.g. the toolbar) falls
+					// through to the browser's own native context menu — hide ours
+					// first so it doesn't linger open underneath it.
+					document.addEventListener('contextmenu', e => {
+						if (!chartContainerEl.contains(e.target)) hideContextMenu();
+					});
+					document.addEventListener('click', hideContextMenu);
+					window.addEventListener('resize', hideContextMenu);
+					window.addEventListener('scroll', hideContextMenu, true);
+
+					function rebuildSeriesData() {
+						series.setData(realCandles);
+
+						const intervalSec = INTERVAL_SECONDS[INTERVAL] || 3600;
+						const lastClose = realCandles.length ? realCandles[realCandles.length - 1].close : 0;
+						const lastTime = realCandles.length
+							? realCandles[realCandles.length - 1].time
+							: (Math.floor(Date.now() / 1000) + tzOffset);
+						const count = Math.round(FUTURE_MARGIN_DAYS * 86400 / intervalSec);
+						const futureTicks = [];
+						for (let i = 1; i <= count; i++) {
+							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
+						}
+						futureTickCount = futureTicks.length;
+						futureAxisSeries.setData(futureTicks);
+					}
+
+					async function loadCandles() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
+						const klines = (resp.result || []).slice().reverse();
+						realCandles = klines.map(toCandle);
+						rebuildSeriesData();
+						applyVisibleRange();
+					}
+
+					async function updateLatestCandle() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const klines = resp.result || [];
+						if (!klines.length) return;
+						const updated = toCandle(klines[0]);
+						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
+							realCandles[realCandles.length - 1] = updated;
+						} else {
+							realCandles.push(updated);
+						}
+						rebuildSeriesData();
+					}
+
+					async function setTf(iv) {
+						INTERVAL = iv;
+						await loadCandles();
+						await refreshBands();
+						await refreshZonesBoxes();
+						await updateForecastVisibility();
+					}
+
+					async function refreshDeltaZero() {
+						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
+						const data = await (await fetch(DZ_URL)).json();
+						// Re-check: "S/D" may have been switched off while this fetch
+						// was in flight — onToggleLines() already cleared priceLines
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_ALL_LINES) return;
+						clearLines(priceLines);
+						if (!SHOW_WEEKLY_LINES) return;
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => priceLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Weekly',
+						})));
+					}
+
+					let nearestExpiryStr = null;
+					let lastTradeCount = 0;
+
+					function updateStatusLine() {
+						const expiries = [INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
+						let text = expiries + '  ·  ' + lastTradeCount + ' trades';
+						if (nearestExpiryStr) text += '  ·  Nearest: ' + nearestExpiryStr;
+						setStatus(text);
+					}
+
+					async function refreshMonthlyDeltaZero() {
+						if (!MDZ_URL) return;
+						const data = await (await fetch(MDZ_URL)).json();
+						clearLines(monthlyLines);
+						// Line drawing is skipped in minimal mode or with the "S/D"
+						// checkbox off, but this fetch still runs — its trade_count
+						// feeds the footer's "N trades", which stays on /oi/<asset> too.
+						if (SHOW_MONTHLY_LINES && !MINIMAL_CHART && SHOW_ALL_LINES) {
+							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
+								price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Monthly',
+							})));
+						}
+						lastTradeCount = data.trade_count || 0;
+						updateStatusLine();
+					}
+
+					async function refreshNearestExpiry() {
+						// Cheap standalone lookup (no curve-building) — the yellow zones
+						// boxes use this same nearest-active-expiry internally, but via
+						// their own full computation, not this lightweight endpoint.
+						const data = await (await fetch(NEAREST_EXPIRY_URL)).json();
+						nearestExpiryStr = data.expiry || null;
+						updateStatusLine();
+					}
+
+					async function refreshAllDeltaZero() {
+						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
+						const data = await (await fetch(ADZ_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
+						clearLines(allLines);
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => allLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'All',
+						})));
+					}
+
+					async function refreshTomorrowDeltaZero() {
+						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
+						const data = await (await fetch(DZT_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
+						clearLines(tomorrowLines);
+						if (!SHOW_DAILY_LINES) return;
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily (24H)',
+						})));
+					}
+
+					async function refreshDayAfterTomorrowDeltaZero() {
+						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
+						const data = await (await fetch(DZT2_URL)).json();
+						// Re-check: see refreshDeltaZero's own comment above.
+						if (!SHOW_ALL_LINES) return;
+						clearLines(dayAfterTomorrowLines);
+						if (!SHOW_DAILY_LINES) return;
+						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
+						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
+							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
+							lineStyle: LightweightCharts.LineStyle.Solid,
+							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily+1 (24H)',
+						})));
+					}
+
+					// "S/D" checkbox (next to Ruler) — hides every horizontal
+					// price-line indicator (delta=0 sets) and stops their
+					// refresh*() functions from even fetching (see SHOW_ALL_LINES
+					// above), to actually cut server load rather than just hiding
+					// the result. Turning off clears everything immediately rather
+					// than waiting for each set's own next poll (their refresh*()
+					// functions return before their own clearLines() call when
+					// SHOW_ALL_LINES is false). Turning back on re-fetches
+					// everything immediately for the same reason.
+					// refreshMonthlyDeltaZero() is untouched here — it always
+					// keeps polling regardless, for the footer's trade count.
+					function onToggleLines() {
+						SHOW_ALL_LINES = document.getElementById('lines-toggle').checked;
+						if (SHOW_ALL_LINES) {
+							refreshDeltaZero();
+							refreshMonthlyDeltaZero();
+							refreshAllDeltaZero();
+							refreshTomorrowDeltaZero();
+							refreshDayAfterTomorrowDeltaZero();
+						} else {
+							clearLines(priceLines);
+							clearLines(monthlyLines);
+							clearLines(allLines);
+							clearLines(tomorrowLines);
+							clearLines(dayAfterTomorrowLines);
+						}
+					}
+
+					function clearBandsLines() {
+						highResistanceSeries.setData([]);
+						lowSupportSeries.setData([]);
+						gammaBandSeries.setData([]);
+						smartLiqUpperSeries.setData([]);
+						smartLiqLowerSeries.setData([]);
+						highResistanceSeries.setMarkers([]);
+						lowSupportSeries.setMarkers([]);
+						smartLiqUpperSeries.setMarkers([]);
+						smartLiqLowerSeries.setMarkers([]);
+					}
+
+					async function refreshBands() {
+						if (MINIMAL_CHART || !SHOW_BANDS) return;
+						const data = await (await fetch(BANDS_URL)).json();
+						// Re-check: "Bands" may have been switched off while this fetch
+						// was in flight — onToggleBands() already cleared everything
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_BANDS) return;
+						const rows = data.bands || [];
+						highResistanceSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.high_resistance })));
+						lowSupportSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.low_support })));
+						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
+						// 0.0 means absent (see dankbit.bands' smart_liq_upper_price/
+						// smart_liq_lower_price) — filtered out rather than plotted,
+						// same principle setBoxData()'s "0.0 = no crossing" already
+						// applies to the zones boxes, so a legless/degenerate point
+						// doesn't render as a spurious price-0 dip in the line.
+						const smartLiqUpperRows = rows.filter(r => r.smart_liq_upper_price);
+						const smartLiqLowerRows = rows.filter(r => r.smart_liq_lower_price);
+						smartLiqUpperSeries.setData(smartLiqUpperRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_upper_price })));
+						smartLiqLowerSeries.setData(smartLiqLowerRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_lower_price })));
+
+						// Per-point (not whole-line) emphasis: dominance can flip from
+						// one tracked expiry to the next (e.g. upper stronger at the
+						// nearest expiry, lower stronger at a further one), and
+						// Lightweight Charts has no per-point lineWidth within a single
+						// series — so instead of thickening the whole line, draw a
+						// bigger marker dot only at the points where that side's own
+						// smart_liq_upper_strength/smart_liq_lower_strength actually
+						// beats its counterpart at that SAME expiry (each row compared
+						// only against itself, not some single "nearest" row). size:0
+						// hides the marker entirely at non-dominant points, same
+						// convention the +/- markers below use.
+						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: chartColors.smartLiqUpper,
+							shape: 'circle',
+							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
+						})));
+						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: chartColors.smartLiqLower,
+							shape: 'circle',
+							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
+						})));
+
+						// +/- marker per point: whether the payoff at that
+						// intersection (not the intersection's own price) sits
+						// above or below the zero-payoff line — size:0 hides the
+						// marker's shape glyph so only the text renders.
+						highResistanceSeries.setMarkers(rows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'aboveBar',
+							color: chartColors.highResistance,
+							shape: 'circle',
+							size: 0,
+							text: r.high_resistance_positive ? '+' : '-',
+						})));
+						lowSupportSeries.setMarkers(rows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'aboveBar',
+							color: chartColors.lowSupport,
+							shape: 'circle',
+							size: 0,
+							text: r.low_support_positive ? '+' : '-',
+						})));
+					}
+
+					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
+						// 0.0 is the "no crossing at all" sentinel (see
+						// dankbit.bands) — nothing real to draw on that edge.
+						if (!top && !bottom) { boxSeries.setData([]); bottomLineSeries.setData([]); return; }
+						if (top && bottom && top !== bottom) {
+							boxSeries.applyOptions({ baseValue: { type: 'price', price: bottom } });
+							boxSeries.setData([
+								{ time: fromTime, value: top },
+								{ time: toTime, value: top },
+							]);
+							bottomLineSeries.setData([
+								{ time: fromTime, value: bottom },
+								{ time: toTime, value: bottom },
+							]);
+							return;
+						}
+						// Only one edge has a crossing, or both coincide (zero-height
+						// box) — can't draw a rectangle, so draw a single line at
+						// whichever price we do have instead of dropping it silently.
+						const price = top || bottom;
+						boxSeries.setData([]);
+						bottomLineSeries.setData([
+							{ time: fromTime, value: price },
+							{ time: toTime, value: price },
+						]);
+					}
+
+					function clearZonesBoxes() {
+						aboveBoxSeries.setData([]);
+						belowBoxSeries.setData([]);
+						aboveBoxBottomLine.setData([]);
+						belowBoxBottomLine.setData([]);
+						smpBmlBoxSeries.setData([]);
+						smpBmlBoxBottomLine.setData([]);
+					}
+
+					async function refreshZonesBoxes() {
+						if (MINIMAL_CHART || !SHOW_ZONES_BOXES) return;
+						// Live lookup — computed fresh by the server on every call (see
+						// dankbit.bands.get_box), not read from stored history.
+						// Persisted (feeding the Bands lines' history) unless
+						// ZONES_BOX_WINDOW_MODE is 'hours', in which case the ?hours=
+						// override makes the server compute display-only instead — see
+						// ZONES_BOX_WINDOW_MODE above.
+						const url = ZONES_BOX_WINDOW_MODE === 'hours'
+							? ZB_URL + '?hours=' + ZONES_BOX_WINDOW_HOURS
+							: ZB_URL;
+						const data = await (await fetch(url)).json();
+						// Re-check: the "Zones" checkbox may have been switched off
+						// while this fetch was in flight (e.g. a periodic poll or a
+						// timeframe switch) — the guard at the top of this function
+						// only ran before the request started, so without this the
+						// boxes would still get redrawn a few seconds after being
+						// unchecked once this stale response arrives.
+						if (!SHOW_ZONES_BOXES) return;
+						if (!data || data.t === undefined) {
+							clearZonesBoxes();
+							return;
+						}
+						const fromTime = Math.floor(Date.now() / 1000) + tzOffset - 10 * 86400;
+						const toTime   = Math.floor(data.expiration / 1000) + tzOffset;
+
+						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
+						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
+						setBoxData(aboveBoxSeries, aboveBoxBottomLine, aboveTop, aboveBottom, fromTime, toTime);
+
+						const belowTop    = Math.max(data.short_zero_below_price, data.long_zero_below_price);
+						const belowBottom = Math.min(data.short_zero_below_price, data.long_zero_below_price);
+						setBoxData(belowBoxSeries, belowBoxBottomLine, belowTop, belowBottom, fromTime, toTime);
+
+						// Seller Max Profit / Buyer Max Loss box — same fromTime/toTime as the yellow box
+						// above, since both come from this same nearest-expiry get_box() call.
+						const smpBmlTop    = Math.max(data.seller_max_profit, data.buyer_max_loss);
+						const smpBmlBottom = Math.min(data.seller_max_profit, data.buyer_max_loss);
+						setBoxData(smpBmlBoxSeries, smpBmlBoxBottomLine, smpBmlTop, smpBmlBottom, fromTime, toTime);
+					}
+
+					// "Zones" checkbox (Delta Chart only, right after "S/D") —
+					// controls the yellow High Zone/Low Zone boxes and the teal
+					// Middle Zone (Seller Max Profit/Buyer Max Loss) box, i.e.
+					// everything refreshZonesBoxes()/clearZonesBoxes() draw.
+					// Checked by default (SHOW_ZONES_BOXES starts true, matching
+					// the checkbox's own default-checked state), since these boxes
+					// were always shown before this checkbox existed. Stops
+					// refreshZonesBoxes() from calling the server at all while off
+					// (see SHOW_ZONES_BOXES above), purely to reduce server load —
+					// not just hiding the result; get_box() never persists to
+					// dankbit.bands regardless, so this has no effect on that
+					// model either way. The 4-hourly compute_snapshot() cron is
+					// untouched either way. Clears the boxes immediately
+					// when switched off and re-fetches immediately when switched
+					// back on.
+					function onToggleZonesBoxes() {
+						SHOW_ZONES_BOXES = document.getElementById('zones-boxes-toggle').checked;
+						if (SHOW_ZONES_BOXES) {
+							refreshZonesBoxes();
+						} else {
+							clearZonesBoxes();
+						}
+					}
+
+					// "Bands" checkbox (Delta Chart only, next to "Zones") —
+					// controls only the High/Resistance + Low/Support + Gamma Band lines
+					// (green/red/dashed violet), NOT the yellow/teal zones boxes,
+					// which have their own separate "Zones" checkbox instead
+					// (SHOW_ZONES_BOXES/onToggleZonesBoxes() above). refreshBands()
+					// only ever reads the already-persisted dankbit.bands rows
+					// (/api/bands/<asset>) — it never triggers a new computation.
+					// Those rows are kept fresh solely by the 4-hourly compute_snapshot()
+					// cron; toggling this checkbox, or this browser polling it, has no
+					// effect on when new extrema get computed. Clears the lines
+					// immediately when switched off (refreshBands() returns
+					// before clearing when SHOW_BANDS is false) and re-fetches
+					// immediately when switched back on.
+					function onToggleBands() {
+						SHOW_BANDS = document.getElementById('bands-toggle').checked;
+						if (SHOW_BANDS) {
+							refreshBands();
+						} else {
+							clearBandsLines();
+						}
+					}
+
+					function clearForecastLines() {
+						forecastSeries.setData([]);
+					}
+
+					// The Thales Forecast candles are 4h resolution and only
+					// make visual sense lined up against real 4h-spaced
+					// candles, so both the checkbox and the series itself
+					// are restricted to the 4h timeframe — shown/hidden by
+					// updateForecastVisibility() on every timeframe switch.
+					// Called from setTf()/init() on both Delta and Gamma
+					// Chart (both share setTf()), but the checkbox itself
+					// only exists on the Delta Chart — guarded with a null
+					// check rather than assuming the element is present.
+					function updateForecastVisibility() {
+						const visible = INTERVAL === '4h';
+						const wrap = document.getElementById('forecast-toggle-wrap');
+						if (wrap) wrap.style.display = visible ? '' : 'none';
+						refreshForecast();
+					}
+
+					// "Thales Forecast" checkbox (Delta Chart only) —
+					// fetches /api/forecast/<asset> and draws the forecast
+					// candles (see FORECAST_URL, forecastSeries above). Stops
+					// fetching entirely while off, or while not on the 4h
+					// timeframe (see updateForecastVisibility above), same
+					// server-load-reducing pattern as every other optional
+					// indicator here. Display time is NOT taken from the
+					// server's `t` (an arbitrary now-relative timestamp) — it's
+					// recomputed here, anchored to the same grid
+					// futureAxisSeries uses for its own future ticks
+					// (realCandles[last].time, stepped by intervalSec).
+					// Lightweight Charts builds one shared logical time axis
+					// from the union of every series' timestamps; server-
+					// relative "now" timestamps almost never land on that grid,
+					// so forecastSeries' points ended up alternating with
+					// futureAxisSeries' ticks in the same stretch — each series
+					// only getting every other logical slot, which rendered as
+					// every other forecast candle missing.
+					//
+					// The anchor walks forward from realCandles[last].time
+					// (a whole number of intervalSec steps at a time, so it
+					// never leaves the grid) until it's strictly past "now"
+					// — rather than assuming realCandles[last] is always
+					// the current still-forming candle (one step behind
+					// "now"), which would silently break if Deribit or the
+					// 5s updateLatestCandle() poll ever returned a stale
+					// last-closed candle instead. This guarantees the first
+					// forecast candle is always the next 4h candle after
+					// now, on the correct grid, regardless of which one
+					// realCandles[last] actually is.
+					async function refreshForecast() {
+						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
+						const data = await (await fetch(FORECAST_URL)).json();
+						// Re-check: "Thales Forecast" may have been switched off (or the
+						// timeframe changed away from 4h) while this fetch was in
+						// flight — onToggleForecast() already cleared the series
+						// synchronously in that case, so just bail without redrawing.
+						if (!SHOW_FORECAST || INTERVAL !== '4h') return;
+						const points = data.points || [];
+						if (!points.length) { clearForecastLines(); return; }
+						const intervalSec = INTERVAL_SECONDS[INTERVAL];
+						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
+						let firstTime = realCandles[realCandles.length - 1].time;
+						while (firstTime <= nowShifted) firstTime += intervalSec;
+						forecastSeries.setData(points.map((p, i) => ({
+							time: firstTime + i * intervalSec,
+							open: p.open, high: p.high, low: p.low, close: p.close,
+						})));
+					}
+
+					function onToggleForecast() {
+						SHOW_FORECAST = document.getElementById('forecast-toggle').checked;
+						if (SHOW_FORECAST) {
+							refreshForecast();
+						} else {
+							clearForecastLines();
+						}
+					}
+
+					// "Zones from" dropdown — 00:00-Iran-vs-trailing-hours window for
+					// the zones boxes (see ZONES_BOX_WINDOW_MODE above) — re-fetches
+					// immediately on change rather than waiting for the next
+					// ZONES_BOX_REFRESH poll.
+					function onZonesBoxWindowChange() {
+						ZONES_BOX_WINDOW_MODE = document.getElementById('zones-box-window-select').value;
+						refreshZonesBoxes();
+					}
+
+					// "Light"/"Dark" radio (see DARK_MODE/axisBlack()/rulerColor()
+					// above) — swaps the chart's own canvas-drawn colors via
+					// chart.applyOptions() and toggles body.dark for the fixed HTML
+					// overlays (status bar, toggle labels, exchange label, ruler
+					// info, context menu — see the <style> block). Candle/box/band
+					// series already use saturated colors that read fine on either
+					// background, so only the chart chrome needs swapping here.
+					function applyTheme() {
+						document.body.classList.toggle('dark', DARK_MODE);
+						chart.applyOptions({
+							layout: {
+								background: { type: 'solid', color: DARK_MODE ? '#000000' : '#ffffff' },
+								textColor: DARK_MODE ? '#d1d4dc' : '#333333',
+							},
+							rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+							timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						});
+					}
+
+					function onThemeChange() {
+						DARK_MODE = document.getElementById('theme-select').value === 'dark';
+						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
+						applyTheme();
+						// Re-invoke every indicator whose own line stroke color is
+						// theme-dependent (axisBlack()) so the switch takes effect
+						// immediately instead of waiting for the next poll — each
+						// already no-ops (or has already cleared its own lines) if
+						// that indicator isn't currently shown/enabled.
+						refreshDeltaZero();
+						refreshMonthlyDeltaZero();
+						refreshAllDeltaZero();
+						refreshTomorrowDeltaZero();
+						refreshDayAfterTomorrowDeltaZero();
+						refreshGammaTops();
+						refreshStrikeGamma();
+					}
+
+					// "Settings" button/dialog (after Ruler, all 3 TV chart pages) —
+					// re-applies the current chartColors to every already-created
+					// series/line via applyOptions() rather than needing a
+					// server round-trip or a full chart rebuild.
+					function applyChartColors() {
+						const c = chartColors;
+						const zonesRgba = hexToRgba(c.zonesBox, 0.25);
+						aboveBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
+						belowBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
+						aboveBoxBottomLine.applyOptions({ color: c.zonesBox });
+						belowBoxBottomLine.applyOptions({ color: c.zonesBox });
+
+						const middleRgba = hexToRgba(c.middleZone, 0.25);
+						smpBmlBoxSeries.applyOptions({ topLineColor: c.middleZone, topFillColor1: middleRgba, topFillColor2: middleRgba, bottomLineColor: c.middleZone, bottomFillColor1: middleRgba, bottomFillColor2: middleRgba });
+						smpBmlBoxBottomLine.applyOptions({ color: c.middleZone });
+
+						highResistanceSeries.applyOptions({ color: c.highResistance });
+						lowSupportSeries.applyOptions({ color: c.lowSupport });
+						gammaBandSeries.applyOptions({ color: c.gammaBand });
+						smartLiqUpperSeries.applyOptions({ color: c.smartLiqUpper });
+						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower });
+
+						// The +/- and dominance markers bake their color in at draw
+						// time (see refreshBands() above) rather than reading a
+						// series-level option, so they need a redraw to pick up a
+						// changed color immediately — harmless no-op if Bands is
+						// currently off/not fetched yet.
+						if (SHOW_BANDS) refreshBands();
+					}
+
+					function openSettingsModal() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						document.getElementById('settings-modal').style.display = 'flex';
+					}
+
+					function closeSettingsModal() {
+						document.getElementById('settings-modal').style.display = 'none';
+					}
+
+					function saveChartColors() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) chartColors[key] = input.value;
+						});
+						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
+						applyChartColors();
+						closeSettingsModal();
+					}
+
+					function resetChartColors() {
+						chartColors = Object.assign({}, DEFAULT_COLORS);
+						localStorage.removeItem(COLOR_STORAGE_KEY);
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						applyChartColors();
+					}
+
+					let rulerActive = false;
+					let rulerPrice1 = null;
+					let rulerLines  = [];
+
+					function toggleRuler() {
+						rulerActive = !rulerActive;
+						document.getElementById('ruler-btn').classList.toggle('active', rulerActive);
+						rulerLines.forEach(l => series.removePriceLine(l));
+						rulerLines = [];
+						rulerPrice1 = null;
+						const info = document.getElementById('ruler-info');
+						info.style.display = 'none';
+						info.textContent = '';
+					}
+
+					chart.subscribeClick(param => {
+						if (!rulerActive || !param.point) return;
+						const price = series.coordinateToPrice(param.point.y);
+						if (rulerPrice1 === null) {
+							rulerPrice1 = price;
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: '①',
+							}));
+						} else {
+							rulerLines.push(series.createPriceLine({
+								price, color: rulerColor(), lineWidth: 1,
+								lineStyle: LightweightCharts.LineStyle.Dashed,
+								axisLabelVisible: true, axisLabelColor: axisBlack(), title: '②',
+							}));
+							const pct = ((price - rulerPrice1) / rulerPrice1 * 100);
+							const sign = pct >= 0 ? '+' : '';
+							const info = document.getElementById('ruler-info');
+							info.style.display = 'block';
+							info.textContent = rulerPrice1.toFixed(0) + ' → ' + price.toFixed(0) + '   ' + sign + pct.toFixed(2) + '%';
+							rulerPrice1 = null;
+						}
+					});
+
+					async function init() {
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
+						catch (e) { setStatus('Error: ' + e.message); }
+					}
+					init();
+					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshDeltaZero, REFRESH);
+					setInterval(refreshMonthlyDeltaZero, REFRESH);
+					setInterval(refreshNearestExpiry, REFRESH);
+					setInterval(refreshAllDeltaZero, REFRESH);
+					setInterval(refreshTomorrowDeltaZero, REFRESH);
+					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
+					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
+					// underlying dankbit.bands rows only ever change once per
+					// hourly compute_snapshot() cron tick, so polling any faster
+					// just re-fetches identical data; syncing it to the same
+					// (slower) interval Zones already uses cuts wasted requests
+					// with zero loss of real freshness, which matters more now
+					// that this addon is heading toward more concurrent users.
+					setInterval(refreshBands, ZONES_BOX_REFRESH);
+					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
+					setInterval(refreshGammaTops, REFRESH);
+					setInterval(refreshStrikeGamma, REFRESH);
+					setInterval(refreshForecast, REFRESH);
+				//]]></script>
+			</body>
+		</html>
+	</template>
+
+</odoo>
