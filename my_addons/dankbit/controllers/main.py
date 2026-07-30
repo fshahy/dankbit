@@ -1327,6 +1327,40 @@ class ChartController(http.Controller):
             strikes.append(entry)
         return strikes, trade_count
 
+    def _max_pain_for_expiry(self, asset, expiry_str):
+        """Max Pain strike for `asset`'s option chain expiring at
+        `expiry_str` (e.g. "25JUL26", the same day-suffix parsed out of
+        the URL by gamma_by_strike_at_json) — feeds /gamma/<instrument>'s
+        orange Max Pain line. Built from
+        dankbit.trade.get_open_interest_by_currency()'s real live open
+        interest directly (the same bulk call _gamma_by_strike already
+        makes), not from dankbit's own recorded trades — every strike
+        with real outstanding OI belongs in the chain even if this addon
+        never logged a trade there, unlike _gamma_by_strike's strike list
+        (which only covers strikes it has trades for). Instrument names
+        encode strike + option type (e.g. "BTC-25JUL26-98000-C"), parsed
+        the same way dankbit.trade's own strike/option_type computed
+        fields are. None if the chain has no open interest at all."""
+        oi_map = request.env["dankbit.trade"].get_open_interest_by_currency(asset)
+        prefix = f"{asset}-{expiry_str}-"
+        call_oi, put_oi = {}, {}
+        for name, oi in oi_map.items():
+            if not name.startswith(prefix):
+                continue
+            parts = name.split("-")
+            if len(parts) != 4:
+                continue
+            try:
+                strike = int(parts[2])
+            except ValueError:
+                continue
+            if name[-1] == "C":
+                call_oi[strike] = call_oi.get(strike, 0.0) + oi
+            elif name[-1] == "P":
+                put_oi[strike] = put_oi.get(strike, 0.0) + oi
+        strikes = sorted(set(call_oi) | set(put_oi))
+        return options.max_pain(strikes, call_oi, put_oi)
+
     @http.route("/api/gamma-by-strike/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def gamma_by_strike_json(self, asset):
         """Per-strike combined portfolio dollar-gamma, every trade through
@@ -1446,6 +1480,7 @@ class ChartController(http.Controller):
             "expiry": expiry_str,
             "strikes": strikes,
             "trade_count": trade_count,
+            "max_pain": self._max_pain_for_expiry(asset, expiry_str),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         return request.make_response(

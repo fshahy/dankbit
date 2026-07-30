@@ -512,3 +512,28 @@ def build_zone_curves(instrument_name, index_price, trades, from_price, to_price
         longs_obj, shorts_obj = build(zoom_from, zoom_to, steps)
 
     return longs_obj, shorts_obj
+
+
+def max_pain(strikes, call_oi, put_oi):
+    """The Max Pain strike for an option chain: the strike in `strikes`
+    (a plain price list, no synthetic grid — the payout curve below is
+    piecewise-linear and only bends at a strike, so its minimum always
+    lands exactly on one, same reasoning options.zone_summary's own
+    crossing-based extrema rely on) at which the total intrinsic value
+    owed to every option holder in the chain — sum over every strike k of
+    call_oi[k] * max(S - k, 0) + put_oi[k] * max(k - S, 0), evaluated at
+    settlement price S — is smallest, i.e. where option sellers/writers
+    as a group are collectively best off. `call_oi`/`put_oi` are plain
+    {strike: open_interest} dicts (real Deribit open interest, not
+    trade-derived positioning — see
+    ChartController._max_pain_for_expiry). None for an empty chain."""
+    if not strikes:
+        return None
+
+    def total_payout(S):
+        return (
+            sum(call_oi.get(k, 0.0) * max(S - k, 0.0) for k in strikes)
+            + sum(put_oi.get(k, 0.0) * max(k - S, 0.0) for k in strikes)
+        )
+
+    return float(min(strikes, key=total_payout))

@@ -367,6 +367,9 @@
 					</t>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+					<t t-if="show_strike_gamma == 'true'">
+						<span class="tf-label" id="strike-gamma-instrument-label"><t t-esc="strike_gamma_instrument"/></span>
+					</t>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -863,6 +866,17 @@
 					// how much gamma is at this strike but which position
 					// is driving it.
 					let strikeGammaLines = [];
+					// Max Pain (/gamma/<instrument> only, alongside Strike
+					// Gamma above) — the strike where Deribit's real open
+					// interest, not dankbit's own recorded trades (see
+					// ChartController._max_pain_for_expiry), would pay out
+					// the least total intrinsic value to option holders
+					// across the whole chain if settled there. A single
+					// reference level, so — unlike the per-strike gamma
+					// lines above, which are axis-label-only
+					// (lineVisible: false) — this one draws a real visible
+					// line.
+					let maxPainLine = null;
 
 					function dominantLeg(item) {
 						const legs = { LC: item.long_call, LP: item.long_put, SC: item.short_call, SP: item.short_put };
@@ -872,6 +886,7 @@
 					function drawStrikeGammaLines(data) {
 						strikeGammaLines.forEach(l => series.removePriceLine(l));
 						strikeGammaLines.length = 0;
+						if (maxPainLine) { series.removePriceLine(maxPainLine); maxPainLine = null; }
 						const strikes = data.strikes || [];
 						const maxAbsGamma = strikes.reduce((m, item) => Math.max(m, Math.abs(item.gamma)), 0);
 						strikes.forEach(item => {
@@ -886,12 +901,26 @@
 							const shade = DARK_MODE ? 255 - lightShade : lightShade;
 							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
 							strikeGammaLines.push(series.createPriceLine({
-								price: item.price, color, lineWidth: 1,
+								price: item.price, color, lineWidth: 1, lineVisible: false,
 								lineStyle: LightweightCharts.LineStyle.Solid,
 								axisLabelVisible: true, axisLabelColor: color,
 								title: 'Γ ' + sign + Math.round(Math.abs(item.gamma) / 1e6) + ' ' + dominantLeg(item),
 							}));
 						});
+
+						// 0/null means no open interest at all for this expiry
+						// (see options.max_pain) — same "falsy means absent"
+						// convention every other price-level field in this
+						// addon uses, so no line is drawn rather than a
+						// spurious price-0 one.
+						if (data.max_pain) {
+							maxPainLine = series.createPriceLine({
+								price: data.max_pain, color: '#fb8c00', lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: 'black',
+								title: 'Max Pain',
+							});
+						}
 					}
 
 					// No checkbox — this is /gamma/<instrument>'s sole
@@ -1182,14 +1211,52 @@
 						}
 					}
 
+					// Populated by refreshBands() from the same rows that feed
+					// smartLiqUpperSeries/smartLiqLowerSeries (the green/red
+					// Smart Liquidity term-structure lines), kept around so
+					// refreshLiveBandDots() can snap each hourly dominance dot
+					// onto that same line instead of its own real price — see
+					// interpolateOnLine() below. The lines' own data/rendering
+					// is untouched by this; these are read-only copies.
+					let smartLiqUpperPoints = [];
+					let smartLiqLowerPoints = [];
+
 					function clearBandsLines() {
 						smartLiqUpperSeries.setData([]);
 						smartLiqLowerSeries.setData([]);
+						smartLiqUpperSeries.setMarkers([]);
+						smartLiqLowerSeries.setMarkers([]);
+						smartLiqUpperPoints = [];
+						smartLiqLowerPoints = [];
 						gammaBandSeries.setData([]);
 						liveBandUpperSeries.setData([]);
 						liveBandLowerSeries.setData([]);
 						liveBandUpperSeries.setMarkers([]);
 						liveBandLowerSeries.setMarkers([]);
+					}
+
+					// Value of a sparse, time-sorted {time, value} line at an
+					// arbitrary time, linearly interpolated between its two
+					// bracketing points. Clamped to the first/last value when
+					// time falls outside the line's own range — in practice
+					// every hourly dominance dot's time is well before the
+					// Smart Liquidity line's own points (each positioned at a
+					// tracked expiry's future settlement time — see
+					// dankbit.bands), so this clamps every dot to the nearest
+					// (current) expiry's level rather than extrapolating.
+					// null with no points at all (line not loaded/absent yet).
+					function interpolateOnLine(points, time) {
+						if (!points.length) return null;
+						if (time <= points[0].time) return points[0].value;
+						if (time >= points[points.length - 1].time) return points[points.length - 1].value;
+						for (let i = 0; i < points.length - 1; i++) {
+							const a = points[i], b = points[i + 1];
+							if (time >= a.time && time <= b.time) {
+								const frac = (time - a.time) / (b.time - a.time);
+								return a.value + frac * (b.value - a.value);
+							}
+						}
+						return points[points.length - 1].value;
 					}
 
 					async function refreshBands() {
@@ -1208,8 +1275,47 @@
 						// doesn't render as a spurious price-0 dip in the line.
 						const smartLiqUpperRows = rows.filter(r => r.smart_liq_upper_price);
 						const smartLiqLowerRows = rows.filter(r => r.smart_liq_lower_price);
-						smartLiqUpperSeries.setData(smartLiqUpperRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_upper_price })));
-						smartLiqLowerSeries.setData(smartLiqLowerRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_lower_price })));
+						smartLiqUpperPoints = smartLiqUpperRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_upper_price }));
+						smartLiqLowerPoints = smartLiqLowerRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_lower_price }));
+						smartLiqUpperSeries.setData(smartLiqUpperPoints);
+						smartLiqLowerSeries.setData(smartLiqLowerPoints);
+
+						// Per-point marker on each future expiry point: size is
+						// the dominance dot restored from before the Bands
+						// rework (a visible circle, size 1, wherever that
+						// side's own smart_liq_upper_strength/
+						// smart_liq_lower_strength beats its counterpart at
+						// that SAME expiry — dominance can flip from one
+						// tracked expiry to the next, so each point is
+						// compared only against itself; size 0/invisible
+						// otherwise), text is the +/- marker (whether the
+						// payoff at that High/Resistance or Low/Support
+						// intersection sits above or below the zero-payoff
+						// line) restored alongside it — both re-attached to
+						// the Smart Liquidity lines since High/Resistance/
+						// Low/Support no longer have their own line series on
+						// this chart. position:'inBar' keeps the dot centered
+						// on the line's own value so it reads as a normal
+						// point sitting on the line. Scoped to
+						// smartLiqUpperRows/smartLiqLowerRows (not the full
+						// rows list) since a marker's time must match an
+						// existing data point on that series.
+						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: chartColors.highResistance,
+							shape: 'circle',
+							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
+							text: r.high_resistance_positive ? '+' : '-',
+						})));
+						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
+							time: Math.floor(r.t / 1000) + tzOffset,
+							position: 'inBar',
+							color: chartColors.lowSupport,
+							shape: 'circle',
+							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
+							text: r.low_support_positive ? '+' : '-',
+						})));
 					}
 
 					// Live Band rows are computed hourly, but a dot must land on
@@ -1258,16 +1364,59 @@
 							} else {
 								lowerWins = true;
 							}
-							if (upperWins) upperDominant.push({ time: p.time, value: p.smart_liq_upper });
-							if (lowerWins) lowerDominant.push({ time: p.time, value: p.smart_liq_lower });
+							// Plotted position is snapped onto the green/red Smart
+							// Liquidity line itself (via interpolateOnLine()) rather
+							// than this dot's own real smart_liq_upper/lower price —
+							// a display-only change for a cleaner chart; the
+							// dominance decision above (upperWins/lowerWins) and
+							// every other calculation are untouched. Skipped if
+							// that line has no points loaded at all. realPrice (the
+							// actual smart_liq_upper/lower value, not the on-line
+							// plotted position) is kept alongside so the "current"
+							// point below can still label its true price.
+							if (upperWins) {
+								const v = interpolateOnLine(smartLiqUpperPoints, p.time);
+								if (v !== null) upperDominant.push({ time: p.time, value: v, realPrice: p.smart_liq_upper });
+							}
+							if (lowerWins) {
+								const v = interpolateOnLine(smartLiqLowerPoints, p.time);
+								if (v !== null) lowerDominant.push({ time: p.time, value: v, realPrice: p.smart_liq_lower });
+							}
 						});
-						liveBandUpperSeries.setData(upperDominant);
-						liveBandLowerSeries.setData(lowerDominant);
+						liveBandUpperSeries.setData(upperDominant.map(p => ({ time: p.time, value: p.value })));
+						liveBandLowerSeries.setData(lowerDominant.map(p => ({ time: p.time, value: p.value })));
+
+						// Only the single most-recent hourly dot (today's/now's
+						// dominant side, whichever bucket is latest across both
+						// series) gets a text label of its real Smart Liquidity
+						// price — every older hourly dot keeps its plain circle
+						// with no text, and the green/red line's own (future)
+						// term-structure points are untouched entirely. Drawn via
+						// the marker's own "text" (on the chart body, next to the
+						// point), never the axis label, so it can't land on the
+						// price panel.
+						const latestUpper = upperDominant.length ? upperDominant[upperDominant.length - 1] : null;
+						const latestLower = lowerDominant.length ? lowerDominant[lowerDominant.length - 1] : null;
+						let currentSide = null;
+						if (latestUpper && latestLower) currentSide = latestUpper.time >= latestLower.time ? 'upper' : 'lower';
+						else if (latestUpper) currentSide = 'upper';
+						else if (latestLower) currentSide = 'lower';
+
+						function liveBandMarker(p, color, isCurrent) {
+							const marker = { time: p.time, position: 'inBar', color, shape: 'circle', size: 1 };
+							// Lightweight Charts has no horizontal marker-text
+							// offset — text is centered on the marker's own time
+							// position — so leading spaces are used to push the
+							// (still-centered) text visually off to the right of
+							// the point instead of straddling it.
+							if (isCurrent) marker.text = '      ' + String(Math.round(p.realPrice));
+							return marker;
+						}
 						liveBandUpperSeries.setMarkers(
-							upperDominant.map(p => ({ time: p.time, position: 'inBar', color: chartColors.highResistance, shape: 'circle', size: 1 }))
+							upperDominant.map(p => liveBandMarker(p, chartColors.highResistance, currentSide === 'upper' && p.time === latestUpper.time))
 						);
 						liveBandLowerSeries.setMarkers(
-							lowerDominant.map(p => ({ time: p.time, position: 'inBar', color: chartColors.lowSupport, shape: 'circle', size: 1 }))
+							lowerDominant.map(p => liveBandMarker(p, chartColors.lowSupport, currentSide === 'lower' && p.time === latestLower.time))
 						);
 					}
 
@@ -1388,8 +1537,10 @@
 					function onToggleBands() {
 						SHOW_BANDS = document.getElementById('bands-toggle').checked;
 						if (SHOW_BANDS) {
-							refreshBands();
-							refreshLiveBandDots();
+							// Sequenced (not fired in parallel) — refreshLiveBandDots()
+							// now reads smartLiqUpperPoints/smartLiqLowerPoints, which
+							// only refreshBands() populates.
+							refreshBands().then(refreshLiveBandDots);
 						} else {
 							clearBandsLines();
 						}
@@ -1544,8 +1695,9 @@
 						// refreshLiveBandDots() above) rather than reading a
 						// series-level option, so they need a redraw to pick up a
 						// changed color immediately — harmless no-op if Bands is
-						// currently off/not fetched yet.
-						if (SHOW_BANDS) { refreshBands(); refreshLiveBandDots(); }
+						// currently off/not fetched yet. Sequenced, same reason as
+						// onToggleBands() above.
+						if (SHOW_BANDS) { refreshBands().then(refreshLiveBandDots); }
 					}
 
 					function openSettingsModal() {
@@ -1640,9 +1792,11 @@
 					// with zero loss of real freshness, which matters more now
 					// that this addon is heading toward more concurrent users.
 					// refreshLiveBandDots() shares the same rationale — its own
-					// dankbit.live.band rows are also hourly-cron-fed.
-					setInterval(refreshBands, ZONES_BOX_REFRESH);
-					setInterval(refreshLiveBandDots, ZONES_BOX_REFRESH);
+					// dankbit.live.band rows are also hourly-cron-fed. Sequenced
+					// into one interval (rather than two independent ones) since
+					// refreshLiveBandDots() now reads smartLiqUpperPoints/
+					// smartLiqLowerPoints, which only refreshBands() populates.
+					setInterval(() => { refreshBands().then(refreshLiveBandDots); }, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);

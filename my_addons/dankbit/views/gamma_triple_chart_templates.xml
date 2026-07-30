@@ -45,6 +45,22 @@
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
 
+					/* Custom right-click context menu (Lightweight Charts has
+					   no built-in one) — same hand-rolled approach as the
+					   Delta/Gamma Chart's own "Reset chart view" item. */
+					#context-menu {
+						position: fixed;
+						font-family: monospace; font-size: 11pt;
+						background: #fff; border: 1px solid #ccc; border-radius: 4px;
+						box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+						padding: 4px 0; z-index: 20; display: none;
+						min-width: 160px;
+					}
+					#context-menu .context-menu-item {
+						padding: 6px 14px; color: #333; cursor: pointer; white-space: nowrap;
+					}
+					#context-menu .context-menu-item:hover { background: #f0f0f0; }
+
 					/* "Light"/"Dark" theme dropdown — same localStorage key
 					   (dankbit_theme) every other TV chart page in this addon
 					   uses, so the preference carries over across all of them. */
@@ -55,6 +71,9 @@
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+					body.dark #context-menu .context-menu-item { color: #ddd; }
+					body.dark #context-menu .context-menu-item:hover { background: #333; }
 
 					/* Shown while refreshGammaTriple() is fetching/computing the
 					   5 price lines (a fresh dankbit.bands._compute_asset() call
@@ -82,18 +101,19 @@
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
-						<option value="15m" selected="selected">15m</option>
+						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h">4h</option>
+						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="4">4h</option>
 						<option value="8">8h</option>
-						<option value="12" selected="selected">12h</option>
+						<option value="12">12h</option>
 						<option value="16">16h</option>
 						<option value="24">24h</option>
+						<option value="average" selected="selected">Average</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -103,6 +123,9 @@
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 				</div>
 				<div id="ruler-info"/>
+				<div id="context-menu">
+					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
@@ -113,14 +136,49 @@
 					// own refresh rate uses, so the lines visibly move on
 					// the cadence the user actually configures.
 					const REFRESH = parseInt(cfg.refresh, 10) * 1000;
-					let   INTERVAL = '15m';
+					let   INTERVAL = '4h';
 					// Trade window (hours) the 3 gamma_band lines + Smart
 					// Liquidity upper/lower are computed over — the "Window"
 					// dropdown, mirrored server-side by
 					// ChartController.gamma_triple_json's own ?hours= handling.
 					let   WINDOW_HOURS = 12;
+					// "Average" option (last item in the "Window" dropdown) —
+					// instead of a single ?hours= window, fetches all 4 of
+					// AVERAGE_WINDOW_HOURS in parallel and averages each line's
+					// value across them (see averageGammaTripleData()) rather
+					// than showing any one window's own reading.
+					let   WINDOW_IS_AVERAGE = true;
+					const AVERAGE_WINDOW_HOURS = [8, 12, 16, 24];
 					const klineUrl = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
-					const gammaTripleUrl = () => '/api/gamma-triple/' + ASSET + '?hours=' + WINDOW_HOURS;
+					const gammaTripleUrl = h => '/api/gamma-triple/' + ASSET + '?hours=' + h;
+
+					// Averages each of the 5 line fields across however many of
+					// the 4 window responses actually have a value for it. 0.0
+					// means "not computable in that window" (same absent
+					// convention every gamma_band/smart_liq_*_price field in
+					// this addon uses) — averaging only over the present
+					// values keeps one thin/data-sparse window from silently
+					// dragging the average toward 0, rather than a plain
+					// sum-of-4/4 mean. 0 if absent in every window, matching
+					// the single-window behavior this page already has
+					// (if (data.xxx) gates each line's drawing). Instrument
+					// names don't vary with the window (same "now" instant,
+					// just a different trailing-hours curve), so the first
+					// response that has each one wins rather than averaging
+					// strings.
+					function averageGammaTripleData(results) {
+						const out = {
+							asset: results[0].asset,
+							nearest_instrument: (results.map(r => r.nearest_instrument).find(v => v)) || null,
+							weekly_instrument:  (results.map(r => r.weekly_instrument).find(v => v))  || null,
+							monthly_instrument: (results.map(r => r.monthly_instrument).find(v => v)) || null,
+						};
+						['nearest_gamma_band', 'weekly_gamma_band', 'monthly_gamma_band', 'smart_liq_upper_price', 'smart_liq_lower_price'].forEach(field => {
+							const present = results.map(r => r[field]).filter(v => v);
+							out[field] = present.length ? present.reduce((a, b) => a + b, 0) / present.length : 0;
+						});
+						return out;
+					}
 
 					// Same browser-local-timezone shift every other TV chart page
 					// in this addon applies — Lightweight Charts always renders
@@ -218,6 +276,54 @@
 						});
 					}
 
+					// Right-click "Reset chart view" — mirrors original TradingView's
+					// context-menu item, same as the Delta Chart/Gamma Chart:
+					// re-autoscales the price axis (undoes any manual drag-zoom on
+					// the price scale) and restores the default time-scale window
+					// for the current timeframe (undoes any pan/zoom on the time
+					// axis), without touching series data or any indicator state.
+					function resetChartView() {
+						chart.priceScale('right').applyOptions({ autoScale: true });
+						applyVisibleRange();
+					}
+
+					// Custom context menu (Lightweight Charts has no built-in one) —
+					// right-clicking the chart area shows a single "Reset chart view"
+					// item at the cursor, clamped so it never renders off-screen.
+					const contextMenu = document.getElementById('context-menu');
+
+					function hideContextMenu() {
+						contextMenu.style.display = 'none';
+					}
+
+					function showContextMenu(x, y) {
+						contextMenu.style.display = 'block';
+						const maxX = window.innerWidth - contextMenu.offsetWidth - 4;
+						const maxY = window.innerHeight - contextMenu.offsetHeight - 4;
+						contextMenu.style.left = Math.min(x, maxX) + 'px';
+						contextMenu.style.top = Math.min(y, maxY) + 'px';
+					}
+
+					function onResetChartViewClick() {
+						resetChartView();
+						hideContextMenu();
+					}
+
+					const chartContainerEl = document.getElementById('chart-container');
+					chartContainerEl.addEventListener('contextmenu', e => {
+						e.preventDefault();
+						showContextMenu(e.clientX, e.clientY);
+					});
+					// Right-clicking outside the chart area (e.g. the toolbar) falls
+					// through to the browser's own native context menu — hide ours
+					// first so it doesn't linger open underneath it.
+					document.addEventListener('contextmenu', e => {
+						if (!chartContainerEl.contains(e.target)) hideContextMenu();
+					});
+					document.addEventListener('click', hideContextMenu);
+					window.addEventListener('resize', hideContextMenu);
+					window.addEventListener('scroll', hideContextMenu, true);
+
 					async function loadCandles() {
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
@@ -244,22 +350,34 @@
 						await loadCandles();
 					}
 
+					function windowStatusLabel() {
+						return WINDOW_IS_AVERAGE
+							? 'avg of ' + AVERAGE_WINDOW_HOURS.join('/') + 'h windows'
+							: WINDOW_HOURS + 'h trailing window';
+					}
+
 					async function setWindow(h) {
-						WINDOW_HOURS = parseInt(h, 10);
-						setStatus(ASSET + ' · Gamma Triple (' + WINDOW_HOURS + 'h trailing window, live)');
+						WINDOW_IS_AVERAGE = (h === 'average');
+						if (!WINDOW_IS_AVERAGE) WINDOW_HOURS = parseInt(h, 10);
+						setStatus(ASSET + ' · Gamma Triple (' + windowStatusLabel() + ', live)');
 						await refreshGammaTriple();
 					}
 
-					// Shows #spinner for the duration of the fetch — this endpoint
-					// recomputes the whole curve fresh server-side on every call
-					// (no persisted history behind this page), so it can take
-					// noticeably longer than the plain klines poll. Hidden in a
-					// finally so a fetch error still clears it rather than
-					// leaving it spinning forever.
+					// Shows #spinner for the duration of the fetch(es) — this
+					// endpoint recomputes the whole curve fresh server-side on
+					// every call (no persisted history behind this page), so it
+					// can take noticeably longer than the plain klines poll —
+					// the "Average" window makes 4 such calls in parallel
+					// instead of 1. Hidden in a finally so a fetch error still
+					// clears it rather than leaving it spinning forever.
 					async function refreshGammaTriple() {
 						showSpinner();
 						try {
-							const data = await (await fetch(gammaTripleUrl())).json();
+							const data = WINDOW_IS_AVERAGE
+								? averageGammaTripleData(await Promise.all(
+									AVERAGE_WINDOW_HOURS.map(h => fetch(gammaTripleUrl(h)).then(r => r.json()))
+								))
+								: await (await fetch(gammaTripleUrl(WINDOW_HOURS))).json();
 
 							if (nearestPriceLine)       { series.removePriceLine(nearestPriceLine);       nearestPriceLine       = null; }
 							if (weeklyPriceLine)        { series.removePriceLine(weeklyPriceLine);        weeklyPriceLine        = null; }
@@ -267,28 +385,40 @@
 							if (smartLiqUpperPriceLine) { series.removePriceLine(smartLiqUpperPriceLine); smartLiqUpperPriceLine = null; }
 							if (smartLiqLowerPriceLine) { series.removePriceLine(smartLiqLowerPriceLine); smartLiqLowerPriceLine = null; }
 
+							// Gamma regime marker (+/- prefix on the title) — whether
+							// this line's own gamma_band value is positive or
+							// negative, same +/- convention the Delta Chart's
+							// High/Resistance-Low/Support markers use, just baked
+							// into the title text here since createPriceLine has
+							// no separate marker API the way a line series does.
+							// Smart Liquidity lines below deliberately don't get
+							// this — they're a price level, not a gamma value,
+							// so "regime" doesn't apply to them.
 							if (data.nearest_gamma_band) {
+								const sign = data.nearest_gamma_band >= 0 ? '+' : '-';
 								nearestPriceLine = series.createPriceLine({
 									price: data.nearest_gamma_band, color: '#42a5f5', lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: 'black',
-									title: 'Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : ''),
+									title: sign + ' Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : ''),
 								});
 							}
 							if (data.weekly_gamma_band) {
+								const sign = data.weekly_gamma_band >= 0 ? '+' : '-';
 								weeklyPriceLine = series.createPriceLine({
 									price: data.weekly_gamma_band, color: '#fbc02d', lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: 'black',
-									title: 'Weekly' + (data.weekly_instrument ? ' ' + data.weekly_instrument : ''),
+									title: sign + ' Weekly' + (data.weekly_instrument ? ' ' + data.weekly_instrument : ''),
 								});
 							}
 							if (data.monthly_gamma_band) {
+								const sign = data.monthly_gamma_band >= 0 ? '+' : '-';
 								monthlyPriceLine = series.createPriceLine({
 									price: data.monthly_gamma_band, color: '#c9a0dc', lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: 'black',
-									title: 'Monthly' + (data.monthly_instrument ? ' ' + data.monthly_instrument : ''),
+									title: sign + ' Monthly' + (data.monthly_instrument ? ' ' + data.monthly_instrument : ''),
 								});
 							}
 							// 0.0 means absent (see smart_liq_upper_price/
@@ -377,7 +507,7 @@
 						try {
 							await loadCandles();
 							await refreshGammaTriple();
-							setStatus(ASSET + ' · Gamma Triple (' + WINDOW_HOURS + 'h trailing window, live)');
+							setStatus(ASSET + ' · Gamma Triple (' + windowStatusLabel() + ', live)');
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
