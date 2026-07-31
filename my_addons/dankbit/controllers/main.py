@@ -10,7 +10,7 @@ from . import options
 from . import delta
 from . import gamma
 
-# /y/<asset>'s own trade window — no model/table backs this page at
+# /gt/<asset>'s own trade window — no model/table backs this page at
 # all, everything is recomputed fresh on every request via
 # dankbit.bands._compute_asset(). Both the 3 expiry gammas (nearest/
 # weekly/monthly) and the nearest expiry's Smart Liquidity upper/lower
@@ -1216,7 +1216,7 @@ class ChartController(http.Controller):
         configured weekly expiry / configured monthly expiry, for
         "Weekly"/"Monthly" respectively) and, from each of those 3
         datasets, marks only the single highest-positive-gamma strike
-        rather than drawing every strike; and feeds /gamma/<instrument>'s
+        rather than drawing every strike; and feeds /mp/<instrument>'s
         "Strike Gamma"
         indicator via gamma_by_strike_at_json (expiry_exact — isolated to
         that one instrument, unlike Top OI(s)' cumulative scopes above),
@@ -1330,7 +1330,7 @@ class ChartController(http.Controller):
     def _max_pain_for_expiry(self, asset, expiry_str):
         """Max Pain strike for `asset`'s option chain expiring at
         `expiry_str` (e.g. "25JUL26", the same day-suffix parsed out of
-        the URL by gamma_by_strike_at_json) — feeds /gamma/<instrument>'s
+        the URL by gamma_by_strike_at_json) — feeds /mp/<instrument>'s
         orange Max Pain line. Built from
         dankbit.trade.get_open_interest_by_currency()'s real live open
         interest directly (the same bulk call _gamma_by_strike already
@@ -1446,7 +1446,7 @@ class ChartController(http.Controller):
         isolated to trades whose expiration exactly matches `instrument`'s
         own day-suffix — expiration = <that expiry> alone, not
         expiration <= <that expiry> the way gamma_by_strike_until_json
-        works. Feeds /gamma/<instrument>'s "Strike Gamma" indicator
+        works. Feeds /mp/<instrument>'s "Strike Gamma" indicator
         (gamma_by_strike_chart) — every strike drawn, restricted to just
         that one instrument's own trades, not folded in with any sooner
         expiry's the way every gamma_by_strike_until_json caller (Gamma
@@ -1747,7 +1747,7 @@ class ChartController(http.Controller):
 
     @http.route("/api/gamma-triple/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def gamma_triple_json(self, asset):
-        """/y/<asset>'s own and only endpoint — a single current
+        """/gt/<asset>'s own and only endpoint — a single current
         snapshot (not a time series; nothing here is ever persisted),
         computed fresh on every request straight off
         dankbit.bands._compute_asset() (reused unmodified), same
@@ -1818,7 +1818,7 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/y/<string:asset>", type="http", auth="user", website=True)
+    @http.route("/gt/<string:asset>", type="http", auth="user", website=True)
     def gamma_triple_chart(self, asset):
         """Minimal TradingView chart — candles plus 5 horizontal price
         lines: nearest/weekly/monthly expiry gamma_band plus the nearest
@@ -1828,7 +1828,7 @@ class ChartController(http.Controller):
         Y_CHART_DEFAULT_WINDOW_HOURS=12 — see gamma_triple_json) via
         dankbit.bands._compute_asset() (reused unmodified), all 5
         recomputed live on every poll, nothing persisted, so
-        /chart/<asset>, /oi/<asset>, and /gamma/<instrument> are all
+        /chart/<asset>, /oi/<asset>, and /mp/<instrument> are all
         completely unaffected. Renders its own standalone template
         (dankbit_gamma_triple_chart). Polls on the general
         dankbit.refresh_interval (not zones_box_refresh_interval) so the
@@ -1911,10 +1911,10 @@ class ChartController(http.Controller):
 
     def _build_tv_chart_context(self, asset):
         """Shared context-building for /chart/<asset>, /oi/<asset>, and
-        /gamma/<instrument> — all three render the same
+        /mp/<instrument> — all three render the same
         dankbit_tv_chart_until template; /oi/<asset> additionally sets
         show_gamma_point so the template also draws the "Top OI(s)"
-        indicator, and /gamma/<instrument> additionally sets
+        indicator, and /mp/<instrument> additionally sets
         show_strike_gamma + strike_gamma_instrument so the template draws
         the restored per-strike "Strike Gamma" lines instead (see
         gamma_by_strike_chart). Returns (context, None) on success or
@@ -1962,10 +1962,21 @@ class ChartController(http.Controller):
 
         monthly_instrument = icp.get_param(monthly_param, default="").upper()
 
+        # Delta Chart's window title shows the nearest active expiry rather
+        # than the configured weekly expiry (the "expiry" field above) —
+        # showing the weekly one there had been read by Thales's dev as the
+        # expiry the chart's trades/indicators are scoped to, which isn't
+        # true for the Bands/Zones/gamma-band indicators (all nearest-expiry
+        # based). Falls back to the weekly expiry's own day-suffix if there's
+        # no active expiry at all, so the title never renders blank.
+        nearest_instrument = request.env["dankbit.bands"].nearest_expiry(asset)
+        nearest_expiry_str = nearest_instrument.split("-", 1)[1] if nearest_instrument else expiry_str
+
         return {
             "instrument": instrument,
             "asset": asset,
             "expiry": expiry_str,
+            "nearest_expiry": nearest_expiry_str,
             "monthly_instrument": monthly_instrument,
             "refresh_interval": refresh_interval,
             "zones_box_refresh_interval": zones_box_refresh_interval,
@@ -2014,7 +2025,7 @@ class ChartController(http.Controller):
         ctx["show_gamma_point"] = "true"
         return request.render("dankbit.dankbit_tv_chart_until", ctx)
 
-    @http.route("/gamma/<string:instrument>", type="http", auth="user", website=True)
+    @http.route("/mp/<string:instrument>", type="http", auth="user", website=True)
     def gamma_by_strike_chart(self, instrument):
         """Minimal TradingView chart (candles only, same template/context as
         /chart/<asset> and /oi/<asset>) plus the restored "Strike Gamma"

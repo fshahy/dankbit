@@ -1,7 +1,7 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /y/<asset> — its own file,
+	<!-- Standalone, minimal TradingView page for /gt/<asset> — its own file,
 	     not the shared dankbit_tv_chart_until template /chart/, /oi/,
-	     /gamma/ render. -->
+	     /mp/ render. -->
 
 	<template id="dankbit_gamma_triple_chart" name="Dankbit Gamma Triple Chart">
 		<html>

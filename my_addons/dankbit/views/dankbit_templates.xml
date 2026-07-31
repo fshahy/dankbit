@@ -204,7 +204,7 @@
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> <t t-esc="expiry"/> — <t t-if="show_gamma_point == 'true'">Gamma Chart</t><t t-elif="show_strike_gamma == 'true'">Strike Gamma</t><t t-else="">Delta Chart</t></title>
+				<title><t t-esc="asset"/> <t t-if="show_gamma_point == 'true'"><t t-esc="expiry"/> — Gamma Chart</t><t t-elif="show_strike_gamma == 'true'"><t t-esc="expiry"/> — Strike Gamma</t><t t-else=""><t t-esc="nearest_expiry"/> — Delta Chart</t></title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -417,15 +417,15 @@
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
 					// Only true on /oi/<asset> — /chart/<asset> and
-					// /gamma/<instrument> always pass show_gamma_point="false"
+					// /mp/<instrument> always pass show_gamma_point="false"
 					// (see _build_tv_chart_context).
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
-					// Only true on /gamma/<instrument> — the restored "Strike
+					// Only true on /mp/<instrument> — the restored "Strike
 					// Gamma" indicator (see drawStrikeGammaLines below), one
 					// price line per distinct strike rather than /oi/<asset>'s
 					// single top-strike-per-scope "Top OI(s)" line set.
 					const SHOW_STRIKE_GAMMA = cfg.showStrikeGamma === 'true';
-					// The instrument /gamma/<instrument> was requested with
+					// The instrument /mp/<instrument> was requested with
 					// (e.g. "BTC-25JUL26") — unrelated to INSTRUMENT above
 					// (the configured *weekly* expiry), this is whatever
 					// specific expiry the URL named, used as the isolated
@@ -442,7 +442,7 @@
 					const FORECAST_DOWN_COLOR = cfg.forecastDownColor || '#ef9a9a';
 					const FORECAST_WICK_UP_COLOR = cfg.forecastWickUpColor || '#66bb6a';
 					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
-					// /oi/<asset> and /gamma/<instrument> are the minimal pages
+					// /oi/<asset> and /mp/<instrument> are the minimal pages
 					// (candles + exactly one gamma indicator each — no
 					// Weekly/Monthly/All/Daily delta=0 lines, no zones
 					// boxes/extrema, no S/D (Lines)/Zones/Bands/Thales Forecast
@@ -843,7 +843,7 @@
 						refreshGammaTops();
 					}
 
-					// "Strike Gamma" lines (/gamma/<instrument> only) — the
+					// "Strike Gamma" lines (/mp/<instrument> only) — the
 					// restored per-strike indicator: one price line per
 					// distinct strike that has ever traded, isolated to
 					// STRIKE_GAMMA_INSTRUMENT's own expiry alone (see SGI_URL
@@ -866,7 +866,7 @@
 					// how much gamma is at this strike but which position
 					// is driving it.
 					let strikeGammaLines = [];
-					// Max Pain (/gamma/<instrument> only, alongside Strike
+					// Max Pain (/mp/<instrument> only, alongside Strike
 					// Gamma above) — the strike where Deribit's real open
 					// interest, not dankbit's own recorded trades (see
 					// ChartController._max_pain_for_expiry), would pay out
@@ -917,13 +917,13 @@
 							maxPainLine = series.createPriceLine({
 								price: data.max_pain, color: '#fb8c00', lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: 'black',
+								axisLabelVisible: true, axisLabelColor: '#fb8c00',
 								title: 'Max Pain',
 							});
 						}
 					}
 
-					// No checkbox — this is /gamma/<instrument>'s sole
+					// No checkbox — this is /mp/<instrument>'s sole
 					// purpose, so it's always on (gated only by
 					// SHOW_STRIKE_GAMMA/SGI_URL themselves being set at all,
 					// same as every other minimal-page indicator's
