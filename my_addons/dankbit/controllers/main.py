@@ -1753,11 +1753,15 @@ class ChartController(http.Controller):
         dankbit.bands._compute_asset() (reused unmodified), same
         live-compute-nothing-persisted pattern /api/zones-box/<asset>
         uses: nearest/weekly/monthly expiry gamma_band, plus the nearest
-        expiry's own Smart Liquidity upper/lower prices (both shown, not
-        collapsed to a single "dominant" one) — all over the same
-        trailing-hours window, user-selectable via the page's own
-        "Window" dropdown: an optional `?hours=` query param, restricted
-        to Y_CHART_WINDOW_HOURS_CHOICES (any other/missing value falls
+        expiry's own Smart Liquidity upper/lower prices AND their own
+        smart_liq_upper_strength/smart_liq_lower_strength (which side is
+        the stronger/more dominant level — same fields the Delta Chart's
+        own Bands dominance markers use) — the client picks whichever
+        side is dominant and draws only that one line, this endpoint
+        itself still reports both — all over the same trailing-hours
+        window, user-selectable via the page's own "Window" dropdown:
+        an optional `?hours=` query param, restricted to
+        Y_CHART_WINDOW_HOURS_CHOICES (any other/missing value falls
         back to Y_CHART_DEFAULT_WINDOW_HOURS, same defensive restriction
         pattern the dropdown itself enforces client-side). No model/table
         backs this at all."""
@@ -1790,6 +1794,8 @@ class ChartController(http.Controller):
         nearest_gamma = nearest_data["gamma_band"] if nearest_data else None
         smart_liq_upper = nearest_data["smart_liq_upper_price"] if nearest_data else 0.0
         smart_liq_lower = nearest_data["smart_liq_lower_price"] if nearest_data else 0.0
+        smart_liq_upper_strength = nearest_data["smart_liq_upper_strength"] if nearest_data else 0.0
+        smart_liq_lower_strength = nearest_data["smart_liq_lower_strength"] if nearest_data else 0.0
 
         weekly_instrument = weekly_gamma = None
         weekly_cfg = icp.get_param(weekly_param, default="").upper()
@@ -1812,6 +1818,8 @@ class ChartController(http.Controller):
             "monthly_gamma_band": monthly_gamma or 0.0,
             "smart_liq_upper_price": smart_liq_upper or 0.0,
             "smart_liq_lower_price": smart_liq_lower or 0.0,
+            "smart_liq_upper_strength": smart_liq_upper_strength or 0.0,
+            "smart_liq_lower_strength": smart_liq_lower_strength or 0.0,
         }
         return request.make_response(
             json.dumps(payload),
@@ -1846,6 +1854,20 @@ class ChartController(http.Controller):
     @http.route("/api/klines/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def klines_proxy(self, asset, interval="4h", limit="500"):
         candles = request.env["dankbit.trade"].get_candles(asset, interval=interval, limit=int(limit))
+        candles = candles[::-1]  # newest-first for frontend
+        return request.make_response(
+            json.dumps({"result": candles}),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/klines-futures/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def klines_futures_proxy(self, asset, interval="4h", limit="500"):
+        """Kraken Futures equivalent of klines_proxy above — sourced from
+        dankbit.trade.get_candles_kraken_futures() instead of get_candles()
+        (Binance spot). Used only by /gt/<asset>'s own candle series, per
+        product decision to keep this one page on Kraken Futures rather
+        than switching every TradingView page's candle source."""
+        candles = request.env["dankbit.trade"].get_candles_kraken_futures(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),

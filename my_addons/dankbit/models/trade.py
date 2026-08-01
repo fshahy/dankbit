@@ -23,6 +23,12 @@ _DERIBIT_CACHE = {
 _BINANCE_CACHE = {}
 _BINANCE_CANDLES_CACHE_TTL = 5.0
 
+# Separate cache for Kraken Futures candles (get_candles_kraken_futures) —
+# same short-fixed-TTL reasoning as _BINANCE_CACHE above, just a distinct
+# dict/key-space since this is a different upstream API.
+_KRAKEN_CACHE = {}
+_KRAKEN_CANDLES_CACHE_TTL = 5.0
+
 def _safe_binance_request(
     url,
     params,
@@ -48,6 +54,39 @@ def _safe_binance_request(
         except Exception as e:
             _logger.warning(
                 "Binance request failed (%d/%d) %s params=%s error=%s",
+                attempt, retries, url, params, e
+            )
+            if attempt < retries:
+                time_module.sleep(backoff * (2 ** (attempt - 1)))
+            else:
+                if raise_on_fail:
+                    raise
+                return None
+
+def _safe_kraken_futures_request(
+    url,
+    params,
+    timeout=10.0,
+    retries=3,
+    backoff=0.4,
+    raise_on_fail=False,
+):
+    """Same robust GET-with-retries/backoff shape as _safe_binance_request
+    above, for Kraken Futures' public charts API instead — a failure there
+    is signalled by the response body simply lacking a "candles" key
+    (no {"code"/"error": ...} envelope the way Binance/Deribit use), so
+    that's what's checked here rather than a specific error key."""
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or "candles" not in data:
+                raise RuntimeError(f"Kraken Futures error: {data}")
+            return data
+        except Exception as e:
+            _logger.warning(
+                "Kraken Futures request failed (%d/%d) %s params=%s error=%s",
                 attempt, retries, url, params, e
             )
             if attempt < retries:
@@ -350,6 +389,53 @@ class Trade(models.Model):
             for row in data
         ]
         _BINANCE_CACHE[cache_key] = {"ts": now_ts, "value": candles}
+        return candles
+
+    _KRAKEN_FUTURES_SYMBOL_MAP = {"BTC": "PF_XBTUSD", "ETH": "PF_ETHUSD"}
+
+    def get_candles_kraken_futures(self, asset, interval="4h", limit=500):
+        """Real Kraken Futures candles (USD-margined perpetuals — PF_XBTUSD/
+        PF_ETHUSD), oldest-first, same {t, o, h, l, c} shape get_candles()
+        returns — used **only** by /gt/<asset> (ChartController.
+        gamma_triple_chart's own klines_futures_proxy route), per product
+        decision to source that one page's candles from Kraken Futures
+        instead of Binance spot; every other TradingView page in this addon
+        (/chart, /oi, /mp) keeps using get_candles()/Binance unchanged.
+
+        Kraken Futures' public charts API (https://futures.kraken.com/api/
+        charts/v1/trade/<symbol>/<resolution>) has the same native 15m/1h/
+        4h/1d resolution strings this addon's own interval values already
+        use, and its own `count` param returns exactly the most recent N
+        candles ending "now" oldest-first — no aggregation or window math
+        needed here either, same as get_candles()'s own Binance call.
+        Cached in the separate _KRAKEN_CACHE dict (same short fixed
+        _KRAKEN_CANDLES_CACHE_TTL=5s reasoning as _BINANCE_CANDLES_CACHE_TTL
+        — this gets polled every 5s per open /gt tab)."""
+        symbol = self._KRAKEN_FUTURES_SYMBOL_MAP.get(asset.upper(), "PF_" + asset.upper() + "USD")
+
+        cache_key = f"kraken_candles_{symbol}_{interval}_{limit}"
+        now_ts = time_module.time()
+        cached = _KRAKEN_CACHE.get(cache_key, {})
+        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _KRAKEN_CANDLES_CACHE_TTL):
+            return cached.get("value")
+
+        url = f"https://futures.kraken.com/api/charts/v1/trade/{symbol}/{interval}"
+        data = _safe_kraken_futures_request(url, params={"count": limit}, timeout=10.0)
+        if not data:
+            if cached and cached.get("value") is not None:
+                _logger.warning("get_candles_kraken_futures: using stale cached value for %s", cache_key)
+                return cached.get("value")
+            _logger.exception("get_candles_kraken_futures failed and no cache available for %s", cache_key)
+            return []
+
+        # Kraken Futures candle row: {"time": ms, "open", "high", "low",
+        # "close", "volume"} — oldest-first already, matching this
+        # function's own documented return order (same as get_candles()).
+        candles = [
+            {"t": int(row["time"]), "o": float(row["open"]), "h": float(row["high"]), "l": float(row["low"]), "c": float(row["close"])}
+            for row in data["candles"]
+        ]
+        _KRAKEN_CACHE[cache_key] = {"ts": now_ts, "value": candles}
         return candles
 
     def _get_latest_trade_ts_for_instrument(self, instrument_name: str):

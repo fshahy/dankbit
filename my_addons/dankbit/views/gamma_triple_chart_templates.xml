@@ -25,6 +25,17 @@
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
 					}
+					/* Same right: 80px offset the shared /chart,/oi,/mp template's
+					   own #exchange-label uses — the chart's rightPriceScale has
+					   no fixed width (auto-sized to the widest visible price
+					   label), so right: 12px would sit underneath/over it. */
+					#exchange-label {
+						position: fixed; top: 8px; right: 80px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
 					.tf-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; padding: 0 2px;
@@ -68,6 +79,7 @@
 					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
+					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
@@ -98,6 +110,7 @@
 				<div id="chart-container"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
+				<div id="exchange-label"/>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -110,10 +123,10 @@
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="4">4h</option>
 						<option value="8">8h</option>
-						<option value="12">12h</option>
+						<option value="12" selected="selected">12h</option>
 						<option value="16">16h</option>
 						<option value="24">24h</option>
-						<option value="average" selected="selected">Average</option>
+						<option value="average">Average</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -129,6 +142,14 @@
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
+					// Candles are Kraken Futures on this page only (see
+					// dankbit.trade.get_candles_kraken_futures) — mirrors the
+					// server-side _KRAKEN_FUTURES_SYMBOL_MAP (PF_XBTUSD/
+					// PF_ETHUSD) rather than a naive 'PF_' + ASSET + 'USD'
+					// concat, since Kraken uses "XBT" (not "BTC") as
+					// Bitcoin's own ticker.
+					const KRAKEN_FUTURES_SYMBOL = { BTC: 'PF_XBTUSD', ETH: 'PF_ETHUSD' }[ASSET] || ('PF_' + ASSET + 'USD');
+					document.getElementById('exchange-label').textContent = 'Kraken Futures · ' + KRAKEN_FUTURES_SYMBOL;
 					// Recomputed from scratch on every request (no persisted
 					// history behind this page at all — see
 					// ChartController.gamma_triple_json) — polls on the same
@@ -146,10 +167,16 @@
 					// instead of a single ?hours= window, fetches all 4 of
 					// AVERAGE_WINDOW_HOURS in parallel and averages each line's
 					// value across them (see averageGammaTripleData()) rather
-					// than showing any one window's own reading.
-					let   WINDOW_IS_AVERAGE = true;
+					// than showing any one window's own reading. Default is
+					// the plain 12h window instead (matches the dropdown's
+					// own "12h" default selection).
+					let   WINDOW_IS_AVERAGE = false;
 					const AVERAGE_WINDOW_HOURS = [8, 12, 16, 24];
-					const klineUrl = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+					// Kraken Futures, not Binance spot — /gt/<asset> only, per
+					// product decision; every other TradingView page in this
+					// addon keeps reading candles from /api/klines/<asset>
+					// (Binance spot, see ChartController.klines_proxy).
+					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					const gammaTripleUrl = h => '/api/gamma-triple/' + ASSET + '?hours=' + h;
 
 					// Averages each of the 5 line fields across however many of
@@ -173,7 +200,7 @@
 							weekly_instrument:  (results.map(r => r.weekly_instrument).find(v => v))  || null,
 							monthly_instrument: (results.map(r => r.monthly_instrument).find(v => v)) || null,
 						};
-						['nearest_gamma_band', 'weekly_gamma_band', 'monthly_gamma_band', 'smart_liq_upper_price', 'smart_liq_lower_price'].forEach(field => {
+						['nearest_gamma_band', 'weekly_gamma_band', 'monthly_gamma_band', 'smart_liq_upper_price', 'smart_liq_lower_price', 'smart_liq_upper_strength', 'smart_liq_lower_strength'].forEach(field => {
 							const present = results.map(r => r[field]).filter(v => v);
 							out[field] = present.length ? present.reduce((a, b) => a + b, 0) / present.length : 0;
 						});
@@ -424,16 +451,22 @@
 							// 0.0 means absent (see smart_liq_upper_price/
 							// smart_liq_lower_price) — no line drawn rather than a
 							// spurious price-0 line, same principle the Delta Chart's
-							// own Smart Liquidity lines use. Both sides are shown
-							// (not collapsed to a single "dominant" one).
-							if (data.smart_liq_upper_price) {
+							// own Smart Liquidity lines use. Only the dominant side
+							// is drawn here (never both) — whichever of
+							// smart_liq_upper_strength/smart_liq_lower_strength is
+							// larger, the same two fields the Delta Chart's own
+							// Bands dominance markers compare. A strict >
+							// comparison, so an exact tie draws neither.
+							const upperDominant = data.smart_liq_upper_price && data.smart_liq_upper_strength > data.smart_liq_lower_strength;
+							const lowerDominant = data.smart_liq_lower_price && data.smart_liq_lower_strength > data.smart_liq_upper_strength;
+							if (upperDominant) {
 								smartLiqUpperPriceLine = series.createPriceLine({
 									price: data.smart_liq_upper_price, color: SMART_LIQ_UPPER_COLOR, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dotted,
 									axisLabelVisible: true, axisLabelColor: 'black', title: 'Smart Liq Upper',
 								});
 							}
-							if (data.smart_liq_lower_price) {
+							if (lowerDominant) {
 								smartLiqLowerPriceLine = series.createPriceLine({
 									price: data.smart_liq_lower_price, color: SMART_LIQ_LOWER_COLOR, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dotted,
