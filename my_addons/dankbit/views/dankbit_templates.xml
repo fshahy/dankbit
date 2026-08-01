@@ -392,6 +392,10 @@
 							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-lowSupport"/></label>
 							<label class="color-row">Gamma Band <input type="color" id="color-gammaBand"/></label>
 						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Strike Gamma</div>
+							<label class="color-row">Max Pain <input type="color" id="color-maxPain"/></label>
+						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
 							<button class="tf-btn" onclick="saveChartColors()">Save</button>
@@ -566,6 +570,7 @@
 						highResistance: '#2e7d32',
 						lowSupport: '#c62828',
 						gammaBand: '#c9a0dc',
+						maxPain: '#fb8c00',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -915,9 +920,9 @@
 						// spurious price-0 one.
 						if (data.max_pain) {
 							maxPainLine = series.createPriceLine({
-								price: data.max_pain, color: '#fb8c00', lineWidth: 2,
+								price: data.max_pain, color: chartColors.maxPain, lineWidth: 2,
 								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: '#fb8c00',
+								axisLabelVisible: true, axisLabelColor: chartColors.maxPain,
 								title: 'Max Pain',
 							});
 						}
@@ -1698,6 +1703,13 @@
 						// currently off/not fetched yet. Sequenced, same reason as
 						// onToggleBands() above.
 						if (SHOW_BANDS) { refreshBands().then(refreshLiveBandDots); }
+
+						// Max Pain also bakes its color in at draw time via
+						// createPriceLine (see drawStrikeGammaLines), same
+						// reasoning as the dominance dots above — harmless no-op
+						// on /chart/<asset> and /oi/<asset>, where
+						// SHOW_STRIKE_GAMMA is always false.
+						if (SHOW_STRIKE_GAMMA) { refreshStrikeGamma(); }
 					}
 
 					function openSettingsModal() {
