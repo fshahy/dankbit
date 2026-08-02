@@ -21,16 +21,21 @@ logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 log = logging.getLogger("ws")
 
 # -----------------------------------------------------
-# PostgreSQL connection (global)
+# PostgreSQL connection (global, reconnected on drop — see insert_trade)
 # -----------------------------------------------------
-PG_CONN = psycopg2.connect(
-    dbname=os.getenv("POSTGRES_DB"),
-    user=os.getenv("POSTGRES_USER"),
-    password=os.getenv("POSTGRES_PASSWORD"),
-    host=os.getenv("POSTGRES_HOST", "db"),
-    port=os.getenv("POSTGRES_PORT", "5432")
-)
-PG_CONN.autocommit = True
+def connect_db():
+    conn = psycopg2.connect(
+        dbname=os.getenv("POSTGRES_DB"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD"),
+        host=os.getenv("POSTGRES_HOST", "db"),
+        port=os.getenv("POSTGRES_PORT", "5432")
+    )
+    conn.autocommit = True
+    return conn
+
+
+PG_CONN = connect_db()
 print("WS connecting to DB:", PG_CONN.dsn, flush=True)
 
 
@@ -96,12 +101,31 @@ def insert_trade(t):
         t.get("timestamp"),             # ms → converted in SQL
     )
 
-    try:
-        with PG_CONN.cursor() as cur:
-            cur.execute(sql, values)
-    except Exception as e:
-        log.error(f"DB insert error: {e}")
-        PG_CONN.rollback()
+    global PG_CONN
+    for attempt in (1, 2):
+        try:
+            with PG_CONN.cursor() as cur:
+                cur.execute(sql, values)
+            return
+        except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+            # The connection itself died (idle timeout, DB restart, network
+            # blip) — psycopg2 doesn't auto-reconnect, so every insert would
+            # otherwise fail silently forever until this process is
+            # restarted. Reconnect once and retry this same insert.
+            log.error(f"DB connection error: {e} — reconnecting")
+            try:
+                PG_CONN.close()
+            except Exception:
+                pass
+            PG_CONN = connect_db()
+        except Exception as e:
+            log.error(f"DB insert error: {e}")
+            try:
+                PG_CONN.rollback()
+            except Exception:
+                pass
+            return
+    log.error(f"DB insert failed after reconnect for {t.get('instrument_name')}")
 
 
 # -----------------------------------------------------

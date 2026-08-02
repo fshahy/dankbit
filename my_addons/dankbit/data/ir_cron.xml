@@ -80,6 +80,66 @@
             <field name="priority">5</field>
         </record>
 
+        <record id="dankbit_compute_next_candle_forecast_1h_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Next Candle Forecast (1H)</field>
+            <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
+            <field name="interval_number">15</field>
+            <field name="interval_type">minutes</field>
+            <!-- Phase-aligned to :00/:15/:30/:45 UTC (any clean multiple-of-15-minutes
+                 anchor works — Odoo's scheduler catches up to "now" then stays locked
+                 to this phase forever) so each revision tick lands on the exact
+                 boundary next_candle_forecast.revision_for_elapsed_hours() expects,
+                 rather than an arbitrary phase from whenever this record happened to
+                 be created/activated. -->
+            <field name="nextcall">2020-01-01 00:00:00</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_and_log(timeframe='1h')</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_compute_next_candle_forecast_4h_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Next Candle Forecast (4H)</field>
+            <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <!-- Phase-aligned to the top of every UTC hour — see the 1H cron's own
+                 comment above for why this matters. -->
+            <field name="nextcall">2020-01-01 00:00:00</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_and_log(timeframe='4h')</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_compute_next_candle_forecast_1d_cron" model="ir.cron">
+            <field name="active">False</field>
+            <field name="name">Dankbit - Compute Next Candle Forecast (1D)</field>
+            <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
+            <field name="interval_number">4</field>
+            <field name="interval_type">hours</field>
+            <!-- Phase-aligned to 00/04/08/12/16/20 UTC — see the 1H cron's own
+                 comment above for why this matters. -->
+            <field name="nextcall">2020-01-01 00:00:00</field>
+            <field name="state">code</field>
+            <field name="code">model.compute_and_log(timeframe='1d')</field>
+            <field name="priority">5</field>
+        </record>
+
+        <record id="dankbit_check_next_candle_accuracy_cron" model="ir.cron">
+            <field name="active">False</field>
+            <!-- 5 minutes after the top of the hour, so this never races the
+                 compute crons above for the same instant. -->
+            <field name="nextcall">2020-01-01 00:05:00</field>
+            <field name="name">Dankbit - Check Next Candle Forecast Accuracy</field>
+            <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="state">code</field>
+            <field name="code">model.check_accuracy()</field>
+            <field name="priority">5</field>
+        </record>
+
         <record id="dankbit_delete_old_http_logs_cron" model="ir.cron">
             <field name="active">False</field>
             <field name="name">Dankbit - Delete Old HTTP Logs</field>

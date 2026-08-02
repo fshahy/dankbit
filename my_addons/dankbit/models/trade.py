@@ -396,11 +396,11 @@ class Trade(models.Model):
     def get_candles_kraken_futures(self, asset, interval="4h", limit=500):
         """Real Kraken Futures candles (USD-margined perpetuals — PF_XBTUSD/
         PF_ETHUSD), oldest-first, same {t, o, h, l, c} shape get_candles()
-        returns — used **only** by /gt/<asset> (ChartController.
-        gamma_triple_chart's own klines_futures_proxy route), per product
-        decision to source that one page's candles from Kraken Futures
-        instead of Binance spot; every other TradingView page in this addon
-        (/chart, /oi, /mp) keeps using get_candles()/Binance unchanged.
+        returns — used by /gt/<asset> and /4l/<asset> (both via the shared
+        klines_futures_proxy route), per product decision to source those
+        two pages' candles from Kraken Futures instead of Binance spot;
+        every other TradingView page in this addon (/chart, /oi, /mp)
+        keeps using get_candles()/Binance unchanged.
 
         Kraken Futures' public charts API (https://futures.kraken.com/api/
         charts/v1/trade/<symbol>/<resolution>) has the same native 15m/1h/

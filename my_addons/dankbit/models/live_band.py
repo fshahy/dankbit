@@ -21,9 +21,8 @@ class LiveBand(models.Model):
     time its own cron runs (a real point-in-time reading), so this history
     shows how these numbers actually moved hour to hour for one asset, not
     just their final value per expiry. Each reading uses the plain
-    since-00:00-Iran default window (Asia/Tehran, via
-    options.day_window_start() — same as dankbit.bands' own cron), not a
-    rolling window.
+    since-00:00-UTC default window (options.day_window_start() — same as
+    dankbit.bands' own cron), not a rolling window.
 
     Entirely independent of dankbit.bands — separate model/table/cron,
     reusing dankbit.bands._compute_asset() unmodified (the same pure
@@ -49,7 +48,7 @@ class LiveBand(models.Model):
 
     def compute_and_create(self, asset):
         """Computes the nearest expiry's dankbit.bands._compute_asset()
-        result (same since-00:00-Iran default window that model's own
+        result (same since-00:00-UTC default window that model's own
         cron uses — not a rolling window, since this is meant to mirror
         the same numbers dankbit.bands itself would persist for that
         instrument, just as an unbounded log instead of one frozen row)

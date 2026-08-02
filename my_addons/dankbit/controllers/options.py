@@ -21,30 +21,25 @@ from . import vega as vega_lib
 # their own separate copy of this same 0.9 value.
 DELTA_SATURATION_FRACTION = 0.9
 
-# Every "trades since 00:00 UTC" trade window in this addon (chart_png_zones,
+# Every "trades since 00:00" trade window in this addon (chart_png_zones,
 # the /<instrument>/lp,lc,sp,sc single-leg routes, dankbit.bands._compute_asset's
 # default hours=None window, dankbit.forecast.snapshot's trade-weighted-greeks
-# helper) actually resets at Iran midnight, not UTC midnight — confirmed
-# directly against Thales's own numbers: his R/S (high_resistance/low_support)
-# didn't match ours at all despite GAVG (gamma_band) matching almost exactly,
-# and the gap closed once this was corrected. Asia/Tehran (Iran's IANA zone
-# name) via zoneinfo, not a hardcoded +3:30 offset, so this stays correct
-# through any future Iranian DST rule change (Iran currently observes none,
-# as of this addon's own testing, but zoneinfo handles that automatically
-# either way).
-IRAN_TZ = ZoneInfo("Asia/Tehran")
+# helper) reset at UTC midnight. This briefly reset at Iran (Asia/Tehran)
+# midnight instead — confirmed at the time against Thales's own numbers,
+# whose R/S (high_resistance/low_support) only matched ours under that
+# zone — but Thales dev has since asked to revert this back to UTC
+# midnight, so this is UTC-anchored again.
 
 
 def day_window_start(as_of):
-    """The most recent Iran midnight at or before `as_of`, returned as a
+    """The most recent UTC midnight at or before `as_of`, returned as a
     naive UTC datetime — the actual day-boundary reference behind every
-    "trades since 00:00 UTC" window in this addon (see IRAN_TZ above).
+    "trades since 00:00" window in this addon (see comment above).
     `as_of` may be naive (assumed UTC, matching the convention every caller
     already uses, e.g. dankbit.bands._compute_asset's own `as_of`) or
     tz-aware."""
-    as_of_utc = as_of.replace(tzinfo=timezone.utc) if as_of.tzinfo is None else as_of
-    iran_midnight = as_of_utc.astimezone(IRAN_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
-    return iran_midnight.astimezone(timezone.utc).replace(tzinfo=None)
+    as_of_utc = as_of.replace(tzinfo=timezone.utc) if as_of.tzinfo is None else as_of.astimezone(timezone.utc)
+    return as_of_utc.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
 
 class OptionStrat:

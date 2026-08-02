@@ -205,11 +205,8 @@ class Bands(models.Model):
         boundaries for `asset` as of now, for one specific active expiry
         only — mirrors the /<instrument>/zones PNG route called with that
         specific instrument, aggregated per-asset. Trades are taken since
-        the most recent Iran midnight by default (options.day_window_start —
-        despite the "00:00 UTC" label this and every other day-windowed
-        route in this addon uses, confirmed against Thales's own numbers:
-        his R/S didn't match ours at all until this was corrected, even
-        though GAVG/gamma_band already did); passing `hours` instead restricts
+        the most recent UTC midnight by default (options.day_window_start);
+        passing `hours` instead restricts
         to the trailing `hours` hours through now — used by /chart/<asset>'s
         00:00-vs-trailing-hours radio toggle (see get_box,
         dankbit_templates.xml). `expiry_index` selects which active expiry, in soonest-first

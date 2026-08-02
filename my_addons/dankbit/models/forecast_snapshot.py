@@ -141,7 +141,7 @@ class ForecastSnapshot(models.Model):
 
     def compute_and_persist(self, asset):
         """Compute this moment's per-leg Greeks/band data for `asset` (nearest
-        active expiry, trades since 00:00 Iran — see options.day_window_start)
+        active expiry, trades since 00:00 UTC — see options.day_window_start)
         and upsert it into the current
         4h bucket's row, refining it in place until the bucket rolls over
         (see BUCKET_HOURS). Returns the upserted record, or None if there's

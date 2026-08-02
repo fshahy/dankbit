@@ -1,0 +1,147 @@
+<?xml version="1.0"?>
+
+<odoo>
+    <record id="dankbit_forecast_next_candle_view_form" model="ir.ui.view">
+        <field name="name">dankbit_forecast_next_candle.view.form</field>
+        <field name="model">dankbit.forecast.next_candle</field>
+        <field name="arch" type="xml">
+            <form string="Next Candle Forecast">
+                <sheet>
+                    <group>
+                        <field name="asset" />
+                        <field name="timeframe" />
+                        <field name="current_candle_start" />
+                        <field name="target_time" />
+                        <field name="revision" />
+                        <field name="max_revisions" />
+                        <field name="is_final" />
+                        <field name="generated_at" />
+                        <field name="snapshot_id" />
+                    </group>
+                    <group string="Forecast">
+                        <field name="forecast_open" />
+                        <field name="forecast_close" />
+                        <field name="forecast_high" />
+                        <field name="forecast_low" />
+                        <field name="confidence" />
+                    </group>
+                    <group string="Engine Breakdown">
+                        <field name="greek_flow_score" />
+                        <field name="structural_adjustment" />
+                        <field name="smart_liquidity_adjustment" />
+                        <field name="activity_regime" />
+                        <field name="is_weekend" />
+                    </group>
+                    <group string="Accuracy">
+                        <field name="actual_open" />
+                        <field name="actual_close" />
+                        <field name="actual_high" />
+                        <field name="actual_low" />
+                        <field name="close_error" />
+                        <field name="close_error_pct" />
+                        <field name="direction_correct" />
+                        <field name="high_error" />
+                        <field name="low_error" />
+                        <field name="range_coverage" />
+                        <field name="checked_at" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_next_candle_view_list" model="ir.ui.view">
+        <field name="name">dankbit_forecast_next_candle.view.list</field>
+        <field name="model">dankbit.forecast.next_candle</field>
+        <field name="arch" type="xml">
+            <list string="Next Candle Forecast">
+                <field name="asset" />
+                <field name="timeframe" />
+                <field name="target_time" />
+                <field name="revision" />
+                <field name="max_revisions" />
+                <field name="is_final" />
+                <field name="generated_at" />
+                <field name="forecast_open" />
+                <field name="forecast_close" />
+                <field name="forecast_high" />
+                <field name="forecast_low" />
+                <field name="confidence" />
+                <field name="actual_close" optional="show" />
+                <field name="close_error" optional="show" />
+                <field name="direction_correct" optional="show" />
+                <field name="close_error_pct" optional="hide" />
+                <field name="high_error" optional="hide" />
+                <field name="low_error" optional="hide" />
+                <field name="range_coverage" optional="hide" />
+                <field name="checked_at" optional="hide" />
+                <field name="greek_flow_score" optional="hide" />
+                <field name="structural_adjustment" optional="hide" />
+                <field name="smart_liquidity_adjustment" optional="hide" />
+                <field name="activity_regime" optional="hide" />
+                <field name="is_weekend" optional="hide" />
+                <field name="snapshot_id" optional="hide" />
+            </list>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_next_candle_view_pivot" model="ir.ui.view">
+        <field name="name">dankbit_forecast_next_candle.view.pivot</field>
+        <field name="model">dankbit.forecast.next_candle</field>
+        <field name="arch" type="xml">
+            <pivot string="Next Candle Forecast Accuracy">
+                <field name="asset" type="row"/>
+                <field name="revision" type="row"/>
+                <field name="is_final" type="col"/>
+                <field name="close_error" type="measure"/>
+                <field name="close_error_pct" type="measure"/>
+                <field name="high_error" type="measure"/>
+                <field name="low_error" type="measure"/>
+                <field name="range_coverage" type="measure"/>
+                <field name="confidence" type="measure"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_next_candle_view_search" model="ir.ui.view">
+        <field name="name">dankbit.forecast.next_candle.view.search</field>
+        <field name="model">dankbit.forecast.next_candle</field>
+        <field name="arch" type="xml">
+            <search string="Search Next Candle Forecast">
+                <field name="asset" string="Asset"/>
+                <field name="target_time" string="Target Time"/>
+                <field name="generated_at" string="Generated At"/>
+
+                <separator/>
+
+                <filter name="only_btc" string="Only BTC" domain="[('asset', '=', 'BTC')]"/>
+                <filter name="only_eth" string="Only ETH" domain="[('asset', '=', 'ETH')]"/>
+                <filter name="final_only" string="Final Revision Only" domain="[('is_final', '=', True)]"/>
+                <filter name="checked" string="Checked" domain="[('checked_at', '!=', False)]"/>
+                <filter name="unchecked" string="Unchecked" domain="[('checked_at', '=', False)]"/>
+                <filter name="is_weekend" string="Weekend" domain="[('is_weekend', '=', True)]"/>
+                <filter name="direction_correct" string="Direction Correct" domain="[('direction_correct', '=', True)]"/>
+
+                <group expand="0" string="Group By">
+                    <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                    <filter string="Timeframe" name="timeframe" context="{'group_by':'timeframe'}"/>
+                    <filter string="Target Time" name="target_time" context="{'group_by':'target_time'}"/>
+                    <filter string="Revision" name="revision" context="{'group_by':'revision'}"/>
+                    <filter string="Activity Regime" name="activity_regime" context="{'group_by':'activity_regime'}"/>
+                    <filter string="Weekend" name="group_is_weekend" context="{'group_by':'is_weekend'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="dankbit_forecast_next_candle_action" model="ir.actions.act_window">
+        <field name="name">Next Candle Forecast</field>
+        <field name="res_model">dankbit.forecast.next_candle</field>
+        <field name="view_mode">list,pivot,form</field>
+    </record>
+
+    <menuitem id="dankbit_forecast_next_candle_menu" name="Next Candle Forecast"
+        action="dankbit_forecast_next_candle_action"
+        parent="dankbit_root_menu"
+        sequence="75"/>
+</odoo>

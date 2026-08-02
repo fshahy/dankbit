@@ -228,6 +228,19 @@
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
+					/* "Next Candle Forecast" status pill (Delta Chart only, see
+					   #next-candle-forecast-label below) — same fixed pill
+					   pattern as #exchange-label, positioned right below it.
+					   Empty/no-op text collapses to zero visible content
+					   rather than an empty box (see refreshNextCandleForecast). */
+					#next-candle-forecast-label {
+						position: fixed; top: 40px; right: 80px;
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
+					#next-candle-forecast-label:empty { display: none; }
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -305,6 +318,7 @@
 					body.dark, body.dark html { background: #000000; }
 					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark #next-candle-forecast-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
@@ -324,6 +338,7 @@
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
+				<div id="next-candle-forecast-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -359,9 +374,13 @@
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
 						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="next-candle-forecast-toggle" onchange="onToggleNextCandleForecast()"/>
+							Next Candle Forecast
+						</label>
 						<span class="tf-label">Zones from:</span>
 						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
-							<option value="midnight">00:00 Iran</option>
+							<option value="midnight">00:00 UTC</option>
 							<option value="hours"><t t-esc="zones_box_window_hours"/>h ago</option>
 						</select>
 					</t>
@@ -597,7 +616,14 @@
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
+					const LAST_TRADE_URL   = '/api/last-trade/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
+					// "Next Candle Forecast" status pill (Delta Chart only) —
+					// a separate feature from the 18-candle Thales Forecast
+					// series above (FORECAST_URL/forecastSeries), not gated by
+					// the "Thales Forecast" checkbox — see
+					// refreshNextCandleForecast below.
+					const NEXT_CANDLE_FORECAST_URL = '/api/next-candle-forecast/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
 					// checkbox at all, so SHOW_FORECAST simply never gets
@@ -607,6 +633,12 @@
 					// Draws a fully deterministic path (see FORECAST_URL) ported
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
+					// "Next Candle Forecast" checkbox — unchecked by default,
+					// same as every other optional indicator on this page;
+					// unchecking stops refreshNextCandleForecast() from
+					// fetching at all, same server-load-reducing pattern as
+					// every other checkbox on this page.
+					let SHOW_NEXT_CANDLE_FORECAST = false;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -756,6 +788,23 @@
 					const forecastSeries = chart.addCandlestickSeries({
 						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
 						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
+						lastValueVisible: false, priceLineVisible: false,
+					});
+
+					// Next Candle Forecast (4H) — a separate feature from the
+					// 18-candle Thales Forecast series above, gated by its
+					// own checkbox rather than the "Thales Forecast" one
+					// above (see SHOW_NEXT_CANDLE_FORECAST), matching the
+					// #next-candle-forecast-label pill it's drawn alongside —
+					// see refreshNextCandleForecast). Exactly ONE candle, at
+					// the upcoming 4h slot, sourced from
+					// /api/next-candle-forecast/<asset> (dankbit.forecast.
+					// next_candle). Blue/indigo so it's visually distinct from
+					// both the real candles (teal/red) and the other forecast
+					// series (light green/red).
+					const nextCandleForecastSeries = chart.addCandlestickSeries({
+						upColor: '#64b5f6', downColor: '#9575cd', borderVisible: false,
+						wickUpColor: '#1e88e5', wickDownColor: '#5e35b1',
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
@@ -1087,6 +1136,7 @@
 						await refreshLiveBandDots();
 						await refreshZonesBoxes();
 						await updateForecastVisibility();
+						await refreshNextCandleForecast();
 					}
 
 					async function refreshDeltaZero() {
@@ -1108,11 +1158,28 @@
 
 					let nearestExpiryStr = null;
 					let lastTradeCount = 0;
+					let lastTradeTs = null;
+
+					// Shown in real UTC (not the browser-local tzOffset shift the
+					// chart's own time axis uses) — this is a staleness check
+					// against server time, not a chart position, so genuine UTC
+					// is what's directly comparable to "now" when eyeballing
+					// whether dankbit_ws has stalled (see refreshLastTrade).
+					function formatLastTradeTs(iso) {
+						if (!iso) return null;
+						return new Date(iso).toLocaleString('de-DE', {
+							timeZone: 'UTC',
+							year: 'numeric', month: '2-digit', day: '2-digit',
+							hour: '2-digit', minute: '2-digit', second: '2-digit',
+						}) + ' UTC';
+					}
 
 					function updateStatusLine() {
 						const expiries = [INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
 						let text = expiries + '  ·  ' + lastTradeCount + ' trades';
 						if (nearestExpiryStr) text += '  ·  Nearest: ' + nearestExpiryStr;
+						const lastTradeLabel = formatLastTradeTs(lastTradeTs);
+						if (lastTradeLabel) text += '  ·  Last trade: ' + lastTradeLabel;
 						setStatus(text);
 					}
 
@@ -1141,6 +1208,17 @@
 						// their own full computation, not this lightweight endpoint.
 						const data = await (await fetch(NEAREST_EXPIRY_URL)).json();
 						nearestExpiryStr = data.expiry || null;
+						updateStatusLine();
+					}
+
+					async function refreshLastTrade() {
+						// Cheap standalone lookup (no curve-building), asset-wide (not
+						// restricted to any one expiry) — a growing gap between this
+						// and "now" is the at-a-glance signal that dankbit_ws has
+						// stalled (its DB connection can die without crashing the
+						// container, silently dropping every trade).
+						const data = await (await fetch(LAST_TRADE_URL)).json();
+						lastTradeTs = data.last_trade_ts || null;
 						updateStatusLine();
 					}
 
@@ -1630,7 +1708,90 @@
 						}
 					}
 
-					// "Zones from" dropdown — 00:00-Iran-vs-trailing-hours window for
+					function clearNextCandleForecastCandle() {
+						nextCandleForecastSeries.setData([]);
+					}
+
+					function onToggleNextCandleForecast() {
+						SHOW_NEXT_CANDLE_FORECAST = document.getElementById('next-candle-forecast-toggle').checked;
+						if (SHOW_NEXT_CANDLE_FORECAST) {
+							refreshNextCandleForecast();
+						} else {
+							const label = document.getElementById('next-candle-forecast-label');
+							if (label) label.textContent = '';
+							clearNextCandleForecastCandle();
+						}
+					}
+
+					// "Next Candle Forecast" checkbox — a separate feature from
+					// the 18-candle Thales Forecast series above:
+					// dankbit.forecast.next_candle tracks exactly ONE target
+					// candle at a time PER TIMEFRAME (1H/4H/1D), each revised
+					// on its own fixed cadence while its current candle is
+					// still forming (see controllers/next_candle_forecast.py).
+					// Draws both the status pill text AND one candle
+					// (nextCandleForecastSeries) at the upcoming slot for
+					// WHICHEVER timeframe the chart's own "Timeframe" dropdown
+					// is currently showing (INTERVAL is already exactly
+					// '1h'/'4h'/'1d', a 1:1 match with the backend's own
+					// `timeframe` values — no translation needed beyond the
+					// label's own display name below) — switching timeframe
+					// naturally reveals that timeframe's own forecast instead
+					// of three overlapping/mismatched-width candles at once.
+					// Checked by default (unlike every other optional
+					// indicator here), since it was already always-on before
+					// this checkbox existed — unchecking stops
+					// refreshNextCandleForecast() from fetching at all, same
+					// server-load-reducing pattern as every other checkbox on
+					// this page. The label element doesn't exist on
+					// /oi/<asset> or /mp/<instrument> (see the t-if in the
+					// template), so this null-checks before touching it, same
+					// convention updateForecastVisibility() uses for
+					// #forecast-toggle-wrap; MINIMAL_CHART is checked directly
+					// too so the candle series (created unconditionally, same
+					// as forecastSeries) never gets data there either. The
+					// candle is positioned via the same real-candle-time-grid
+					// anchor refreshForecast() uses (realCandles[last].time,
+					// stepped by intervalSec) rather than the server's own
+					// `target_time`, for the same shared-logical-time-axis
+					// reason — this already works correctly at any timeframe
+					// since intervalSec always matches whichever grid is
+					// currently displayed.
+					const NEXT_CANDLE_FORECAST_LABELS = { '1h': '1H', '4h': '4H', '1d': 'Daily' };
+					async function refreshNextCandleForecast() {
+						const label = document.getElementById('next-candle-forecast-label');
+						if (MINIMAL_CHART || !SHOW_NEXT_CANDLE_FORECAST) { if (label) label.textContent = ''; clearNextCandleForecastCandle(); return; }
+
+						const tf = INTERVAL;
+						const data = await (await fetch(NEXT_CANDLE_FORECAST_URL + '?timeframe=' + tf)).json();
+						// Re-check: the checkbox may have been switched off, or
+						// the timeframe changed, while this fetch was in flight
+						// — onToggleNextCandleForecast() already cleared
+						// synchronously in the former case, so bail without
+						// redrawing; a timeframe change mid-flight just means
+						// this response is stale, so bail too (the newer
+						// in-flight/next-poll fetch will draw the right one).
+						if (!SHOW_NEXT_CANDLE_FORECAST || INTERVAL !== tf) return;
+						const row = data.row;
+						if (label) {
+							label.textContent = row
+								? 'Next ' + (NEXT_CANDLE_FORECAST_LABELS[row.timeframe] || row.timeframe.toUpperCase()) + ' Forecast · Revision '
+									+ row.revision + '/' + row.max_revisions + ' · Confidence ' + Math.round(row.confidence) + '%'
+								: '';
+						}
+
+						if (!row || !realCandles.length) { clearNextCandleForecastCandle(); return; }
+						const intervalSec = INTERVAL_SECONDS[INTERVAL];
+						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
+						let slotTime = realCandles[realCandles.length - 1].time;
+						while (slotTime <= nowShifted) slotTime += intervalSec;
+						nextCandleForecastSeries.setData([{
+							time: slotTime,
+							open: row.forecast_open, high: row.forecast_high, low: row.forecast_low, close: row.forecast_close,
+						}]);
+					}
+
+					// "Zones from" dropdown — 00:00-UTC-vs-trailing-hours window for
 					// the zones boxes (see ZONES_BOX_WINDOW_MODE above) — re-fetches
 					// immediately on change rather than waiting for the next
 					// ZONES_BOX_REFRESH poll.
@@ -1785,7 +1946,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); await refreshNextCandleForecast(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
@@ -1793,6 +1954,7 @@
 					setInterval(refreshDeltaZero, REFRESH);
 					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshNearestExpiry, REFRESH);
+					setInterval(refreshLastTrade, REFRESH);
 					setInterval(refreshAllDeltaZero, REFRESH);
 					setInterval(refreshTomorrowDeltaZero, REFRESH);
 					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
@@ -1813,6 +1975,7 @@
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
+					setInterval(refreshNextCandleForecast, REFRESH);
 				//]]></script>
 			</body>
 		</html>
