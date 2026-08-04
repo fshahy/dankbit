@@ -232,14 +232,26 @@
 					const THEME_STORAGE_KEY = 'dankbit_theme';
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
-					// 4 clearly distinct hues, one per leg — no pre-existing
-					// per-leg color convention elsewhere in this addon to
-					// match (the Zones page's own Gamma section header is a
-					// single violet label, not 4 separate per-leg colors).
-					const BCG_COLOR = '#42a5f5'; // Buyer Call Gamma — blue
-					const BPG_COLOR = '#26a69a'; // Buyer Put Gamma — teal
+					// Black would vanish into the dark-mode chart background
+					// (#000000), so LC/LP swap to a lighter gray there, same
+					// axisBlack()-style convention every other "plain black"
+					// line in this addon already uses (see dankbit_templates.xml).
+					function axisBlack() { return DARK_MODE ? '#e8e8e8' : '#000000'; }
+					// No pre-existing per-leg color convention elsewhere in
+					// this addon to match (the Zones page's own Gamma
+					// section header is a single violet label, not 4
+					// separate per-leg colors). LC/LP are both black (via
+					// axisBlack()); SC/SP are both orange — per product
+					// decision, not distinct hues per leg.
 					const SCG_COLOR = '#fb8c00'; // Seller Call Gamma — orange
-					const SPG_COLOR = '#ab47bc'; // Seller Put Gamma — purple
+					const SPG_COLOR = '#fb8c00'; // Seller Put Gamma — orange
+					// Combined (buy+sell) all-calls / all-puts gamma extreme —
+					// violet, matching this addon's own "gamma" color
+					// association elsewhere (the Zones page's violet Gamma
+					// section header, the Delta Chart's dashed violet Gamma
+					// Band line).
+					const CALL_GAMMA_COLOR = '#c9a0dc';
+					const PUT_GAMMA_COLOR = '#c9a0dc';
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -279,6 +291,7 @@
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
+					let callGammaPriceLine = null, putGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -428,6 +441,8 @@
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
+							if (callGammaPriceLine) { series.removePriceLine(callGammaPriceLine); callGammaPriceLine = null; }
+							if (putGammaPriceLine) { series.removePriceLine(putGammaPriceLine); putGammaPriceLine = null; }
 							if (!latest) return;
 
 							// 0.0 means absent (same convention every gamma_band/
@@ -437,20 +452,23 @@
 							// (unlike most other price lines in this addon, which
 							// force a black axis label regardless of line color)
 							// so the label is identifiable by color at a glance
-							// with 4 lines on one chart.
+							// with 4 lines on one chart — except LC/LP, which are
+							// deliberately both black (axisBlack(), theme-aware)
+							// per product decision, so their axis labels match
+							// each other instead of standing apart.
 							if (latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
-									price: latest.bcg_price, color: BCG_COLOR, lineWidth: 2,
+									price: latest.bcg_price, color: axisBlack(), lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: BCG_COLOR,
+									axisLabelVisible: true, axisLabelColor: axisBlack(),
 									title: 'LC ' + formatAbbreviated(latest.bcg_value),
 								});
 							}
 							if (latest.bpg_price) {
 								bpgPriceLine = series.createPriceLine({
-									price: latest.bpg_price, color: BPG_COLOR, lineWidth: 2,
+									price: latest.bpg_price, color: axisBlack(), lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: BPG_COLOR,
+									axisLabelVisible: true, axisLabelColor: axisBlack(),
 									title: 'LP ' + formatAbbreviated(latest.bpg_value),
 								});
 							}
@@ -468,6 +486,28 @@
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: SPG_COLOR,
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
+								});
+							}
+							// All Calls / All Puts — the combined buy+sell gamma
+							// curve for that expiry's calls/puts, same computation
+							// as the 4 lines above (options.portfolio_gamma over
+							// the same STs grid) but not split by direction, so
+							// its own peak/bottom sign isn't fixed like a single
+							// leg's — see options.option_type_gamma_extreme().
+							if (latest.call_gamma_price) {
+								callGammaPriceLine = series.createPriceLine({
+									price: latest.call_gamma_price, color: CALL_GAMMA_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: CALL_GAMMA_COLOR,
+									title: 'Calls ' + formatAbbreviated(latest.call_gamma_value),
+								});
+							}
+							if (latest.put_gamma_price) {
+								putGammaPriceLine = series.createPriceLine({
+									price: latest.put_gamma_price, color: PUT_GAMMA_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: PUT_GAMMA_COLOR,
+									title: 'Puts ' + formatAbbreviated(latest.put_gamma_value),
 								});
 							}
 						} finally {

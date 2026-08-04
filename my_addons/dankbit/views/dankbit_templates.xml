@@ -799,12 +799,14 @@
 					// see refreshNextCandleForecast). Exactly ONE candle, at
 					// the upcoming 4h slot, sourced from
 					// /api/next-candle-forecast/<asset> (dankbit.forecast.
-					// next_candle). Blue/indigo so it's visually distinct from
-					// both the real candles (teal/red) and the other forecast
-					// series (light green/red).
+					// next_candle). Same light green/red as the 18-candle
+					// Thales Forecast series above (FORECAST_UP_COLOR etc.) —
+					// both forecast series read from the same configurable
+					// colors, so they stay in sync as one visual "family",
+					// each still colored per-candle by its own open vs close.
 					const nextCandleForecastSeries = chart.addCandlestickSeries({
-						upColor: '#64b5f6', downColor: '#9575cd', borderVisible: false,
-						wickUpColor: '#1e88e5', wickDownColor: '#5e35b1',
+						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
+						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
 						lastValueVisible: false, priceLineVisible: false,
 					});
 

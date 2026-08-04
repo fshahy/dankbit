@@ -1576,6 +1576,69 @@ MOMENTUM_WICK_COMPRESSION = 0.75
 SWEEP_REJECTION_BODY_BOOST = 1.35
 
 
+# ============================================================
+# FlowImbalance damping, Zone Brake, and the Breakout Gate — added per
+# Thales dev feedback (a chat transcript reviewing the 18-candle forecast
+# against a live BTC-4aug26 example, 2026-08-03; see CLAUDE.md's Thales
+# Forecast candles section for the full discussion). His critique: the
+# engine correctly identified a bullish target (price above the
+# equilibrium zone, Call-side Greek levels clustered higher) but rode
+# there with too much confidence given the raw Long/Short trade count at
+# 00:00 UTC was near-neutral (142 vs 148 in his example), and pushed
+# straight through the Zone High resistance edge without any real
+# confirmation that the level had actually been broken. His own stated
+# first fix: reduce body intensity ~20% under a near-neutral Long/Short
+# split, brake within ~0.5 ATR of the Zone High/Low edge, and gate
+# crossing that edge behind confirmation — the 3 pieces below. Every
+# other idea from that transcript (an explicit DirectionScore, a 3-stage
+# target path, independent High/Low wick construction, per-horizon
+# confidence decay, etc.) is deliberately deferred, scoped separately.
+# ============================================================
+FLOW_IMBALANCE_NEUTRAL_THRESHOLD = 0.05
+FLOW_IMBALANCE_BODY_DAMPING = 0.20
+
+ZONE_BRAKE_ATR_DISTANCE = 0.5
+ZONE_BRAKE_MIN_BODY_MULT = 0.40
+
+BREAKOUT_GATE_WICK_BLEED = 0.6
+
+
+def flow_imbalance(long_count, short_count):
+    """(Longs-Shorts)/(Longs+Shorts) — how one-sided the raw trade count
+    behind this scan's window actually was, independent of what the
+    Greek levels themselves suggest. A near-equal split (his example:
+    142 long vs 148 short, |imbalance| ~= 0.02) means no real directional
+    edge in who's actually trading, so simulate_forecast's own per-step
+    loop shrinks body_confidence by FLOW_IMBALANCE_BODY_DAMPING whenever
+    |imbalance| stays under FLOW_IMBALANCE_NEUTRAL_THRESHOLD, even when
+    the target itself stays bullish/bearish. Returns None (not 0.0) when
+    there's no trade-count data at all — e.g. a dankbit.forecast.snapshot
+    row frozen before long_trade_count/short_trade_count existed — so the
+    caller can skip the damping outright rather than reading "unknown" as
+    "perfectly balanced"."""
+    total = long_count + short_count
+    if total <= 0:
+        return None
+    return (long_count - short_count) / total
+
+
+def _zone_brake_mult(distance, effective_atr, atr_distance, min_mult):
+    """How much to shrink body_confidence as the projected price nears a
+    resistance/support level it's heading toward — 1.0 (no brake) once
+    `distance` away is at least `atr_distance` ATRs, shrinking linearly
+    down to `min_mult` as it closes in (floored there rather than at 0,
+    so a genuinely strong signal can still produce some body right up
+    against the level). `distance` negative (price already past the
+    level) also returns 1.0 — the brake's job is only to slow an approach,
+    not to keep dragging on a level that's already behind the candle."""
+    if distance is None or distance < 0:
+        return 1.0
+    reference = max(effective_atr * atr_distance, 1e-9)
+    if distance >= reference:
+        return 1.0
+    return max(distance / reference, min_mult)
+
+
 def _gamma_confirmation(closes, gamma_ref, buffer):
     """Whether the last GAMMA_CONFIRM_BARS *real* closes are consistently
     above/below `gamma_ref` by at least `buffer` — Thales's own bar-by-bar
@@ -1757,6 +1820,11 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     SESSION_ATR_FACTOR = _cfg(cfg, "SESSION_ATR_FACTOR")
     SESSION_SHOCK_FACTOR = _cfg(cfg, "SESSION_SHOCK_FACTOR")
     SESSION_FIRST_MOVE_ATR = _cfg(cfg, "SESSION_FIRST_MOVE_ATR")
+    FLOW_IMBALANCE_NEUTRAL_THRESHOLD = _cfg(cfg, "FLOW_IMBALANCE_NEUTRAL_THRESHOLD")
+    FLOW_IMBALANCE_BODY_DAMPING = _cfg(cfg, "FLOW_IMBALANCE_BODY_DAMPING")
+    ZONE_BRAKE_ATR_DISTANCE = _cfg(cfg, "ZONE_BRAKE_ATR_DISTANCE")
+    ZONE_BRAKE_MIN_BODY_MULT = _cfg(cfg, "ZONE_BRAKE_MIN_BODY_MULT")
+    BREAKOUT_GATE_WICK_BLEED = _cfg(cfg, "BREAKOUT_GATE_WICK_BLEED")
 
     levels = derive_levels(current, cfg)
     band_width = levels["band_width"]
@@ -1783,6 +1851,10 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     if consensus is None:
         consensus = {"consensus_direction": 0, "consensus_strength": 0.0, "conflict": False,
                      "conflict_strength": 0.0, "confirms_top": False, "confirms_low": False, "all_aligned": False}
+
+    # FlowImbalance — step-invariant, computed once from `current`'s own
+    # raw Long/Short trade count (see flow_imbalance()'s own docstring).
+    flow_imb = flow_imbalance(current["long_trade_count"], current["short_trade_count"])
 
     # Center slope: how much the blended center has moved since the
     # previous snapshot, per real hour — the forecast's only source of
@@ -1999,6 +2071,14 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             body_confidence *= max(1.0 - consensus["conflict_strength"] * GAMMA_BAND_CONFLICT_BODY_DAMPING, 0.35)
             wick_expansion *= 1.0 + consensus["conflict_strength"] * GAMMA_BAND_CONFLICT_WICK_EXPANSION
 
+        # FlowImbalance damping — see flow_imbalance()'s own docstring.
+        # A near-neutral raw Long/Short trade count means no real
+        # directional edge in who's actually trading, so the body stays
+        # smaller even when the target itself (gamma_ref/consensus/etc.
+        # above) is confidently bullish or bearish.
+        if flow_imb is not None and abs(flow_imb) < FLOW_IMBALANCE_NEUTRAL_THRESHOLD:
+            body_confidence *= 1.0 - FLOW_IMBALANCE_BODY_DAMPING
+
         neutral_score = 0.0
         if not any_shock_active:
             neutral_score = gamma_neutral_score(projected_open, closes[-1] if closes else projected_open, gamma_ref, band_width, effective_atr)
@@ -2041,11 +2121,26 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
                 body_confidence = max(body_confidence, LIQUIDITY_BODY_CONFIDENCE_FLOOR)
                 wick_expansion *= LIQUIDITY_SWEEP_WICK_COMPRESSION
 
-        forecast_impulse = (
+        raw_impulse_sum = (
             base_pull_impulse + slope_impulse + current_body_impulse + curve_extreme_impulse
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
             + liquidity["impulse"] + flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT + term_slope_impulse
-        ) * body_confidence
+        )
+
+        # Zone Brake — as the pre-confidence impulse points toward `top`
+        # (bullish) or `low` (bearish) within ZONE_BRAKE_ATR_DISTANCE ATRs
+        # of that level, shrink body_confidence rather than letting the
+        # candle close in on it at full strength; his own worked example
+        # only covers the resistance side, mirrored here for support too,
+        # same as every other paired long/short mechanism in this engine.
+        # `top`/`low` can be 0.0 (absent, see dankbit.bands's own "0.0 =
+        # absent" convention), hence the truthiness check.
+        if raw_impulse_sum > 0 and top:
+            body_confidence *= _zone_brake_mult(top - projected_open, effective_atr, ZONE_BRAKE_ATR_DISTANCE, ZONE_BRAKE_MIN_BODY_MULT)
+        elif raw_impulse_sum < 0 and low:
+            body_confidence *= _zone_brake_mult(projected_open - low, effective_atr, ZONE_BRAKE_ATR_DISTANCE, ZONE_BRAKE_MIN_BODY_MULT)
+
+        forecast_impulse = raw_impulse_sum * body_confidence
         if gb_counter_trend_locked:
             allowed_opposite = GAMMA_BAND_COUNTER_MAX_OPP_IMPULSE * max(1.0 - consensus["consensus_strength"], 0.05)
             if consensus["consensus_direction"] < 0 and forecast_impulse > 0:
@@ -2093,6 +2188,32 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
         projected_close = projected_open + step_move
 
+        # Breakout Gate — a projected close shouldn't cross above `top`
+        # (the Zone High upper edge) or below `low` just because the
+        # Greek levels sit that way; his own feedback wants a real
+        # crossing conditioned on actual structural confirmation. Reused
+        # here rather than inventing a second mechanism: Gamma-Band
+        # Consensus's own confirms_top/confirms_low (a real top/low/gamma
+        # slope agreement over actual elapsed history, gated to the
+        # matching direction) plus Greek Flow's own directional impulse
+        # sign agreeing. Only fires on an actual crossing attempt
+        # (projected_open starts on the near side of the level) — a
+        # candle that's already past it isn't dragged back. Blocked
+        # excess bleeds into wick (BREAKOUT_GATE_WICK_BLEED) instead of
+        # being discarded, so a rejected level still shows as tested
+        # rather than a flat ceiling — see the upper_wick/lower_wick
+        # block below.
+        pending_upper_bleed = 0.0
+        pending_lower_bleed = 0.0
+        upper_gate_open = consensus["confirms_top"] and consensus["consensus_direction"] > 0 and flow["impulse"] >= 0
+        lower_gate_open = consensus["confirms_low"] and consensus["consensus_direction"] < 0 and flow["impulse"] <= 0
+        if top and projected_open <= top and projected_close > top and not upper_gate_open:
+            pending_upper_bleed = (projected_close - top) * BREAKOUT_GATE_WICK_BLEED
+            projected_close = top
+        if low and projected_open >= low and projected_close < low and not lower_gate_open:
+            pending_lower_bleed = (low - projected_close) * BREAKOUT_GATE_WICK_BLEED
+            projected_close = low
+
         upper_target_sum, upper_target_weight = top, 1.0
         lower_target_sum, lower_target_weight = low, 1.0
         if consensus["confirms_top"]:
@@ -2120,6 +2241,11 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
                       if projected_bull else (upper_room * FORECAST_WICK_FACTOR * 0.5 + effective_atr * FORECAST_ATR_FACTOR * 0.5) * wick_expansion)
         lower_wick = ((lower_room * FORECAST_WICK_FACTOR * 0.5 + effective_atr * FORECAST_ATR_FACTOR * 0.5) * wick_expansion
                       if projected_bull else (lower_room * FORECAST_WICK_FACTOR + effective_atr * FORECAST_ATR_FACTOR) * wick_expansion)
+
+        # Breakout Gate's blocked excess (see above) — shows the level as
+        # tested/rejected rather than a flat ceiling/floor.
+        upper_wick += pending_upper_bleed
+        lower_wick += pending_lower_bleed
 
         upper_wick *= 1.0 + min(mm_upper_wick_boost, 1.25)
         lower_wick *= 1.0 + min(mm_lower_wick_boost, 1.25)

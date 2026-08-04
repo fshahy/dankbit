@@ -1,19 +1,62 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /gt/<asset> — its own file,
-	     not the shared dankbit_tv_chart_until template /chart/, /oi/,
-	     /mp/ render. -->
+	<!-- Standalone, minimal TradingView page for /mw/<asset> — its own file,
+	     structurally a near-copy of four_leg_gamma_chart_templates.xml
+	     (/4l/<asset>). "Timeframe" dropdown (15m/1h/4h/1d, 4h default),
+	     candles from Kraken Futures perpetuals (dankbit.trade.
+	     get_candles_kraken_futures(), same /api/klines-futures/<asset>
+	     proxy /gt/<asset> and /4l/<asset> use). 4 horizontal reference
+	     lines redrawn fresh on every poll from /api/mw-gamma's own latest
+	     reading (BCG/BPG/SCG/SPG — where each of the 4 trade legs' own
+	     portfolio dollar-gamma curve peaks or bottoms). Unlike /4l/<asset>
+	     (whose "Expiry" dropdown picks Nearest/Nearest+1/Nearest+2 and
+	     restricts trades to that one exact instrument), this page's own
+	     "Expiry" dropdown picks Weekly/Monthly (the configured
+	     weekly_expiry/monthly_expiry instrument, Weekly default) and the
+	     4 gamma legs are computed CUMULATIVE through that expiry — every
+	     active instrument up to and including it, not just one — see
+	     mw_gamma_json. "Window" dropdown (12h/24h/48h/72h —
+	     MW_WINDOW_HOURS_CHOICES, a 72h option /4l/<asset>'s own "Window"
+	     dropdown doesn't offer — 48h default, unlike /4l/<asset>'s own
+	     12h default) picks
+	     the trailing-hours trade window fed into that same cumulative
+	     domain, independent of "Expiry", via ?hours= on
+	     /api/mw-gamma/<asset>. -->
 
-	<template id="dankbit_gamma_triple_chart" name="Dankbit Gamma Triple Chart">
+	<template id="dankbit_mw_gamma_chart" name="Dankbit MW Gamma Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — Gamma Triple</title>
+				<title><t t-esc="asset"/> — MW Gamma</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
 					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
 					#chart-container { width: 100%; height: 100%; }
+					/* "Window" boundary marker — Lightweight Charts v4 has
+					   no native vertical-line primitive (a price line is
+					   horizontal-only, and a line series needs unique/
+					   ascending time values so it can't render a single
+					   vertical stroke), so this is a plain absolutely-
+					   positioned overlay div, repositioned in JS via
+					   chart.timeScale().timeToCoordinate() — same
+					   HTML-overlay approach every other fixed annotation on
+					   this page (#status, #ruler-info, #exchange-label)
+					   already uses, rather than fighting the chart's own
+					   series data model. */
+					#window-vline {
+						position: fixed; top: 0; width: 1px;
+						background: #555; z-index: 5; pointer-events: none; display: none;
+					}
+					#window-vline-label {
+						position: fixed;
+						font-family: monospace; font-size: 10pt;
+						color: #555; background: rgba(255,255,255,0.85);
+						padding: 1px 6px; border-radius: 3px; border: 1px solid #ccc;
+						z-index: 6; pointer-events: none; display: none; white-space: nowrap;
+					}
+					body.dark #window-vline { background: #aaaaaa; }
+					body.dark #window-vline-label { color: #ccc; background: rgba(0,0,0,0.8); border-color: #555; }
 					#status {
 						position: fixed; bottom: 32px; left: 12px;
 						font-family: monospace; font-size: 11pt;
@@ -25,10 +68,6 @@
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
 					}
-					/* Same right: 80px offset the shared /chart,/oi,/mp template's
-					   own #exchange-label uses — the chart's rightPriceScale has
-					   no fixed width (auto-sized to the widest visible price
-					   label), so right: 12px would sit underneath/over it. */
 					#exchange-label {
 						position: fixed; top: 8px; right: 80px;
 						font-family: monospace; font-size: 11pt;
@@ -57,8 +96,8 @@
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
 
 					/* Custom right-click context menu (Lightweight Charts has
-					   no built-in one) — same hand-rolled approach as the
-					   Delta/Gamma Chart's own "Reset chart view" item. */
+					   no built-in one) — same hand-rolled approach as every
+					   other standalone TV page in this addon. */
 					#context-menu {
 						position: fixed;
 						font-family: monospace; font-size: 11pt;
@@ -87,12 +126,13 @@
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
 
-					/* Shown while refreshGammaTriple() is fetching/computing the
-					   3 price lines (a fresh dankbit.bands._compute_asset() call
-					   server-side each time — no persisted history behind this
-					   page, so this can take noticeably longer than a plain
-					   klines poll). Hidden as soon as that fetch resolves,
-					   success or error. */
+					/* Shown while refreshMwGamma() is fetching/computing the
+					   4 gamma lines (a fresh options.per_leg_greeks() call
+					   server-side each time, over a cumulative multi-instrument
+					   trade set — no persisted history behind this page, so
+					   this can take noticeably longer than a plain klines
+					   poll). Hidden as soon as that fetch resolves, success or
+					   error. Same #spinner pattern /gt and /4l use. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -108,6 +148,8 @@
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="window-vline"/>
+				<div id="window-vline-label"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -119,11 +161,17 @@
 						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
+					<span class="tf-label">Expiry:</span>
+					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
+						<option value="weekly" selected="selected">Weekly</option>
+						<option value="monthly">Monthly</option>
+					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="12" selected="selected">12h</option>
+						<option value="12">12h</option>
 						<option value="24">24h</option>
-						<option value="48">48h</option>
+						<option value="48" selected="selected">48h</option>
+						<option value="72">72h</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -139,38 +187,43 @@
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
-					// Candles are Kraken Futures on this page only (see
-					// dankbit.trade.get_candles_kraken_futures) — mirrors the
-					// server-side _KRAKEN_FUTURES_SYMBOL_MAP (PF_XBTUSD/
-					// PF_ETHUSD) rather than a naive 'PF_' + ASSET + 'USD'
-					// concat, since Kraken uses "XBT" (not "BTC") as
-					// Bitcoin's own ticker.
+					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					// "Timeframe" dropdown, 4h default — same options/
+					// default as /4l/<asset>'s own dropdown (see TF_WINDOW
+					// below for the per-timeframe visible-window convention
+					// it shares with those pages).
+					let INTERVAL = '4h';
+					// Kraken Futures perpetuals, same symbol convention
+					// /gt/<asset> and /4l/<asset> use (server-side
+					// _KRAKEN_FUTURES_SYMBOL_MAP — Kraken uses "XBT" not
+					// "BTC", hence the explicit map rather than a plain
+					// ASSET + 'USD' concat).
 					const KRAKEN_FUTURES_SYMBOL = { BTC: 'PF_XBTUSD', ETH: 'PF_ETHUSD' }[ASSET] || ('PF_' + ASSET + 'USD');
 					document.getElementById('exchange-label').textContent = 'Kraken Futures · ' + KRAKEN_FUTURES_SYMBOL;
-					// Recomputed from scratch on every request (no persisted
-					// history behind this page at all — see
-					// ChartController.gamma_triple_json) — polls on the same
-					// general dankbit.refresh_interval every other page's
-					// own refresh rate uses, so the lines visibly move on
-					// the cadence the user actually configures.
-					const REFRESH = parseInt(cfg.refresh, 10) * 1000;
-					let   INTERVAL = '4h';
-					// Trade window (hours) the 3 gamma_band lines are
-					// computed over — the "Window" dropdown, mirrored
-					// server-side by ChartController.gamma_triple_json's
-					// own ?hours= handling.
-					let   WINDOW_HOURS = 12;
-					// Kraken Futures, not Binance spot — /gt/<asset> only, per
-					// product decision; every other TradingView page in this
-					// addon keeps reading candles from /api/klines/<asset>
-					// (Binance spot, see ChartController.klines_proxy).
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
-					const gammaTripleUrl = h => '/api/gamma-triple/' + ASSET + '?hours=' + h;
-					// Same "Last trade:" footer field the Delta Chart uses —
-					// a growing gap between this and "now" is the at-a-glance
-					// signal that dankbit_ws has stalled (its DB connection
-					// can die without crashing the container, silently
-					// dropping every trade — see dankbit_ws_batch.py).
+					// "Expiry" dropdown — which expiry's trades feed the 4
+					// gamma legs, "weekly" default. Unlike /4l/<asset>'s own
+					// Nearest/Nearest+1/Nearest+2 (isolated to one exact
+					// instrument), the server resolves this to the
+					// configured weekly_expiry/monthly_expiry instrument and
+					// computes CUMULATIVE through it — see mw_gamma_json.
+					let EXPIRY_MODE = 'weekly';
+					// "Window" dropdown — trailing-hours trade window fed
+					// into that same cumulative domain, independent of
+					// EXPIRY_MODE. Choice set (12h/24h/48h/72h) also carries
+					// a 72h option /4l/<asset>'s own "Window" dropdown
+					// doesn't offer, and defaults to 48h here (unlike /4l's
+					// own 12h default) — this page's
+					// cumulative-through-expiry domain benefits from a
+					// wider trailing-hours window by default.
+					let WINDOW_HOURS = 48;
+					const mwGammaUrl = () => '/api/mw-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
+					// Same "Last trade:" footer field the Delta Chart/gt/4l
+					// pages use — a growing gap between this and "now" is
+					// the at-a-glance signal that dankbit_ws has stalled
+					// (its DB connection can die without crashing the
+					// container, silently dropping every trade — see
+					// dankbit_ws_batch.py).
 					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
 					let   lastTradeTs = null;
 
@@ -207,20 +260,16 @@
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 					// Black would vanish into the dark-mode chart background
-					// (#000000), so a "black" line swaps to a lighter gray
-					// there instead — same axisBlack()-style convention every
-					// other "plain black" line in this addon uses (see
-					// dankbit_templates.xml, /4l/<asset>'s own LC/LP lines).
+					// (#000000), so LC/LP swap to a lighter gray there, same
+					// axisBlack()-style convention every other "plain black"
+					// line in this addon already uses (see
+					// dankbit_templates.xml / four_leg_gamma_chart_templates.xml).
 					function axisBlack() { return DARK_MODE ? '#e8e8e8' : '#000000'; }
-					// Line/label color is driven by that line's own dominant
-					// leg (LC/LP/SC/SP — see _gamma_triple_dominant_leg()),
-					// not a fixed per-position hue: LC/LP dominant -> black
-					// (same convention /4l/<asset>'s own LC/LP lines use),
-					// SC/SP dominant -> orange (same convention /4l/<asset>'s
-					// own SC/SP lines use). Falls back to axisBlack() when
-					// there's no dominant leg at all (nothing computable at
-					// that expiry_index).
-					function legColor(leg) { return (leg === 'SC' || leg === 'SP') ? '#fb8c00' : axisBlack(); }
+					// Same per-leg color convention /4l/<asset> uses — LC/LP
+					// both black (via axisBlack()), SC/SP both orange, per
+					// product decision, not distinct hues per leg.
+					const SCG_COLOR = '#fb8c00'; // Seller Call Gamma — orange
+					const SPG_COLOR = '#fb8c00'; // Seller Put Gamma — orange
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -252,16 +301,32 @@
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
 					});
 
-					// The 3 indicators on this page are horizontal price lines,
-					// not connected time-series points — nothing is persisted
-					// anywhere (see ChartController.gamma_triple_json), each
-					// poll just recomputes the 3 current values fresh and
-					// redraws the lines at their new levels.
-					let nearestPriceLine      = null;
-					let nearestPlus1PriceLine = null;
-					let nearestPlus2PriceLine = null;
+					// The 4 gamma "lines" are horizontal reference lines at the
+					// CURRENT (latest) value only — same createPriceLine()
+					// pattern /gt/<asset> and /4l/<asset> use for their own
+					// gamma lines — not a connected historical time series.
+					// Redrawn fresh on every poll (REFRESH, from
+					// dankbit.refresh_interval), each replacing its own
+					// previous line rather than accumulating one per hour.
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function lastTradeSuffix() {
+						const label = formatLastTradeTs(lastTradeTs);
+						return label ? '  ·  Last trade: ' + label : '';
+					}
+
+					function statusText() {
+						const expiryLabel = EXPIRY_MODE === 'monthly' ? 'Monthly' : 'Weekly';
+						return ASSET + ' · MW Gamma (' + expiryLabel + ', ' + WINDOW_HOURS + 'h trailing window, live)' + lastTradeSuffix();
+					}
+
+					async function refreshLastTrade() {
+						const data = await (await fetch(LAST_TRADE_URL)).json();
+						lastTradeTs = data.last_trade_ts || null;
+						setStatus(statusText());
+					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
 					function hideSpinner() { document.getElementById('spinner').style.display = 'none'; }
@@ -270,39 +335,26 @@
 						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
-					// 500 bars is the flat fetch size loadCandles() always
-					// uses regardless of timeframe (see below) — 15m's own
-					// window is capped under that (500 * 15m ≈ 5.2 days)
-					// rather than the wider defaults 1h/4h/1d use.
-					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
-					const BARS_PER_DAY = { '15m': 96, '1h': 24, '4h': 6, '1d': 1 };
-
 					let realCandles = [];
 
+					// Same per-timeframe visible-window convention the
+					// Delta/Gamma/Strike Gamma/4l charts' own TF_WINDOW uses
+					// (15m entry matches /gt/<asset>'s and /4l/<asset>'s own
+					// TF_WINDOW).
+					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
+
 					function applyVisibleRange() {
-						const days = TF_WINDOW[INTERVAL] || 21;
-						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
-						const lastIndex = realCandles.length - 1;
-						chart.timeScale().setVisibleLogicalRange({
-							from: lastIndex - days * barsPerDay,
-							to:   lastIndex,
-						});
+						if (!realCandles.length) return;
+						const days = TF_WINDOW[INTERVAL] || 15;
+						const lastTime = realCandles[realCandles.length - 1].time;
+						chart.timeScale().setVisibleRange({ from: lastTime - days * 86400, to: lastTime });
 					}
 
-					// Right-click "Reset chart view" — mirrors original TradingView's
-					// context-menu item, same as the Delta Chart/Gamma Chart:
-					// re-autoscales the price axis (undoes any manual drag-zoom on
-					// the price scale) and restores the default time-scale window
-					// for the current timeframe (undoes any pan/zoom on the time
-					// axis), without touching series data or any indicator state.
 					function resetChartView() {
 						chart.priceScale('right').applyOptions({ autoScale: true });
 						applyVisibleRange();
 					}
 
-					// Custom context menu (Lightweight Charts has no built-in one) —
-					// right-clicking the chart area shows a single "Reset chart view"
-					// item at the cursor, clamped so it never renders off-screen.
 					const contextMenu = document.getElementById('context-menu');
 
 					function hideContextMenu() {
@@ -327,9 +379,6 @@
 						e.preventDefault();
 						showContextMenu(e.clientX, e.clientY);
 					});
-					// Right-clicking outside the chart area (e.g. the toolbar) falls
-					// through to the browser's own native context menu — hide ours
-					// first so it doesn't linger open underneath it.
 					document.addEventListener('contextmenu', e => {
 						if (!chartContainerEl.contains(e.target)) hideContextMenu();
 					});
@@ -337,12 +386,68 @@
 					window.addEventListener('resize', hideContextMenu);
 					window.addEventListener('scroll', hideContextMenu, true);
 
+					const vLineEl = document.getElementById('window-vline');
+					const vLineLabelEl = document.getElementById('window-vline-label');
+
+					function vLineColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
+
+					// Where the selected "Window" dropdown's own trailing-
+					// hours cutoff falls — snapped to the UTC 4h-candle
+					// grid regardless of the chart's own currently-displayed
+					// Timeframe (INTERVAL): WINDOW_HOURS=48 always lands
+					// exactly 12 four-hour candles back from the current
+					// (still-forming) 4h bucket, 24 -> 6 candles back, 12 ->
+					// 3 candles back (WINDOW_HOURS / 4 in every case).
+					// Computed independently of, but conceptually mirrors,
+					// the same window_start boundary mw_gamma_json uses
+					// server-side to filter trades for the 4 gamma legs —
+					// this line exists purely to make that boundary visible
+					// on the chart, not to feed anything back into the
+					// gamma computation itself.
+					function windowLineTargetTime() {
+						const FOUR_HOURS = 4 * 3600;
+						const nowSec = Math.floor(Date.now() / 1000);
+						const currentBucketStart = Math.floor(nowSec / FOUR_HOURS) * FOUR_HOURS;
+						const candlesBack = WINDOW_HOURS / 4;
+						return currentBucketStart - candlesBack * FOUR_HOURS + tzOffset;
+					}
+
+					function updateWindowVLine() {
+						if (!realCandles.length) {
+							vLineEl.style.display = 'none';
+							vLineLabelEl.style.display = 'none';
+							return;
+						}
+						const x = chart.timeScale().timeToCoordinate(windowLineTargetTime());
+						if (x === null) {
+							vLineEl.style.display = 'none';
+							vLineLabelEl.style.display = 'none';
+							return;
+						}
+						const rect = chartContainerEl.getBoundingClientRect();
+						const color = vLineColor();
+						vLineEl.style.left = Math.round(rect.left + x) + 'px';
+						vLineEl.style.top = rect.top + 'px';
+						vLineEl.style.height = rect.height + 'px';
+						vLineEl.style.background = color;
+						vLineEl.style.display = 'block';
+						vLineLabelEl.style.left = Math.round(rect.left + x + 4) + 'px';
+						vLineLabelEl.style.top = (rect.top + 4) + 'px';
+						vLineLabelEl.style.color = color;
+						vLineLabelEl.textContent = WINDOW_HOURS + 'h';
+						vLineLabelEl.style.display = 'block';
+					}
+
+					window.addEventListener('resize', updateWindowVLine);
+					chart.timeScale().subscribeVisibleTimeRangeChange(updateWindowVLine);
+
 					async function loadCandles() {
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
 						realCandles = klines.map(toCandle);
 						series.setData(realCandles);
 						applyVisibleRange();
+						updateWindowVLine();
 					}
 
 					async function updateLatestCandle() {
@@ -356,6 +461,7 @@
 							realCandles.push(updated);
 						}
 						series.setData(realCandles);
+						updateWindowVLine();
 					}
 
 					async function setTf(iv) {
@@ -363,102 +469,101 @@
 						await loadCandles();
 					}
 
-					function windowStatusLabel() {
-						return WINDOW_HOURS + 'h trailing window';
-					}
-
-					function lastTradeSuffix() {
-						const label = formatLastTradeTs(lastTradeTs);
-						return label ? '  ·  Last trade: ' + label : '';
-					}
-
-					function statusText() {
-						return ASSET + ' · Gamma Triple (' + windowStatusLabel() + ', live)' + lastTradeSuffix();
-					}
-
-					async function refreshLastTrade() {
-						const data = await (await fetch(LAST_TRADE_URL)).json();
-						lastTradeTs = data.last_trade_ts || null;
+					async function setExpiry(mode) {
+						EXPIRY_MODE = mode;
+						await refreshMwGamma();
 						setStatus(statusText());
 					}
 
-					async function setWindow(h) {
-						WINDOW_HOURS = parseInt(h, 10);
+					async function setWindow(hours) {
+						WINDOW_HOURS = parseInt(hours, 10);
+						await refreshMwGamma();
 						setStatus(statusText());
-						await refreshGammaTriple();
+						updateWindowVLine();
 					}
 
+					// Rounds and abbreviates large raw dollar-gamma values
+					// (hundreds of millions to billions is typical here) —
+					// thousands as K, millions as M, sign preserved (long
+					// legs' gamma is positive, short legs' is negative, per
+					// this addon's own convention — see per_leg_greeks).
+					function formatAbbreviated(value) {
+						const sign = value < 0 ? '-' : '';
+						const abs = Math.abs(value);
+						if (abs >= 1e6) return sign + Math.round(abs / 1e6) + 'M';
+						if (abs >= 1e3) return sign + Math.round(abs / 1e3) + 'K';
+						return sign + Math.round(abs);
+					}
+
+					// Only the LATEST reading is used — /api/mw-gamma has no
+					// persisted history (nothing is ever written server-side
+					// for this page), so this just draws a horizontal line
+					// at each leg's own current value.
+					//
 					// Shows #spinner for the duration of the fetch — this
-					// endpoint recomputes the whole curve fresh server-side on
-					// every call (no persisted history behind this page), so it
-					// can take noticeably longer than the plain klines poll.
+					// endpoint recomputes the 4-leg gamma curve fresh
+					// server-side on every call, over a cumulative
+					// multi-instrument trade set (can be noticeably slower
+					// than /4l/<asset>'s own single-instrument version).
 					// Hidden in a finally so a fetch error still clears it
-					// rather than leaving it spinning forever.
-					async function refreshGammaTriple() {
+					// rather than leaving it spinning forever — same pattern
+					// /gt's and /4l's own refresh functions use.
+					async function refreshMwGamma() {
 						showSpinner();
 						try {
-							const data = await (await fetch(gammaTripleUrl(WINDOW_HOURS))).json();
+							const data = await (await fetch(mwGammaUrl())).json();
+							const points = data.points || [];
+							const latest = points.length ? points[points.length - 1] : null;
 
-							if (nearestPriceLine)      { series.removePriceLine(nearestPriceLine);      nearestPriceLine      = null; }
-							if (nearestPlus1PriceLine) { series.removePriceLine(nearestPlus1PriceLine); nearestPlus1PriceLine = null; }
-							if (nearestPlus2PriceLine) { series.removePriceLine(nearestPlus2PriceLine); nearestPlus2PriceLine = null; }
+							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
+							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
+							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
+							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
+							if (!latest) return;
 
-							// Gamma regime marker (+/- prefix on the title) — whether
-							// this line's own gamma_band value is positive or
-							// negative, same +/- convention the Delta Chart's
-							// High/Resistance-Low/Support markers use, just baked
-							// into the title text here since createPriceLine has
-							// no separate marker API the way a line series does.
-							//
-							// Dominant-leg suffix (LC/LP/SC/SP) — which of that
-							// expiry's 4 gamma extrema (Buyer Call/Buyer Put/
-							// Seller Call/Seller Put) has the largest abs
-							// magnitude, from ChartController.
-							// _gamma_triple_dominant_leg() server-side; appended
-							// to the end of the title as plain text, same as
-							// every other label suffix on this chart, since
-							// createPriceLine has no separate subtitle slot.
-							// Followed by that leg's own Abs value (already
-							// rounded server-side, same /1e6 scaling the
-							// /<instrument>/zones page's own Abs. lines use) —
-							// the number behind the dominant leg, not the
-							// gamma_band price the line itself is drawn at.
-							//
-							// axisLabelColor matches each line's own color here
-							// (unlike most other price lines in this addon, which
-							// force a black axis label regardless of line color).
-							// Color itself is picked per-line via legColor(), based
-							// on that line's own dominant leg, not a fixed
-							// per-position hue (see legColor() above).
-							function dominantLegSuffix(leg, value) { return leg ? ' ' + leg + ' ' + value : ''; }
-							if (data.nearest_gamma_band) {
-								const sign = data.nearest_gamma_band >= 0 ? '+' : '-';
-								const color = legColor(data.nearest_dominant_leg);
-								nearestPriceLine = series.createPriceLine({
-									price: data.nearest_gamma_band, color: color, lineWidth: 2,
+							// 0.0 means absent (same convention every
+							// gamma_band/smart_liq_*_price field in this addon
+							// uses) — no line drawn rather than a spurious
+							// price-0 line. axisLabelColor matches each
+							// line's own color here (unlike most other price
+							// lines in this addon, which force a black axis
+							// label regardless of line color) so the label is
+							// identifiable by color at a glance with 4 lines
+							// on one chart — except LC/LP, which are
+							// deliberately both black (axisBlack(), theme-
+							// aware) per product decision, so their axis
+							// labels match each other instead of standing
+							// apart.
+							if (latest.bcg_price) {
+								bcgPriceLine = series.createPriceLine({
+									price: latest.bcg_price, color: axisBlack(), lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: color,
-									title: sign + ' Nearest' + (data.nearest_instrument ? ' ' + data.nearest_instrument : '') + dominantLegSuffix(data.nearest_dominant_leg, data.nearest_dominant_leg_value),
+									axisLabelVisible: true, axisLabelColor: axisBlack(),
+									title: 'LC ' + formatAbbreviated(latest.bcg_value),
 								});
 							}
-							if (data.nearest_plus_1_gamma_band) {
-								const sign = data.nearest_plus_1_gamma_band >= 0 ? '+' : '-';
-								const color = legColor(data.nearest_plus_1_dominant_leg);
-								nearestPlus1PriceLine = series.createPriceLine({
-									price: data.nearest_plus_1_gamma_band, color: color, lineWidth: 2,
+							if (latest.bpg_price) {
+								bpgPriceLine = series.createPriceLine({
+									price: latest.bpg_price, color: axisBlack(), lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: color,
-									title: sign + ' Nearest+1' + (data.nearest_plus_1_instrument ? ' ' + data.nearest_plus_1_instrument : '') + dominantLegSuffix(data.nearest_plus_1_dominant_leg, data.nearest_plus_1_dominant_leg_value),
+									axisLabelVisible: true, axisLabelColor: axisBlack(),
+									title: 'LP ' + formatAbbreviated(latest.bpg_value),
 								});
 							}
-							if (data.nearest_plus_2_gamma_band) {
-								const sign = data.nearest_plus_2_gamma_band >= 0 ? '+' : '-';
-								const color = legColor(data.nearest_plus_2_dominant_leg);
-								nearestPlus2PriceLine = series.createPriceLine({
-									price: data.nearest_plus_2_gamma_band, color: color, lineWidth: 2,
+							if (latest.scg_price) {
+								scgPriceLine = series.createPriceLine({
+									price: latest.scg_price, color: SCG_COLOR, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: color,
-									title: sign + ' Nearest+2' + (data.nearest_plus_2_instrument ? ' ' + data.nearest_plus_2_instrument : '') + dominantLegSuffix(data.nearest_plus_2_dominant_leg, data.nearest_plus_2_dominant_leg_value),
+									axisLabelVisible: true, axisLabelColor: SCG_COLOR,
+									title: 'SC ' + formatAbbreviated(latest.scg_value),
+								});
+							}
+							if (latest.spg_price) {
+								spgPriceLine = series.createPriceLine({
+									price: latest.spg_price, color: SPG_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: SPG_COLOR,
+									title: 'SP ' + formatAbbreviated(latest.spg_value),
 								});
 							}
 						} finally {
@@ -482,6 +587,7 @@
 						DARK_MODE = document.getElementById('theme-select').value === 'dark';
 						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
 						applyTheme();
+						updateWindowVLine();
 					}
 
 					let rulerActive = false;
@@ -527,7 +633,7 @@
 					async function init() {
 						try {
 							await loadCandles();
-							await refreshGammaTriple();
+							await refreshMwGamma();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -535,7 +641,7 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					setInterval(refreshGammaTriple, REFRESH);
+					setInterval(refreshMwGamma, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>

@@ -14,7 +14,7 @@ _logger = logging.getLogger(__name__)
 # plain dict forecast.py's engine expects (see per_leg_greeks/derive_levels)
 # — shared by to_dict() below.
 _FORECAST_SNAPSHOT_FIELDS = [
-    "top", "low", "bml", "smp",
+    "top", "low", "bml", "smp", "long_trade_count", "short_trade_count",
     "bcg_price", "bpg_price", "scg_price", "spg_price",
     "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
     "bcd_price", "bpd_price", "scd_price", "spd_price",
@@ -129,6 +129,16 @@ class ForecastSnapshot(models.Model):
     bml = fields.Float(digits=(16, 4))
     smp = fields.Float(digits=(16, 4))
 
+    # Raw Long/Short trade counts for this same window (see
+    # dankbit.bands._compute_asset's long_trade_count/short_trade_count) —
+    # feeds forecast.flow_imbalance()'s FlowImbalance damping. Default 0,
+    # same "0 = absent/unknown" convention every other pre-migration-row
+    # field on this model already gets (a row frozen before this field
+    # existed just reads 0/0, which flow_imbalance() treats as "no data",
+    # not "perfectly balanced" — see that function's own docstring).
+    long_trade_count = fields.Integer(default=0)
+    short_trade_count = fields.Integer(default=0)
+
     _sql_constraints = [
         ("asset_bucket_uniq", "unique (asset, bucket_start)",
          "Only one Forecast snapshot is kept per asset per time bucket."),
@@ -193,6 +203,8 @@ class ForecastSnapshot(models.Model):
             "low": low,
             "bml": bands_data["buyer_max_loss"],
             "smp": bands_data["seller_max_profit"],
+            "long_trade_count": bands_data["long_trade_count"],
+            "short_trade_count": bands_data["short_trade_count"],
         }
         vals.update(per_leg_fields)
 
@@ -386,6 +398,20 @@ class ForecastSnapshot(models.Model):
         cfg["WEEKEND_BODY_FACTOR"] = f("forecast_weekend_body_factor", 0.65)
         cfg["WEEKEND_SHOCK_FACTOR"] = f("forecast_weekend_shock_factor", 0.75)
         cfg["BUCKET_HOURS_FALLBACK"] = f("forecast_bucket_hours_fallback", 4.0)
+
+        # FlowImbalance damping, Zone Brake, and the Breakout Gate's wick
+        # bleed — see forecast.py's own module-level comments on
+        # flow_imbalance()/_zone_brake_mult()/the Breakout Gate block inside
+        # simulate_forecast, added per Thales dev feedback (see CLAUDE.md's
+        # Thales Forecast candles section) that the engine over-trusted a
+        # bullish Greek target even when the raw Long/Short trade count was
+        # near-neutral, and rode straight through the Zone High edge
+        # without any real confirmation.
+        cfg["FLOW_IMBALANCE_NEUTRAL_THRESHOLD"] = f("forecast_flow_imbalance_neutral_threshold", 0.05)
+        cfg["FLOW_IMBALANCE_BODY_DAMPING"] = f("forecast_flow_imbalance_body_damping", 0.20)
+        cfg["ZONE_BRAKE_ATR_DISTANCE"] = f("forecast_zone_brake_atr_distance", 0.5)
+        cfg["ZONE_BRAKE_MIN_BODY_MULT"] = f("forecast_zone_brake_min_body_mult", 0.40)
+        cfg["BREAKOUT_GATE_WICK_BLEED"] = f("forecast_breakout_gate_wick_bleed", 0.6)
 
         # Per-asset dollar-Greek activity scale — see forecast.py's own
         # module-level comment on GAMMA_ABS_NORMALIZER/etc. for why these

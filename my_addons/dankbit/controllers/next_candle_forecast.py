@@ -22,8 +22,12 @@ discarding it).
 Pure functions only (no Odoo/ORM access), mirroring forecast.py's own
 style. Reuses forecast.py's existing data-shape/building blocks
 (derive_levels, smart_synthetic_liquidity, session_activity_regime,
-_atr14, GREEK_FLOW_REF_HOURS/_cfg) rather than forecast.py's own
-simulate_forecast()/greek_flow() logic, which stays untouched.
+_atr14, GREEK_FLOW_REF_HOURS/_cfg, flow_imbalance) rather than forecast.py's
+own simulate_forecast()/greek_flow() logic, which stays untouched — the
+FlowImbalance damping and Zone Brake ForecastMove receives (see their own
+module-level comment below) are this module's own independent application
+of the same Thales dev feedback that motivated simulate_forecast()'s
+equivalents, not a port of that engine's code.
 
 Originally 4H-only; generalized to all three timeframes via
 TIMEFRAME_CONFIG below. The per-revision Greek-flow history this needs is
@@ -108,11 +112,13 @@ def time_scale(candle_span_hours):
 
 
 # StructuralAdjustment = (center - open) * STRUCTURAL_PULL_WEIGHT * activity
-# body_mult * weekend multiplier * time_scale — a small pull-to-center
+# body_mult * WEEKEND_MOVE_MULT * time_scale — a small pull-to-center
 # nudge standing in for the spec's GAVG/R-S/BML-SMP bullets (derive_levels'
-# own `center` already blends all three).
+# own `center` already blends all three). WEEKEND_MOVE_MULT is also applied
+# to ForecastMove itself (see compute_revision) — both the flow-driven move
+# and the structural pull get damped equally on weekends.
 STRUCTURAL_PULL_WEIGHT = 0.12
-STRUCTURAL_WEEKEND_MULT = 0.6
+WEEKEND_MOVE_MULT = 0.6
 
 # Wick sizing — see compute_wicks. WICK_ATR_FACTOR sets the base wick size
 # as a fraction of real ATR14 (computed at that timeframe's own native
@@ -120,6 +126,42 @@ STRUCTURAL_WEEKEND_MULT = 0.6
 # (spec: Weekend Tail Risk is a Low-only factor).
 WICK_ATR_FACTOR = 0.5
 WEEKEND_TAIL_RISK_MULT = 1.3
+
+# FlowImbalance damping and Zone Brake — added on review against the same
+# Thales dev PDF feedback (2026-08-03) that motivated forecast.py's own
+# flow_imbalance()/_zone_brake_mult()/Breakout Gate additions (see
+# CLAUDE.md's Thales Forecast candles section), but applied here
+# independently — this module deliberately doesn't call into
+# simulate_forecast()'s own per-step loop (see module docstring), so those
+# additions never touched this engine at all. Before this: ForecastMove
+# (the module docstring's own "primary driver of candle body") had no
+# Activity Regime, weekend, or trade-count-conviction damping whatsoever —
+# only StructuralAdjustment (a much smaller term) did. FlowImbalance reuses
+# forecast.flow_imbalance() directly (a plain pure function, no cfg
+# needed); Zone Brake reimplements a small local equivalent of
+# forecast._zone_brake_mult() rather than importing that module-private
+# name, matching this module's own established pattern of reusing
+# forecast.py's PUBLIC building blocks (derive_levels, smart_synthetic_
+# liquidity, session_activity_regime, _atr14) while keeping its own
+# per-step math self-contained.
+FLOW_IMBALANCE_NEUTRAL_THRESHOLD = 0.05
+FLOW_IMBALANCE_BODY_DAMPING = 0.20
+
+ZONE_BRAKE_ATR_DISTANCE = 0.5
+ZONE_BRAKE_MIN_MOVE_MULT = 0.40
+
+
+def _zone_brake_mult(distance, atr, atr_distance, min_mult):
+    """Same shape as forecast._zone_brake_mult(): 1.0 (no brake) once
+    `distance` from the level is at least `atr_distance` ATRs away,
+    shrinking linearly down to `min_mult` as ForecastOpen closes in;
+    `distance` negative (already past the level) also returns 1.0."""
+    if distance is None or distance < 0:
+        return 1.0
+    reference = max(atr * atr_distance, 1e-9)
+    if distance >= reference:
+        return 1.0
+    return max(distance / reference, min_mult)
 
 # Smart Liquidity Close-damping — see apply_smart_liquidity_damping. Looks
 # at the last SMART_LIQ_REJECTION_LOOKBACK *closed* real candles (at that
@@ -211,7 +253,7 @@ def compute_structural_adjustment(current, open_price, is_weekend, activity, can
     forecast.session_activity_regime()'s own result dict (or None)."""
     center = forecast_lib.derive_levels(current)["center"]
     activity_mult = activity.get("body_mult", 1.0) if activity else 1.0
-    weekend_mult = STRUCTURAL_WEEKEND_MULT if is_weekend else 1.0
+    weekend_mult = WEEKEND_MOVE_MULT if is_weekend else 1.0
     return (center - open_price) * STRUCTURAL_PULL_WEIGHT * activity_mult * weekend_mult * time_scale(candle_span_hours)
 
 
@@ -366,11 +408,38 @@ def compute_revision(asset, timeframe, now_utc, index_price, current_snapshot, p
     else:
         forecast_open = index_price
 
+    atr = forecast_lib._atr14(real_candles) or (band_width * 0.1)
+
     structural_adjustment = compute_structural_adjustment(current_snapshot, forecast_open, is_weekend, activity, candle_span_hours)
+
+    # ForecastMove damping — see the module-level FlowImbalance/Zone Brake
+    # comment above. Previously this term (the docstring's own "primary
+    # driver of candle body") moved at full strength regardless of Activity
+    # Regime, weekend, or how one-sided the raw Long/Short trade count
+    # actually was; only StructuralAdjustment got any of that damping.
+    activity_mult = activity.get("body_mult", 1.0) if activity else 1.0
+    weekend_move_mult = WEEKEND_MOVE_MULT if is_weekend else 1.0
+    flow_imb = forecast_lib.flow_imbalance(current_snapshot.get("long_trade_count", 0), current_snapshot.get("short_trade_count", 0))
+    imbalance_mult = 1.0 - FLOW_IMBALANCE_BODY_DAMPING if (flow_imb is not None and abs(flow_imb) < FLOW_IMBALANCE_NEUTRAL_THRESHOLD) else 1.0
+
     forecast_move = clamped_flow_score * band_width * FLOW_SCALE_FACTOR * time_scale(candle_span_hours)
+    forecast_move *= activity_mult * weekend_move_mult * imbalance_mult
+
+    # Zone Brake — shrink the move further as it heads toward `top`
+    # (bullish) or `low` (bearish) within ZONE_BRAKE_ATR_DISTANCE ATRs of
+    # that level, continuous and always-on, layered on top of (not instead
+    # of) apply_smart_liquidity_damping()'s own binary rejection/acceptance
+    # check just below — this dampens the *approach*, that one hard-caps an
+    # actual rejected crossing.
+    zone_brake_mult = 1.0
+    if forecast_move > 0 and top:
+        zone_brake_mult = _zone_brake_mult(top - forecast_open, atr, ZONE_BRAKE_ATR_DISTANCE, ZONE_BRAKE_MIN_MOVE_MULT)
+    elif forecast_move < 0 and low:
+        zone_brake_mult = _zone_brake_mult(forecast_open - low, atr, ZONE_BRAKE_ATR_DISTANCE, ZONE_BRAKE_MIN_MOVE_MULT)
+    forecast_move *= zone_brake_mult
+
     raw_close = forecast_open + forecast_move + structural_adjustment
 
-    atr = forecast_lib._atr14(real_candles) or (band_width * 0.1)
     closed_candles = real_candles[:-1] if len(real_candles) > 1 else []
     forecast_close, leftover_upper, leftover_lower, smart_liq_adjustment = apply_smart_liquidity_damping(
         raw_close, forecast_open, top, low, closed_candles, band_width, atr,
@@ -398,6 +467,12 @@ def compute_revision(asset, timeframe, now_utc, index_price, current_snapshot, p
         "greek_flow_score": flow_score,
         "structural_adjustment": structural_adjustment,
         "smart_liquidity_adjustment": smart_liq_adjustment,
+        # Combined activity/weekend/FlowImbalance/Zone Brake multiplier
+        # actually applied to ForecastMove this revision (see above) — 1.0
+        # means none of the 4 dampers fired; kept as one diagnostic number
+        # rather than 4 separate fields, since what matters for reviewing a
+        # candle after the fact is how much the move got shrunk overall.
+        "flow_move_damping_mult": activity_mult * weekend_move_mult * imbalance_mult * zone_brake_mult,
         "activity_regime": activity.get("regime") if activity else None,
         "is_weekend": is_weekend,
         # The 4 raw values needed to compute the NEXT revision's own F_k

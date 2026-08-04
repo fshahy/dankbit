@@ -274,6 +274,19 @@ class Bands(models.Model):
             )
             return None
 
+        # Raw Long/Short trade counts (same direction == "buy"/"sell" split
+        # main.py's chart_png_zones already shows on the /<instrument>/zones
+        # PNG page's own "N longs / N shorts (since 00:00 UTC)" annotation)
+        # — feeds forecast.flow_imbalance()'s FlowImbalance damping (see
+        # CLAUDE.md's Thales Forecast candles section, per Thales dev
+        # feedback that a near-equal Long/Short count should keep the
+        # forecast body smaller even when the Greek levels point one way).
+        # Extra return field, not persisted onto this model (see the 4
+        # zero-crossing box-boundary fields below for the same pattern) —
+        # dankbit.forecast.snapshot reads it straight off this dict.
+        long_trade_count = len(trades.filtered(lambda t: t.direction == "buy"))
+        short_trade_count = len(trades.filtered(lambda t: t.direction == "sell"))
+
         longs_obj, shorts_obj = options_lib.build_zone_curves(
             asset, index_price, trades, from_price, to_price, steps
         )
@@ -417,6 +430,8 @@ class Bands(models.Model):
             "computed_at": as_of,
             "expiration": target_expiration,
             "index_price": index_price,
+            "long_trade_count": long_trade_count,
+            "short_trade_count": short_trade_count,
             "high_resistance": high_resistance,
             "low_support": low_support,
             "high_resistance_positive": high_resistance_positive,

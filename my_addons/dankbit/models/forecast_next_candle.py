@@ -60,6 +60,14 @@ class ForecastNextCandle(models.Model):
     greek_flow_score = fields.Float(digits=(16, 6))
     structural_adjustment = fields.Float(digits=(16, 4))
     smart_liquidity_adjustment = fields.Float(digits=(16, 4))
+    # Combined Activity Regime / weekend / FlowImbalance / Zone Brake
+    # multiplier actually applied to ForecastMove this revision (see
+    # controllers/next_candle_forecast.py's compute_revision) — 1.0 means
+    # none of the 4 dampers fired that revision. Added per the same Thales
+    # dev PDF review (2026-08-03) that motivated forecast.py's own
+    # flow_imbalance()/_zone_brake_mult(), applied here independently
+    # since this engine doesn't call simulate_forecast()'s per-step loop.
+    flow_move_damping_mult = fields.Float(digits=(16, 4))
     activity_regime = fields.Char()
     is_weekend = fields.Boolean()
 
@@ -218,6 +226,7 @@ class ForecastNextCandle(models.Model):
             "greek_flow_score": result["greek_flow_score"],
             "structural_adjustment": result["structural_adjustment"],
             "smart_liquidity_adjustment": result["smart_liquidity_adjustment"],
+            "flow_move_damping_mult": result["flow_move_damping_mult"],
             "activity_regime": result["activity_regime"],
             "is_weekend": result["is_weekend"],
             "bcd_abs": result["bcd_abs"],

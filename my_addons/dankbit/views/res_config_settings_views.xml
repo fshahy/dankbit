@@ -313,6 +313,22 @@
                         <setting>
                             <field name="forecast_session_firstmove_postny" placeholder="Session Firstmove (PostNY)"/>
                         </setting>
+                        <!-- FlowImbalance damping, Zone Brake, Breakout Gate (Thales dev feedback, 2026-08-03) -->
+                        <setting>
+                            <field name="forecast_flow_imbalance_neutral_threshold" placeholder="Flow Imbalance Neutral Threshold"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_flow_imbalance_body_damping" placeholder="Flow Imbalance Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_zone_brake_atr_distance" placeholder="Zone Brake ATR Distance"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_zone_brake_min_body_mult" placeholder="Zone Brake Min Body Mult"/>
+                        </setting>
+                        <setting>
+                            <field name="forecast_breakout_gate_wick_bleed" placeholder="Breakout Gate Wick Bleed"/>
+                        </setting>
                         <!-- Forecast candle colors -->
                         <setting>
                             <field name="forecast_up_color" placeholder="Forecast Up Color"/>
@@ -567,6 +583,22 @@
                         </setting>
                         <setting>
                             <field name="eth_forecast_session_firstmove_postny" placeholder="ETH Session Firstmove (PostNY)"/>
+                        </setting>
+                        <!-- FlowImbalance damping, Zone Brake, Breakout Gate (Thales dev feedback, 2026-08-03) -->
+                        <setting>
+                            <field name="eth_forecast_flow_imbalance_neutral_threshold" placeholder="ETH Flow Imbalance Neutral Threshold"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_flow_imbalance_body_damping" placeholder="ETH Flow Imbalance Body Damping"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_zone_brake_atr_distance" placeholder="ETH Zone Brake ATR Distance"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_zone_brake_min_body_mult" placeholder="ETH Zone Brake Min Body Mult"/>
+                        </setting>
+                        <setting>
+                            <field name="eth_forecast_breakout_gate_wick_bleed" placeholder="ETH Breakout Gate Wick Bleed"/>
                         </setting>
                     </block>
                  </app>

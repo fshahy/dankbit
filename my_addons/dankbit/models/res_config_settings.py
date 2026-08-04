@@ -760,6 +760,51 @@ class ResConfigSettings(models.TransientModel):
         help="Max first-candle move, in ATR units, for the PostNY session. Default 0.35.",
     )
 
+    # FlowImbalance damping, Zone Brake, and the Breakout Gate — see
+    # forecast.py's own module-level comment on flow_imbalance()/
+    # _zone_brake_mult()/the Breakout Gate block inside simulate_forecast,
+    # added per Thales dev feedback (a chat transcript reviewing the
+    # 18-candle forecast against a live BTC-4aug26 example, 2026-08-03).
+    forecast_flow_imbalance_neutral_threshold = fields.Float(
+        string="Flow Imbalance Neutral Threshold",
+        config_parameter="dankbit.forecast_flow_imbalance_neutral_threshold",
+        default=0.05,
+        digits=(16, 4),
+        help="Below this |(Longs-Shorts)/(Longs+Shorts)| trade-count imbalance, the raw Long/Short split counts as near-neutral and the body gets damped (see Flow Imbalance Body Damping) regardless of what the Greek levels themselves suggest. Default 0.05.",
+    )
+
+    forecast_flow_imbalance_body_damping = fields.Float(
+        string="Flow Imbalance Body Damping",
+        config_parameter="dankbit.forecast_flow_imbalance_body_damping",
+        default=0.20,
+        digits=(16, 4),
+        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral (see Flow Imbalance Neutral Threshold). Default 0.20 (~20%, per Thales dev's own stated first fix).",
+    )
+
+    forecast_zone_brake_atr_distance = fields.Float(
+        string="Zone Brake ATR Distance",
+        config_parameter="dankbit.forecast_zone_brake_atr_distance",
+        default=0.5,
+        digits=(16, 4),
+        help="How many ATRs away from the Zone High/Low edge (top/low) the body brake starts kicking in as the forecast approaches it. Default 0.5.",
+    )
+
+    forecast_zone_brake_min_body_mult = fields.Float(
+        string="Zone Brake Min Body Mult",
+        config_parameter="dankbit.forecast_zone_brake_min_body_mult",
+        default=0.40,
+        digits=(16, 4),
+        help="Floor the Zone Brake's body_confidence multiplier won't shrink below, even right up against the level. Default 0.40.",
+    )
+
+    forecast_breakout_gate_wick_bleed = fields.Float(
+        string="Breakout Gate Wick Bleed",
+        config_parameter="dankbit.forecast_breakout_gate_wick_bleed",
+        default=0.6,
+        digits=(16, 4),
+        help="Fraction of a Breakout-Gate-blocked close (an attempt to cross top/low without structural confirmation) that bleeds into wick instead of being discarded, so a rejected level still shows as tested. Default 0.6.",
+    )
+
     forecast_hours_ahead = fields.Integer(
         string="Hours Ahead",
         config_parameter="dankbit.forecast_hours_ahead",
@@ -1350,6 +1395,46 @@ class ResConfigSettings(models.TransientModel):
         default=0.35,
         digits=(16, 4),
         help="Max first-candle move, in ATR units, for the PostNY session. Default 0.35.",
+    )
+
+    eth_forecast_flow_imbalance_neutral_threshold = fields.Float(
+        string="ETH Flow Imbalance Neutral Threshold",
+        config_parameter="dankbit.eth_forecast_flow_imbalance_neutral_threshold",
+        default=0.05,
+        digits=(16, 4),
+        help="Below this |(Longs-Shorts)/(Longs+Shorts)| trade-count imbalance, the raw Long/Short split counts as near-neutral and the body gets damped (see Flow Imbalance Body Damping) regardless of what the Greek levels themselves suggest. Default 0.05.",
+    )
+
+    eth_forecast_flow_imbalance_body_damping = fields.Float(
+        string="ETH Flow Imbalance Body Damping",
+        config_parameter="dankbit.eth_forecast_flow_imbalance_body_damping",
+        default=0.20,
+        digits=(16, 4),
+        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral (see Flow Imbalance Neutral Threshold). Default 0.20 (~20%, per Thales dev's own stated first fix).",
+    )
+
+    eth_forecast_zone_brake_atr_distance = fields.Float(
+        string="ETH Zone Brake ATR Distance",
+        config_parameter="dankbit.eth_forecast_zone_brake_atr_distance",
+        default=0.5,
+        digits=(16, 4),
+        help="How many ATRs away from the Zone High/Low edge (top/low) the body brake starts kicking in as the forecast approaches it. Default 0.5.",
+    )
+
+    eth_forecast_zone_brake_min_body_mult = fields.Float(
+        string="ETH Zone Brake Min Body Mult",
+        config_parameter="dankbit.eth_forecast_zone_brake_min_body_mult",
+        default=0.40,
+        digits=(16, 4),
+        help="Floor the Zone Brake's body_confidence multiplier won't shrink below, even right up against the level. Default 0.40.",
+    )
+
+    eth_forecast_breakout_gate_wick_bleed = fields.Float(
+        string="ETH Breakout Gate Wick Bleed",
+        config_parameter="dankbit.eth_forecast_breakout_gate_wick_bleed",
+        default=0.6,
+        digits=(16, 4),
+        help="Fraction of a Breakout-Gate-blocked close (an attempt to cross top/low without structural confirmation) that bleeds into wick instead of being discarded, so a rejected level still shows as tested. Default 0.6.",
     )
 
     eth_forecast_hours_ahead = fields.Integer(

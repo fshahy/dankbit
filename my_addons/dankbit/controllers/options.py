@@ -405,6 +405,29 @@ def per_leg_greeks(STs, trades, r=0.0):
     return result
 
 
+def option_type_gamma_extreme(STs, trades, option_type, r=0.0):
+    """Where the COMBINED portfolio dollar-gamma curve of every trade of
+    `option_type` ("call"/"put") — buy and sell together, unlike
+    per_leg_greeks()'s own 4-way long/short split — peaks or bottoms out.
+    portfolio_gamma() is already direction-agnostic (it sums signed
+    buy/sell contributions internally via each trade's own `direction`),
+    so this just filters by option_type and evaluates it directly, same
+    r=0.0 convention as per_leg_greeks(). Unlike a single leg, this
+    combined curve has no fixed peak-vs-bottom sign convention — a mixed
+    buy/sell book can be net long or net short gamma at either end of the
+    grid — so this reports whichever of the curve's own peak (argmax) or
+    bottom (argmin) has the larger |value|. Returns (price, value), or
+    (None, None) if `trades` has nothing of this option_type."""
+    leg_trades = trades.filtered(lambda t: t.option_type == option_type)
+    if not leg_trades:
+        return None, None
+    curve = gamma_lib.portfolio_gamma(STs, leg_trades, r=r)
+    peak_idx = int(np.argmax(curve))
+    bottom_idx = int(np.argmin(curve))
+    idx = peak_idx if abs(curve[peak_idx]) >= abs(curve[bottom_idx]) else bottom_idx
+    return float(STs[idx]), float(curve[idx])
+
+
 def zone_summary(STs, longs_curve, shorts_curve):
     """Same extrema/box-boundary definitions used by dankbit.bands
     and the TradingView zones boxes: Shorts curve peak ("seller_max_profit"),

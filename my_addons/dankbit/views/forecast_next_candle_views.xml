@@ -29,6 +29,7 @@
                         <field name="greek_flow_score" />
                         <field name="structural_adjustment" />
                         <field name="smart_liquidity_adjustment" />
+                        <field name="flow_move_damping_mult" />
                         <field name="activity_regime" />
                         <field name="is_weekend" />
                     </group>
@@ -78,6 +79,7 @@
                 <field name="greek_flow_score" optional="hide" />
                 <field name="structural_adjustment" optional="hide" />
                 <field name="smart_liquidity_adjustment" optional="hide" />
+                <field name="flow_move_damping_mult" optional="hide" />
                 <field name="activity_regime" optional="hide" />
                 <field name="is_weekend" optional="hide" />
                 <field name="snapshot_id" optional="hide" />
