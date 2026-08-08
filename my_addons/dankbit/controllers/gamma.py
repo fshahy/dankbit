@@ -42,6 +42,14 @@ def portfolio_gamma(S, trades, r=0.0, min_hours=1.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
 
     for trd in trades:
+        # iv=0 is bad/missing Deribit data, not a real zero-vol trade —
+        # bs_gamma's own sigma_eps floor (1e-4) would otherwise turn a
+        # trivially small trade into a razor-thin, multi-hundred-million-
+        # dollar gamma spike at its own strike (gamma ~ 1/sigma near the
+        # money). Skipped rather than floored.
+        if trd.iv == 0:
+            continue
+
         hours_to_expiry = trd.get_hours_to_expiry()
         T = hours_to_expiry / (24.0 * 365.0)
 

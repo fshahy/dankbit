@@ -10,7 +10,9 @@
                     <group>
                         <field name="computed_at" />
                         <field name="asset" />
+                        <field name="expiry_index" />
                         <field name="instrument" />
+                        <field name="expiration" />
                         <field name="high_resistance" />
                         <field name="low_support" />
                         <field name="gamma_band" />
@@ -33,7 +35,9 @@
             <list string="Live Band">
                 <field name="computed_at" />
                 <field name="asset" />
+                <field name="expiry_index" />
                 <field name="instrument" />
+                <field name="expiration" />
                 <field name="high_resistance" />
                 <field name="low_support" />
                 <field name="gamma_band" />
@@ -61,6 +65,7 @@
 
                 <group expand="0" string="Group By">
                     <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                    <filter string="Expiry Index" name="expiry_index" context="{'group_by':'expiry_index'}"/>
                 </group>
             </search>
         </field>

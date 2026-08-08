@@ -23,11 +23,37 @@ _DERIBIT_CACHE = {
 _BINANCE_CACHE = {}
 _BINANCE_CANDLES_CACHE_TTL = 5.0
 
-# Separate cache for Kraken Futures candles (get_candles_kraken_futures) —
-# same short-fixed-TTL reasoning as _BINANCE_CACHE above, just a distinct
-# dict/key-space since this is a different upstream API.
-_KRAKEN_CACHE = {}
-_KRAKEN_CANDLES_CACHE_TTL = 5.0
+# Separate cache for Deribit perpetual-futures candles
+# (get_candles_deribit_perpetual) — same short-fixed-TTL reasoning as
+# _BINANCE_CACHE above, just a distinct dict/key-space since this is a
+# different upstream API (and a different Deribit endpoint than the
+# get_index_price/get_open_interest_by_currency calls cached in
+# _DERIBIT_CACHE, which use the configurable dankbit.deribit_cache_ttl
+# instead of this fixed 5s).
+_DERIBIT_PERP_CACHE = {}
+_DERIBIT_PERP_CANDLES_CACHE_TTL = 5.0
+
+# get_last_trades()'s recently-expired grace window (see
+# _get_recently_expired_instruments) — both this REST cron and the WS
+# ingestion service (dankbit_ws_batch.py) only ever discover instruments
+# via Deribit's "expired: false" filter, so without this an instrument
+# that expires between two polls permanently drops out of both
+# ingestion paths, silently losing any trades that landed between the
+# last poll before expiry and the actual expiration moment.
+#
+# get_last_trades() itself only runs nightly (see data/ir_cron.xml) — the
+# WS service is the real-time primary, this cron is purely the "make sure
+# we didn't miss anything, e.g. because the server was down" backstop —
+# so the gap between two runs is ~24h under normal operation, not ~1
+# minute. 3 days comfortably covers that plus a day or two of the server
+# actually being down (the scenario this cron exists for in the first
+# place). get_last_trades() re-fetches each tracked instrument's full
+# history every run (see its own docstring), so tracking an
+# already-fully-caught-up expired instrument for the rest of this window
+# still costs one bounded REST fetch per night, not zero — just cheap,
+# since it settles into a single near-empty page once every trade is
+# already in the DB.
+RECENTLY_EXPIRED_GRACE_MINUTES = 3 * 24 * 60
 
 def _safe_binance_request(
     url,
@@ -54,39 +80,6 @@ def _safe_binance_request(
         except Exception as e:
             _logger.warning(
                 "Binance request failed (%d/%d) %s params=%s error=%s",
-                attempt, retries, url, params, e
-            )
-            if attempt < retries:
-                time_module.sleep(backoff * (2 ** (attempt - 1)))
-            else:
-                if raise_on_fail:
-                    raise
-                return None
-
-def _safe_kraken_futures_request(
-    url,
-    params,
-    timeout=10.0,
-    retries=3,
-    backoff=0.4,
-    raise_on_fail=False,
-):
-    """Same robust GET-with-retries/backoff shape as _safe_binance_request
-    above, for Kraken Futures' public charts API instead — a failure there
-    is signalled by the response body simply lacking a "candles" key
-    (no {"code"/"error": ...} envelope the way Binance/Deribit use), so
-    that's what's checked here rather than a specific error key."""
-    for attempt in range(1, retries + 1):
-        try:
-            resp = requests.get(url, params=params, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            if not isinstance(data, dict) or "candles" not in data:
-                raise RuntimeError(f"Kraken Futures error: {data}")
-            return data
-        except Exception as e:
-            _logger.warning(
-                "Kraken Futures request failed (%d/%d) %s params=%s error=%s",
                 attempt, retries, url, params, e
             )
             if attempt < retries:
@@ -391,65 +384,149 @@ class Trade(models.Model):
         _BINANCE_CACHE[cache_key] = {"ts": now_ts, "value": candles}
         return candles
 
-    _KRAKEN_FUTURES_SYMBOL_MAP = {"BTC": "PF_XBTUSD", "ETH": "PF_ETHUSD"}
+    _DERIBIT_PERPETUAL_SYMBOL_MAP = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
+    # Deribit's get_tradingview_chart_data resolution strings — no native
+    # "4h" bucket (unlike Binance/Kraken Futures), so "4h" resolves to the
+    # native 60 (1h) resolution here and gets bucketed in Python afterward.
+    _DERIBIT_CHART_RESOLUTION_MAP = {"15m": "15", "1h": "60", "4h": "60", "1d": "1D"}
+    _DERIBIT_CHART_RESOLUTION_SECONDS = {"15": 900, "60": 3600, "1D": 86400}
 
-    def get_candles_kraken_futures(self, asset, interval="4h", limit=500):
-        """Real Kraken Futures candles (USD-margined perpetuals — PF_XBTUSD/
-        PF_ETHUSD), oldest-first, same {t, o, h, l, c} shape get_candles()
-        returns — used by /gt/<asset> and /4l/<asset> (both via the shared
-        klines_futures_proxy route), per product decision to source those
-        two pages' candles from Kraken Futures instead of Binance spot;
-        every other TradingView page in this addon (/chart, /oi, /mp)
-        keeps using get_candles()/Binance unchanged.
+    @staticmethod
+    def _bucket_candles(candles, bucket_seconds):
+        """Merge oldest-first {t, o, h, l, c} 1-bar candles into
+        bucket_seconds-wide bars. Buckets by UTC epoch boundary
+        (candle_t // bucket_ms), not by grouping every run of N bars
+        starting from whichever bar happened to be first in the fetch
+        window — so a 4h bucket always lands on 00:00/04:00/... UTC
+        regardless of the request's own start_timestamp, and a still-
+        forming trailing bucket (fewer than N source bars so far) is
+        included as a partial bar rather than dropped."""
+        buckets = {}
+        order = []
+        bucket_ms = bucket_seconds * 1000
+        for c in candles:
+            bucket_start = (c["t"] // bucket_ms) * bucket_ms
+            if bucket_start not in buckets:
+                buckets[bucket_start] = []
+                order.append(bucket_start)
+            buckets[bucket_start].append(c)
+        return [
+            {
+                "t": bucket_start,
+                "o": buckets[bucket_start][0]["o"],
+                "h": max(b["h"] for b in buckets[bucket_start]),
+                "l": min(b["l"] for b in buckets[bucket_start]),
+                "c": buckets[bucket_start][-1]["c"],
+            }
+            for bucket_start in order
+        ]
 
-        Kraken Futures' public charts API (https://futures.kraken.com/api/
-        charts/v1/trade/<symbol>/<resolution>) has the same native 15m/1h/
-        4h/1d resolution strings this addon's own interval values already
-        use, and its own `count` param returns exactly the most recent N
-        candles ending "now" oldest-first — no aggregation or window math
-        needed here either, same as get_candles()'s own Binance call.
-        Cached in the separate _KRAKEN_CACHE dict (same short fixed
-        _KRAKEN_CANDLES_CACHE_TTL=5s reasoning as _BINANCE_CANDLES_CACHE_TTL
-        — this gets polled every 5s per open /gt tab)."""
-        symbol = self._KRAKEN_FUTURES_SYMBOL_MAP.get(asset.upper(), "PF_" + asset.upper() + "USD")
+    def get_candles_deribit_perpetual(self, asset, interval="4h", limit=500):
+        """Real Deribit perpetual-futures candles (BTC-PERPETUAL/
+        ETH-PERPETUAL), oldest-first, same {t, o, h, l, c} shape
+        get_candles() returns — used by /gt/<asset>, /4l/<asset>, and
+        /mw/<asset> (all via the shared klines_futures_proxy route), per
+        product decision to source those three pages' candles from
+        Deribit's own perpetual futures instead of Kraken Futures; every
+        other TradingView page in this addon (/chart, /oi, /mp) keeps
+        using get_candles()/Binance spot unchanged.
 
-        cache_key = f"kraken_candles_{symbol}_{interval}_{limit}"
+        Deribit's public get_tradingview_chart_data endpoint takes an
+        explicit start_timestamp/end_timestamp window (unlike Binance's/
+        Kraken Futures' own simple "give me the most recent N" limit/count
+        param) and has no native 4h resolution — its resolution set is
+        1/3/5/10/15/30/60/120/180/360/720/1D. "15m"/"1h"/"1d" map directly
+        onto 15/60/1D; "4h" fetches native 60-minute bars (4x `limit`, so
+        there's enough raw history to bucket) and merges them into 4h bars
+        via _bucket_candles() — reintroducing the same fetch-1h-then-
+        aggregate step this addon used before it briefly moved this page's
+        candles to Binance spot and then to Kraken Futures (see
+        TradingView Chart Notes).
+
+        end_timestamp is "now"; start_timestamp is far enough back to
+        cover the requested bar count at the native resolution actually
+        fetched. Cached in the separate _DERIBIT_PERP_CACHE dict (same
+        short fixed _DERIBIT_PERP_CANDLES_CACHE_TTL=5s reasoning as
+        _BINANCE_CANDLES_CACHE_TTL — this gets polled every 5s per open
+        /gt, /4l, or /mw tab), keyed by the *requested* interval/limit
+        (not the native resolution actually fetched), so a 4h request and
+        a 1h request never collide in the cache despite both hitting
+        Deribit at resolution=60."""
+        instrument = self._DERIBIT_PERPETUAL_SYMBOL_MAP.get(asset.upper(), asset.upper() + "-PERPETUAL")
+        resolution = self._DERIBIT_CHART_RESOLUTION_MAP.get(interval, "60")
+        aggregate_4h = interval == "4h"
+        bar_seconds = self._DERIBIT_CHART_RESOLUTION_SECONDS.get(resolution, 3600)
+        fetch_limit = limit * 4 if aggregate_4h else limit
+
+        cache_key = f"deribit_perp_candles_{instrument}_{interval}_{limit}"
         now_ts = time_module.time()
-        cached = _KRAKEN_CACHE.get(cache_key, {})
-        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _KRAKEN_CANDLES_CACHE_TTL):
+        cached = _DERIBIT_PERP_CACHE.get(cache_key, {})
+        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _DERIBIT_PERP_CANDLES_CACHE_TTL):
             return cached.get("value")
 
-        url = f"https://futures.kraken.com/api/charts/v1/trade/{symbol}/{interval}"
-        data = _safe_kraken_futures_request(url, params={"count": limit}, timeout=10.0)
-        if not data:
+        end_ms = int(now_ts * 1000)
+        start_ms = end_ms - fetch_limit * bar_seconds * 1000
+        url = "https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
+        params = {
+            "instrument_name": instrument,
+            "start_timestamp": start_ms,
+            "end_timestamp": end_ms,
+            "resolution": resolution,
+        }
+        data = _safe_deribit_request(url, params=params, timeout=10.0)
+        result = (data or {}).get("result") or {}
+        ticks = result.get("ticks") or []
+        if result.get("status") != "ok" or not ticks:
             if cached and cached.get("value") is not None:
-                _logger.warning("get_candles_kraken_futures: using stale cached value for %s", cache_key)
+                _logger.warning("get_candles_deribit_perpetual: using stale cached value for %s", cache_key)
                 return cached.get("value")
-            _logger.exception("get_candles_kraken_futures failed and no cache available for %s", cache_key)
+            _logger.exception("get_candles_deribit_perpetual failed and no cache available for %s", cache_key)
             return []
 
-        # Kraken Futures candle row: {"time": ms, "open", "high", "low",
-        # "close", "volume"} — oldest-first already, matching this
-        # function's own documented return order (same as get_candles()).
+        # get_tradingview_chart_data's result is parallel arrays
+        # (ticks/open/high/low/close), oldest-first, ms timestamps —
+        # zipped into this function's own documented {t, o, h, l, c}
+        # per-candle shape.
         candles = [
-            {"t": int(row["time"]), "o": float(row["open"]), "h": float(row["high"]), "l": float(row["low"]), "c": float(row["close"])}
-            for row in data["candles"]
+            {
+                "t": int(ticks[i]),
+                "o": float(result["open"][i]),
+                "h": float(result["high"][i]),
+                "l": float(result["low"][i]),
+                "c": float(result["close"][i]),
+            }
+            for i in range(len(ticks))
         ]
-        _KRAKEN_CACHE[cache_key] = {"ts": now_ts, "value": candles}
-        return candles
 
-    def _get_latest_trade_ts_for_instrument(self, instrument_name: str):
-        return self.with_context(active_test=False).search(
-            [("name", "=", instrument_name)], order="deribit_ts desc", limit=1
-        )
+        if aggregate_4h:
+            candles = self._bucket_candles(candles, 4 * bar_seconds)
+
+        candles = candles[-limit:]
+        _DERIBIT_PERP_CACHE[cache_key] = {"ts": now_ts, "value": candles}
+        return candles
 
     # ========== FETCHING & INGESTION ==========
 
     # run by scheduled action
     def get_last_trades(self):
         """
-        Hardened REST-only trade importer.
-        - Full history already exists → incremental fetch per instrument.
+        Hardened REST-only backfill importer — run nightly (see
+        data/ir_cron.xml), not the primary ingestion path: the WS
+        service (dankbit_ws_service/dankbit_ws_batch.py) is real-time and
+        primary; this is purely the safety net for whatever it missed,
+        e.g. if the server/WS was down for a stretch.
+        - Always fetches each instrument's FULL retained trade history
+          (start_timestamp=0 through expiration/now), not an incremental
+          fetch resumed from the DB's latest known trade — resuming from
+          the latest trade only backfills the tail, so a WS outage earlier
+          in the day (that later reconnected and kept ingesting) would
+          leave that earlier gap permanently unfetched forever, since
+          nothing ever looks behind the DB's current latest trade again.
+          A full re-fetch is only viable because this cron runs once a
+          day, not on a tight polling loop; re-fetching already-known
+          trades is cheap/idempotent since _create_new_trade() silently
+          drops duplicates via the deribit_trade_identifier unique
+          constraint.
         - Uses timestamp-based pagination (Deribit REST's only supported method).
         - Ensures no gaps, no flooding, no duplicate inserts.
         - Gracefully handles Deribit rate-limit, empty responses, and pagination quirks.
@@ -457,15 +534,44 @@ class Trade(models.Model):
           instrument's fetch is wrapped in its own try/except, so a single
           malformed response/record only skips that instrument for this
           cycle rather than aborting every instrument still left in
-          option_instruments (the next cron cycle resumes it normally,
-          since start_ts is always recomputed from the DB's last committed
-          trade).
+          option_instruments (the next cron cycle re-fetches it from
+          scratch regardless, since start_ts is always 0).
+        - Also covers instruments that expired since the last poll (see
+          _get_recently_expired_instruments/RECENTLY_EXPIRED_GRACE_MINUTES):
+          _get_instruments() alone only returns currently-active
+          ("expired: false") instruments, so without this, any trade that
+          landed between the last poll before an instrument's expiry and
+          its actual expiration timestamp would never be fetched by
+          either this cron or the WS ingestion service (which has the
+          same expired=false-only discovery). These are fetched FIRST,
+          ahead of the (usually far larger) active-instrument list: Deribit
+          itself only keeps a settled instrument's trade history queryable
+          via this REST endpoint for a limited time after expiry (observed
+          well under RECENTLY_EXPIRED_GRACE_MINUTES's own 3-day window), so
+          if this run is what's finally catching one of these instruments
+          up, that data can age out of Deribit's own retention while this
+          run is still working through thousands of already-current active
+          instruments ahead of it — small/urgent goes first, large/routine
+          goes second.
         """
 
-        option_instruments = [
-            inst for inst in self._get_instruments()
-            if inst.get("kind") == "option"
-        ]
+        # Keyed by instrument_name to dedupe: an instrument can in
+        # principle appear in both lists in the same tick (its "active"
+        # cache entry can be up to deribit_cache_ttl stale), so a plain
+        # concatenation could fetch it twice this run — harmless
+        # (idempotent) but wasteful. Recently-expired entries are added
+        # first so they win the ordering (see the docstring above); the
+        # setdefault on the active list just means an instrument already
+        # queued from the expired pass doesn't get a second, redundant
+        # entry.
+        option_instruments_by_name = {}
+        for inst in self._get_recently_expired_instruments():
+            if inst.get("kind") == "option" and inst.get("instrument_name"):
+                option_instruments_by_name[inst["instrument_name"]] = inst
+        for inst in self._get_instruments():
+            if inst.get("kind") == "option" and inst.get("instrument_name"):
+                option_instruments_by_name.setdefault(inst["instrument_name"], inst)
+        option_instruments = list(option_instruments_by_name.values())
 
         icp = self.env["ir.config_parameter"]
         try:
@@ -475,8 +581,9 @@ class Trade(models.Model):
 
         URL = "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument_and_time"
 
-        # critical: if DB already contains full history → always start from last trade timestamp
-        # NEVER limit by "days ago" again
+        # Always fetch each instrument's full history from scratch — see
+        # the docstring above for why this run no longer resumes from the
+        # DB's latest known trade.
         base_start = 0  # REST can only return what it still retains internally
 
         for inst in option_instruments:
@@ -485,42 +592,26 @@ class Trade(models.Model):
                 continue
 
             try:
-                latest_trade = self._get_latest_trade_ts_for_instrument(inst_name)
-
-                # choose correct starting point
-                if latest_trade and latest_trade.deribit_ts:
-                    dt_val = latest_trade.deribit_ts
-                    if isinstance(dt_val, str):
-                        dt_obj = fields.Datetime.from_string(dt_val)
-                    else:
-                        dt_obj = dt_val
-                    if dt_obj.tzinfo is None:
-                        dt_obj = dt_obj.replace(tzinfo=timezone.utc)
-
-                    # Resume AT the last known trade's timestamp, not one ms
-                    # past it: Deribit's start_timestamp bound is inclusive,
-                    # and options books can have multiple trades landing in
-                    # the exact same millisecond (multi-leg/block fills). A
-                    # "+1" here would permanently skip any sibling trades at
-                    # that same millisecond that weren't in the last fetched
-                    # page. The one guaranteed re-fetch of the boundary
-                    # trade itself is cheap: _create_new_trade() already
-                    # silently drops it via the deribit_trade_identifier
-                    # unique-constraint conflict.
-                    start_ts = int(dt_obj.timestamp() * 1000)
-                else:
-                    # fallback (fresh DB case, or an instrument with zero trades)
-                    start_ts = base_start
-
+                start_ts = base_start
                 now_ts = int(time_module.time() * 1000)
 
-                if start_ts >= now_ts:
-                    _logger.debug("Skipping %s — already up to date (start_ts=%s >= now_ts=%s)", inst_name, start_ts, now_ts)
+                # For an already-expired instrument (see
+                # _get_recently_expired_instruments), Deribit will never
+                # have a trade past its own expiration_timestamp — cap the
+                # fetch window there instead of "now" so we don't ask for a
+                # range Deribit can never answer.
+                expiration_ts = inst.get("expiration_timestamp")
+                end_ts = min(now_ts, expiration_ts) if expiration_ts else now_ts
+
+                if start_ts >= end_ts:
+                    # Defensive only — with start_ts always 0 this fires
+                    # only if expiration_ts is degenerate (<= 0).
+                    _logger.debug("Skipping %s — degenerate fetch window (start_ts=%s >= end_ts=%s)", inst_name, start_ts, end_ts)
                     continue
 
                 _logger.info(
                     "Fetching trades for %s from %s → %s",
-                    inst_name, start_ts, now_ts
+                    inst_name, start_ts, end_ts
                 )
 
                 #
@@ -542,7 +633,7 @@ class Trade(models.Model):
                         "instrument_name": inst_name,
                         "count": 1000,
                         "start_timestamp": start_ts,
-                        "end_timestamp": now_ts,
+                        "end_timestamp": end_ts,
                         "sorting": "asc",
                     }
 
@@ -683,6 +774,77 @@ class Trade(models.Model):
                     all_instruments.extend(cached["value"])
 
         return all_instruments
+
+    def _get_recently_expired_instruments(self, grace_minutes=RECENTLY_EXPIRED_GRACE_MINUTES):
+        """Option instruments whose expiration_timestamp falls within the
+        last `grace_minutes` minutes, per currency — see
+        RECENTLY_EXPIRED_GRACE_MINUTES's own comment for why get_last_trades()
+        needs this at all: _get_instruments() alone only ever returns
+        currently-active ("expired: false") instruments, so an instrument
+        that expires between two polls would otherwise drop out of that
+        list forever, silently losing any trades that landed between the
+        last poll before its expiry and the expiration moment itself.
+
+        Deribit's own "expired: true" filter returns every option ever
+        settled for that currency (years of history) — fetching that full
+        list is one bounded REST call, but iterating all of it every tick
+        would grow unbounded over time, so it's filtered down to the
+        grace window here before being handed back to the caller. Cached
+        the same way/TTL as _get_instruments()'s own active list (a
+        separate cache key/currency, so neither list can evict the
+        other's cached value)."""
+        URL = "https://www.deribit.com/api/v2/public/get_instruments"
+
+        timeout = 5.0
+        try:
+            icp = self.env["ir.config_parameter"]
+            timeout = float(icp.get_param("dankbit.deribit_timeout", default=5.0))
+            cache_ttl = float(icp.get_param("dankbit.deribit_cache_ttl", default=300.0))
+        except Exception:
+            cache_ttl = 300.0
+
+        now_ts = time_module.time()
+        cutoff_ms = int((now_ts - grace_minutes * 60) * 1000)
+        recently_expired = []
+
+        for currency in ("BTC", "ETH"):
+            cache_key = f"expired_instruments_{currency}"
+            cached = _DERIBIT_CACHE.get(cache_key, {})
+
+            if (
+                cached
+                and cached.get("value") is not None
+                and (now_ts - cached.get("ts", 0) < cache_ttl)
+            ):
+                instruments = cached["value"]
+            else:
+                params = {
+                    "currency": currency,
+                    "kind": "option",
+                    "expired": "true",
+                }
+
+                data = _safe_deribit_request(URL, params=params, timeout=timeout)
+
+                if data and isinstance(data, dict):
+                    instruments = data.get("result", [])
+                    _DERIBIT_CACHE[cache_key] = {
+                        "ts": now_ts,
+                        "value": instruments,
+                    }
+                else:
+                    _logger.warning(
+                        "Failed to fetch expired %s instruments from Deribit, using cache if available",
+                        currency,
+                    )
+                    instruments = cached.get("value") or []
+
+            recently_expired.extend(
+                inst for inst in instruments
+                if inst.get("expiration_timestamp") and inst["expiration_timestamp"] >= cutoff_ms
+            )
+
+        return recently_expired
 
     def _create_new_trade(self, trade, expiration_ts):
         deribit_dt = datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc)

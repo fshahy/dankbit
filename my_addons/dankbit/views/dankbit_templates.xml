@@ -228,19 +228,18 @@
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
-					/* "Next Candle Forecast" status pill (Delta Chart only, see
-					   #next-candle-forecast-label below) — same fixed pill
+					/* Unified Forecast status pill (Delta Chart only) — same fixed pill
 					   pattern as #exchange-label, positioned right below it.
 					   Empty/no-op text collapses to zero visible content
-					   rather than an empty box (see refreshNextCandleForecast). */
-					#next-candle-forecast-label {
+					   rather than an empty box. */
+					#forecast-status-label {
 						position: fixed; top: 40px; right: 80px;
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
-					#next-candle-forecast-label:empty { display: none; }
+					#forecast-status-label:empty { display: none; }
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -308,6 +307,12 @@
 						gap: 8px; padding: 3px 0;
 					}
 					.color-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.line-row {
+						display: grid; grid-template-columns: minmax(150px, 1fr) 44px 92px;
+						align-items: center; gap: 10px; padding: 3px 0;
+					}
+					.line-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.line-row select { width: 92px; padding: 3px 4px; }
 					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
@@ -318,7 +323,7 @@
 					body.dark, body.dark html { background: #000000; }
 					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
-					body.dark #next-candle-forecast-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark #forecast-status-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
@@ -338,7 +343,7 @@
 				<div id="chart-container"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
-				<div id="next-candle-forecast-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
+				<div id="forecast-status-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -370,18 +375,20 @@
 							<input type="checkbox" id="bands-toggle" onchange="onToggleBands()"/>
 							Bands
 						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="smart-liquidity-toggle" onchange="onToggleSmartLiquidity()"/>
+							Smart Liquidity
+						</label>
 						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
 						</label>
-						<label class="toggle-label">
-							<input type="checkbox" id="next-candle-forecast-toggle" onchange="onToggleNextCandleForecast()"/>
-							Next Candle Forecast
-						</label>
-						<span class="tf-label">Zones from:</span>
+						<span class="tf-label">Option Flow:</span>
 						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
 							<option value="midnight">00:00 UTC</option>
-							<option value="hours"><t t-esc="zones_box_window_hours"/>h ago</option>
+							<option value="2">Last 2 Hours</option>
+							<option value="4">Last 4 Hours</option>
+							<option value="configured"><t t-esc="zones_box_window_hours"/>h (Configured)</option>
 						</select>
 					</t>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
@@ -397,7 +404,7 @@
 				<div id="settings-modal" class="modal-overlay" style="display:none" onclick="if (event.target === this) closeSettingsModal()">
 					<div class="modal-box">
 						<div class="modal-header">
-							<span>Chart Colors</span>
+							<span>Chart Appearance</span>
 							<span class="modal-close" onclick="closeSettingsModal()">&#10005;</span>
 						</div>
 						<div class="modal-section">
@@ -407,13 +414,27 @@
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Bands</div>
-							<label class="color-row">Smart Liquidity Upper <input type="color" id="color-highResistance"/></label>
-							<label class="color-row">Smart Liquidity Lower <input type="color" id="color-lowSupport"/></label>
-							<label class="color-row">Gamma Band <input type="color" id="color-gammaBand"/></label>
+							<label class="line-row"><span>Upper Band</span><input type="color" id="color-bandUpper"/><select id="style-bandUpper"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+							<label class="line-row"><span>Lower Band</span><input type="color" id="color-bandLower"/><select id="style-bandLower"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+							<label class="line-row"><span>Gamma Band</span><input type="color" id="color-gammaBand"/><select id="style-gammaBand"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+							<label class="color-row"><span>Adaptive Smoothing (Forward Test)</span><input type="checkbox" id="band-adaptive-smoothing"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Smart Liquidity</div>
+							<label class="line-row"><span>Upper</span><input type="color" id="color-smartLiqUpper"/><select id="style-smartLiqUpper"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+							<label class="line-row"><span>Lower</span><input type="color" id="color-smartLiqLower"/><select id="style-smartLiqLower"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Strike Gamma</div>
-							<label class="color-row">Max Pain <input type="color" id="color-maxPain"/></label>
+							<label class="line-row"><span>Max Pain</span><input type="color" id="color-maxPain"/><select id="style-maxPain"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title" id="forecast-settings-title">Forecast Candles (4H)</div>
+							<label class="color-row"><span id="forecast-count-label">Candle Count (1–18)</span> <input type="number" id="forecast-candle-count" min="1" max="18" step="1"/></label>
+							<label class="color-row">Up Body <input type="color" id="color-forecastUp"/></label>
+							<label class="color-row">Down Body <input type="color" id="color-forecastDown"/></label>
+							<label class="color-row">Up Wick <input type="color" id="color-forecastWickUp"/></label>
+							<label class="color-row">Down Wick <input type="color" id="color-forecastWickDown"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -498,34 +519,38 @@
 					// checked or not — only the 4-hourly compute_snapshot() cron
 					// ever writes to that model.
 					let SHOW_ZONES_BOXES = true;
-					// User-toggleable via the "Bands" checkbox (Delta Chart
-					// only — this indicator is already suppressed on DG Chart via
-					// MINIMAL_CHART, so this control isn't shown there at all, see the
-					// t-if on its markup). Controls only the High/Resistance + Low/Support +
-					// Gamma Band lines (green/red/dashed violet) — deliberately NOT
-					// the yellow/teal zones boxes, which have their own separate
-					// "Zones" checkbox instead (SHOW_ZONES_BOXES above). Stops
-					// refreshBands() from calling the server at all while off.
-					// refreshBands() only ever reads the already-persisted
-					// dankbit.bands rows (/api/bands/<asset>) — it
-					// never triggers a new computation, for any expiry_index. Every
-					// tracked expiry's row (see TRACKED_EXPIRY_COUNT) is computed and
-					// refreshed solely by the 4-hourly compute_snapshot() cron;
-					// nothing this browser does — checking this box, leaving it
-					// checked, or polling while it's open — causes new extrema to be
-					// computed.
+					// User-toggleable via the "Bands" checkbox. Bands are the pure
+					// Thales upper/lower Longs-vs-Shorts curve intersections
+					// (high_resistance/low_support), not Smart Liquidity and not an
+					// average/blend with Smart Liquidity.
 					let SHOW_BANDS = false;
+					// Smart Liquidity is kept as a separate optional layer. It can still
+					// feed forecast logic on the backend, but it no longer replaces,
+					// averages, or compresses the displayed Green/Red Bands.
+					let SHOW_SMART_LIQUIDITY = false;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
 					// only, "Zones from" dropdown next to "Bands") — 'midnight' is the
-					// original since-00:00-UTC-through-now default; 'hours' switches
-					// to the trailing ZONES_BOX_WINDOW_HOURS hours instead (see
-					// dankbit.zones_box_window_hours setting). Only 'hours' is ever
+					// original since-00:00-UTC-through-now default; '2'/'4' select
+					// fixed trailing windows, while 'configured' uses
+					// ZONES_BOX_WINDOW_HOURS (see dankbit.zones_box_window_hours).
+					// Only a trailing-window selection is ever
 					// sent as a query param (see refreshZonesBoxes()) — a live,
 					// non-persisted override on the server side (see get_box()'s
 					// hours param); the 4-hourly compute_snapshot() cron and every
 					// other viewer's default midnight-based view are completely
 					// unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
+					function selectedOptionFlowHours() {
+						if (ZONES_BOX_WINDOW_MODE === 'midnight') return null;
+						return ZONES_BOX_WINDOW_MODE === 'configured'
+							? ZONES_BOX_WINDOW_HOURS
+							: parseInt(ZONES_BOX_WINDOW_MODE, 10);
+					}
+					function withOptionFlowWindow(url) {
+						const hours = selectedOptionFlowHours();
+						if (hours === null) return url;
+						return url + (url.includes('?') ? '&' : '?') + 'hours=' + hours;
+					}
 					// "Top OI(s)" checkbox (Gamma Chart only) — replaces the
 					// old separate "Strike Gamma"/"Strike Gamma Nearest"/
 					// "Strike Gamma Weekly"/"Strike Gamma Monthly" checkboxes
@@ -577,24 +602,77 @@
 					// the Delta Chart (MINIMAL_CHART suppresses them elsewhere) —
 					// harmless no-op there since the series just never get data.
 					const COLOR_STORAGE_KEY = 'dankbit_chart_colors';
+					const LINE_STYLE_STORAGE_KEY = 'dankbit_chart_line_styles';
+					const FORECAST_COUNT_STORAGE_KEY = 'dankbit_forecast_candle_counts';
+					const BAND_SMOOTHING_STORAGE_KEY = 'dankbit_band_adaptive_smoothing';
+					const BAND_SMOOTHING_STATE_KEY = 'dankbit_band_smoothing_state_' + ASSET;
+					const FORECAST_MAX_COUNTS = { '1h': 72, '4h': 18, '1d': 3 };
 					const DEFAULT_COLORS = {
 						zonesBox: '#fbc02d',
 						middleZone: '#008080',
-						// Keys kept as highResistance/lowSupport (not renamed to
-						// smartLiqUpper/smartLiqLower) so any already-saved
-						// per-browser color customization survives this change —
-						// these two now feed Smart Liquidity Upper/Lower's lines,
-						// not High/Resistance/Low/Support (see series creation
-						// below).
-						highResistance: '#2e7d32',
-						lowSupport: '#c62828',
+						bandUpper: '#2e7d32',
+						bandLower: '#c62828',
+						smartLiqUpper: '#2e7d32',
+						smartLiqLower: '#c62828',
 						gammaBand: '#c9a0dc',
 						maxPain: '#fb8c00',
+						forecastUp: FORECAST_UP_COLOR,
+						forecastDown: FORECAST_DOWN_COLOR,
+						forecastWickUp: FORECAST_WICK_UP_COLOR,
+						forecastWickDown: FORECAST_WICK_DOWN_COLOR,
+					};
+					const DEFAULT_LINE_STYLES = {
+						bandUpper: 'solid',
+						bandLower: 'solid',
+						gammaBand: 'dashed',
+						smartLiqUpper: 'dashed',
+						smartLiqLower: 'dashed',
+						maxPain: 'solid',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
+					let chartLineStyles = Object.assign({}, DEFAULT_LINE_STYLES);
+					let bandAdaptiveSmoothing = localStorage.getItem(BAND_SMOOTHING_STORAGE_KEY) !== 'false';
+					// State is isolated per timeframe. Reusing a 1H ATR-derived buffer on
+					// 4H/1D was visually smooth but mathematically inconsistent and made
+					// the same raw bands depend on which timeframe the user viewed first.
+					let bandSmoothingState = {};
+					try { bandSmoothingState = JSON.parse(localStorage.getItem(BAND_SMOOTHING_STATE_KEY) || '{}'); }
+					catch (e) { bandSmoothingState = {}; }
+					let forecastCandleCounts = { '1h': 72, '4h': 18, '1d': 3 };
 					try {
-						Object.assign(chartColors, JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}'));
+						const savedCounts = JSON.parse(localStorage.getItem(FORECAST_COUNT_STORAGE_KEY) || '{}');
+						Object.keys(FORECAST_MAX_COUNTS).forEach(tf => {
+							forecastCandleCounts[tf] = Math.max(1, Math.min(parseInt(savedCounts[tf], 10) || FORECAST_MAX_COUNTS[tf], FORECAST_MAX_COUNTS[tf]));
+						});
+					} catch (e) { /* malformed stored value — use timeframe defaults */ }
+					try {
+						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
+						// Preserve legacy upper/lower choices while separating Bands
+						// from Smart Liquidity for all new saves.
+						if (savedColors.highResistance) {
+							savedColors.bandUpper = savedColors.bandUpper || savedColors.highResistance;
+							savedColors.smartLiqUpper = savedColors.smartLiqUpper || savedColors.highResistance;
+						}
+						if (savedColors.lowSupport) {
+							savedColors.bandLower = savedColors.bandLower || savedColors.lowSupport;
+							savedColors.smartLiqLower = savedColors.smartLiqLower || savedColors.lowSupport;
+						}
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							if (savedColors[key]) chartColors[key] = savedColors[key];
+						});
 					} catch (e) { /* malformed/legacy stored value — fall back to defaults */ }
+					try {
+						const savedStyles = JSON.parse(localStorage.getItem(LINE_STYLE_STORAGE_KEY) || '{}');
+						Object.keys(DEFAULT_LINE_STYLES).forEach(key => {
+							if (['solid', 'dashed', 'dotted'].includes(savedStyles[key])) chartLineStyles[key] = savedStyles[key];
+						});
+					} catch (e) { /* malformed stored value — fall back to defaults */ }
+
+					function lineStyleFromName(name) {
+						if (name === 'dashed') return LightweightCharts.LineStyle.Dashed;
+						if (name === 'dotted') return LightweightCharts.LineStyle.Dotted;
+						return LightweightCharts.LineStyle.Solid;
+					}
 
 					function hexToRgba(hex, alpha) {
 						const h = hex.replace('#', '');
@@ -618,12 +696,6 @@
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					const LAST_TRADE_URL   = '/api/last-trade/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
-					// "Next Candle Forecast" status pill (Delta Chart only) —
-					// a separate feature from the 18-candle Thales Forecast
-					// series above (FORECAST_URL/forecastSeries), not gated by
-					// the "Thales Forecast" checkbox — see
-					// refreshNextCandleForecast below.
-					const NEXT_CANDLE_FORECAST_URL = '/api/next-candle-forecast/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
 					// checkbox at all, so SHOW_FORECAST simply never gets
@@ -633,12 +705,6 @@
 					// Draws a fully deterministic path (see FORECAST_URL) ported
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
-					// "Next Candle Forecast" checkbox — unchecked by default,
-					// same as every other optional indicator on this page;
-					// unchecking stops refreshNextCandleForecast() from
-					// fetching at all, same server-load-reducing pattern as
-					// every other checkbox on this page.
-					let SHOW_NEXT_CANDLE_FORECAST = false;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -709,21 +775,26 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					const gammaBandSeries          = chart.addLineSeries({ color: chartColors.gammaBand, lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
-					// Smart Role-Aware Synthetic Liquidity term-structure lines
-					// (dankbit.bands.smart_liq_upper_price/smart_liq_lower_price)
-					// — part of the "Bands" checkbox/refreshBands(), not a
-					// separate toggle. Solid green/red, connected point-to-point —
-					// this used to be where High/Resistance/Low/Support were
-					// plotted (dankbit.bands.high_resistance/low_support); those
-					// two fields are still computed/persisted on dankbit.bands
-					// and still feed the /api/zones-box teal box and
-					// dankbit.forecast.snapshot elsewhere, just no longer drawn
-					// on this chart. Visible on every timeframe (1h/4h/1d), same
-					// as every other Bands line — refreshBands() has no
-					// timeframe gating.
-					const smartLiqUpperSeries = chart.addLineSeries({ color: chartColors.highResistance, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
-					const smartLiqLowerSeries = chart.addLineSeries({ color: chartColors.lowSupport, lineWidth: 2, lastValueVisible: false, priceLineVisible: false });
+					const gammaBandSeries = chart.addLineSeries({ color: chartColors.gammaBand, lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.gammaBand), lastValueVisible: false, priceLineVisible: false });
+					// Pure Thales Bands: Green/Red are always the upper/lower
+					// Longs-vs-Shorts curve intersections. They are not averaged with
+					// Smart Liquidity.
+					const bandUpperSeries = chart.addLineSeries({ color: chartColors.bandUpper, lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.bandUpper), lastValueVisible: false, priceLineVisible: false });
+					const bandLowerSeries = chart.addLineSeries({ color: chartColors.bandLower, lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.bandLower), lastValueVisible: false, priceLineVisible: false });
+					// Smart Liquidity remains available, but as a separate optional layer.
+					// Dominance used to be drawn as a second, thicker line series shown
+					// only on the dominant side's own points (the rest left as blank
+					// "whitespace" points). Lightweight Charts v4 does NOT break a line at
+					// a whitespace point, though — confirmed empirically: it silently
+					// connects straight through to the next real value, however many
+					// blanks sit in between. Wherever dominance flipped more than once,
+					// that produced a false extra diagonal connecting non-adjacent points,
+					// which is what was reading as "two lines". Dominance is instead shown
+					// via setMarkers() on this single line (see smartLiqDominanceMarkers) —
+					// a bigger dot on the dominant side's own points, nothing on the other
+					// side — since markers don't rely on whitespace-breaks at all.
+					const smartLiqUpperSeries = chart.addLineSeries({ color: hexToRgba(chartColors.smartLiqUpper, 0.55), lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.smartLiqUpper), lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+					const smartLiqLowerSeries = chart.addLineSeries({ color: hexToRgba(chartColors.smartLiqLower, 0.55), lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.smartLiqLower), lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 					// Per-hour Smart Liquidity dominance dots — same "Bands"
 					// checkbox, a separate data source from the two lines above:
 					// dankbit.live.band's hourly append-only log
@@ -786,27 +857,8 @@
 					// above) so it stays easily distinguishable from the real
 					// candles' own teal/red at a glance.
 					const forecastSeries = chart.addCandlestickSeries({
-						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
-						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
-						lastValueVisible: false, priceLineVisible: false,
-					});
-
-					// Next Candle Forecast (4H) — a separate feature from the
-					// 18-candle Thales Forecast series above, gated by its
-					// own checkbox rather than the "Thales Forecast" one
-					// above (see SHOW_NEXT_CANDLE_FORECAST), matching the
-					// #next-candle-forecast-label pill it's drawn alongside —
-					// see refreshNextCandleForecast). Exactly ONE candle, at
-					// the upcoming 4h slot, sourced from
-					// /api/next-candle-forecast/<asset> (dankbit.forecast.
-					// next_candle). Same light green/red as the 18-candle
-					// Thales Forecast series above (FORECAST_UP_COLOR etc.) —
-					// both forecast series read from the same configurable
-					// colors, so they stay in sync as one visual "family",
-					// each still colored per-candle by its own open vs close.
-					const nextCandleForecastSeries = chart.addCandlestickSeries({
-						upColor: FORECAST_UP_COLOR, downColor: FORECAST_DOWN_COLOR, borderVisible: false,
-						wickUpColor: FORECAST_WICK_UP_COLOR, wickDownColor: FORECAST_WICK_DOWN_COLOR,
+						upColor: chartColors.forecastUp, downColor: chartColors.forecastDown, borderVisible: false,
+						wickUpColor: chartColors.forecastWickUp, wickDownColor: chartColors.forecastWickDown,
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
@@ -972,7 +1024,7 @@
 						if (data.max_pain) {
 							maxPainLine = series.createPriceLine({
 								price: data.max_pain, color: chartColors.maxPain, lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Solid,
+								lineStyle: lineStyleFromName(chartLineStyles.maxPain),
 								axisLabelVisible: true, axisLabelColor: chartColors.maxPain,
 								title: 'Max Pain',
 							});
@@ -1021,7 +1073,9 @@
 						return { time: Math.floor(k.t / 1000) + tzOffset, open: parseFloat(k.o), high: parseFloat(k.h), low: parseFloat(k.l), close: parseFloat(k.c) };
 					}
 
-					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 365 };
+					// Daily Forecast spans only three days; a one-year initial window
+					// compressed all current curves/candles into a thin strip.
+					const TF_WINDOW = { '1h': 30, '4h': 15, '1d': 90 };
 					const BARS_PER_DAY = { '1h': 24, '4h': 6, '1d': 1 };
 					const INTERVAL_SECONDS = { '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
 
@@ -1138,7 +1192,6 @@
 						await refreshLiveBandDots();
 						await refreshZonesBoxes();
 						await updateForecastVisibility();
-						await refreshNextCandleForecast();
 					}
 
 					async function refreshDeltaZero() {
@@ -1296,40 +1349,50 @@
 						}
 					}
 
-					// Populated by refreshBands() from the same rows that feed
-					// smartLiqUpperSeries/smartLiqLowerSeries (the green/red
-					// Smart Liquidity term-structure lines), kept around so
-					// refreshLiveBandDots() can snap each hourly dominance dot
-					// onto that same line instead of its own real price — see
-					// interpolateOnLine() below. The lines' own data/rendering
-					// is untouched by this; these are read-only copies.
+					// Populated by refreshBands() from Smart Liquidity rows only.
+					// They are used to place optional hourly Smart Liquidity dominance dots.
 					let smartLiqUpperPoints = [];
 					let smartLiqLowerPoints = [];
+					let smartLiqTermState = [];
+					let smartLiqMarkerLayer = null;
+					let smartLiqMarkerObserversInstalled = false;
 
-					function clearBandsLines() {
+					function clearSmartLiqTermMarkers() {
+						smartLiqTermState = [];
+						if (smartLiqMarkerLayer) smartLiqMarkerLayer.replaceChildren();
+					}
+
+					function clearBandOnlyLines() {
+						bandUpperSeries.setData([]);
+						bandLowerSeries.setData([]);
+						bandUpperSeries.setMarkers([]);
+						bandLowerSeries.setMarkers([]);
+						gammaBandSeries.setData([]);
+					}
+
+					function clearSmartLiquidityLines() {
 						smartLiqUpperSeries.setData([]);
 						smartLiqLowerSeries.setData([]);
 						smartLiqUpperSeries.setMarkers([]);
 						smartLiqLowerSeries.setMarkers([]);
 						smartLiqUpperPoints = [];
 						smartLiqLowerPoints = [];
-						gammaBandSeries.setData([]);
+						clearSmartLiqTermMarkers();
 						liveBandUpperSeries.setData([]);
 						liveBandLowerSeries.setData([]);
 						liveBandUpperSeries.setMarkers([]);
 						liveBandLowerSeries.setMarkers([]);
 					}
 
+					function clearBandsLines() {
+						clearBandOnlyLines();
+						clearSmartLiquidityLines();
+					}
+
 					// Value of a sparse, time-sorted {time, value} line at an
 					// arbitrary time, linearly interpolated between its two
 					// bracketing points. Clamped to the first/last value when
-					// time falls outside the line's own range — in practice
-					// every hourly dominance dot's time is well before the
-					// Smart Liquidity line's own points (each positioned at a
-					// tracked expiry's future settlement time — see
-					// dankbit.bands), so this clamps every dot to the nearest
-					// (current) expiry's level rather than extrapolating.
-					// null with no points at all (line not loaded/absent yet).
+					// time falls outside the line's own range.
 					function interpolateOnLine(points, time) {
 						if (!points.length) return null;
 						if (time <= points[0].time) return points[0].value;
@@ -1344,165 +1407,559 @@
 						return points[points.length - 1].value;
 					}
 
+					function mergeSmartLiqPoints(historyPoints, termPoints) {
+						const merged = new Map();
+						(historyPoints || []).forEach(p => merged.set(p.time, { time: p.time, value: p.value }));
+						(termPoints || []).forEach(p => merged.set(p.time, { time: p.time, value: p.value }));
+						return Array.from(merged.values()).sort((a, b) => a.time - b.time);
+					}
+
+					function percentile(values, q) {
+						if (!values.length) return 0;
+						const sorted = values.slice().sort((a, b) => a - b);
+						const pos = (sorted.length - 1) * q;
+						const base = Math.floor(pos), rest = pos - base;
+						return sorted[base + 1] !== undefined
+							? sorted[base] + rest * (sorted[base + 1] - sorted[base])
+							: sorted[base];
+					}
+
+					function recentAtr() {
+						if (realCandles.length < 2) return 0;
+						const sample = realCandles.slice(-15);
+						const ranges = [];
+						for (let i = 1; i < sample.length; i++) {
+							const c = sample[i], prev = sample[i - 1];
+							ranges.push(Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close)));
+						}
+						return ranges.length ? ranges.reduce((a, b) => a + b, 0) / ranges.length : 0;
+					}
+
+					function adaptiveBandBuffers(rawUpper, rawLower) {
+						if (!realCandles.length || rawUpper.length < 2 || rawLower.length < 2) return { upper: 0, lower: 0 };
+						const newest = realCandles[realCandles.length - 1].time;
+						const cutoff = newest - 30 * 86400;
+						const firstTime = Math.max(rawUpper[0].time, rawLower[0].time);
+						const lastTime = Math.min(rawUpper[rawUpper.length - 1].time, rawLower[rawLower.length - 1].time);
+						const upperExcursions = [], lowerExcursions = [];
+						realCandles.forEach(c => {
+							if (c.time < cutoff || c.time < firstTime || c.time > lastTime) return;
+							const upper = interpolateOnLine(rawUpper, c.time);
+							const lower = interpolateOnLine(rawLower, c.time);
+							if (upper === null || lower === null || upper <= lower) return;
+							const halfWidth = (upper - lower) / 2;
+							// Only wick excursions that close back inside are reactions.
+							// Accepted closes outside are breakouts and never widen the band.
+							if (c.high > upper && c.close <= upper) upperExcursions.push(Math.min(c.high - upper, halfWidth));
+							if (c.low < lower && c.close >= lower) lowerExcursions.push(Math.min(lower - c.low, halfWidth));
+						});
+						return {
+							upper: upperExcursions.length >= 5 ? percentile(upperExcursions, 0.80) : 0,
+							lower: lowerExcursions.length >= 5 ? percentile(lowerExcursions, 0.80) : 0,
+						};
+					}
+
+					function densifyBandAnchors(anchors, field) {
+						if (anchors.length < 2) return anchors.map(p => ({ time: p.time, value: p[field] }));
+						const dense = [];
+						for (let i = 0; i < anchors.length - 1; i++) {
+							const a = anchors[i], b = anchors[i + 1];
+							const displayStep = INTERVAL_SECONDS[INTERVAL] || 3600;
+							const steps = Math.max(1, Math.round((b.time - a.time) / displayStep));
+							for (let step = 0; step < steps; step++) {
+								const x = step / steps;
+								const eased = x * x * (3 - 2 * x); // continuous slope at each expiry anchor
+								dense.push({ time: Math.round(a.time + step * (b.time - a.time) / steps), value: a[field] + eased * (b[field] - a[field]) });
+							}
+						}
+						const last = anchors[anchors.length - 1];
+						dense.push({ time: last.time, value: last[field] });
+						return dense;
+					}
+
+					function buildAdaptiveBands(rows) {
+						const anchors = rows.filter(r => Number(r.high_resistance) > 0 && Number(r.low_support) > 0)
+							.map(r => ({
+								time: Math.floor(r.t / 1000) + tzOffset,
+								rawUpper: Number(r.high_resistance), rawLower: Number(r.low_support),
+							})).sort((a, b) => a.time - b.time);
+						if (!bandAdaptiveSmoothing || !anchors.length) return {
+							upper: anchors.map(p => ({ time: p.time, value: p.rawUpper })),
+							lower: anchors.map(p => ({ time: p.time, value: p.rawLower })),
+						};
+
+						const timeframeState = bandSmoothingState[INTERVAL] || {};
+						bandSmoothingState[INTERVAL] = timeframeState;
+						const rawUpper = anchors.map(p => ({ time: p.time, value: p.rawUpper }));
+						const rawLower = anchors.map(p => ({ time: p.time, value: p.rawLower }));
+						const buffers = adaptiveBandBuffers(rawUpper, rawLower);
+						const atr = recentAtr();
+						const liveKeys = new Set();
+
+						anchors.forEach(p => {
+							const key = String(p.time - tzOffset);
+							liveKeys.add(key);
+							const rawCenter = (p.rawUpper + p.rawLower) / 2;
+							const rawHalfWidth = Math.max(0, (p.rawUpper - p.rawLower) / 2);
+							const prev = timeframeState[key];
+							let alphaCenter = 0.30, alphaWidth = 0.20;
+							if (prev && atr > 0) {
+								const activity = Math.abs(rawCenter - Number(prev.rawCenter || rawCenter)) / atr;
+								if (activity < 0.20) { alphaCenter = 0.20; alphaWidth = 0.12; }
+								else if (activity > 0.75) { alphaCenter = 0.45; alphaWidth = 0.30; }
+							}
+							let center = prev ? Number(prev.center) + alphaCenter * (rawCenter - Number(prev.center)) : rawCenter;
+							let halfWidth = prev ? Number(prev.halfWidth) + alphaWidth * (rawHalfWidth - Number(prev.halfWidth)) : rawHalfWidth;
+							let upperBuffer = prev ? Number(prev.upperBuffer || 0) + alphaWidth * (buffers.upper - Number(prev.upperBuffer || 0)) : buffers.upper;
+							let lowerBuffer = prev ? Number(prev.lowerBuffer || 0) + alphaWidth * (buffers.lower - Number(prev.lowerBuffer || 0)) : buffers.lower;
+							if (prev && atr > 0) {
+								const centerCap = 0.30 * atr, widthCap = 0.15 * atr;
+								center = Math.max(Number(prev.center) - centerCap, Math.min(Number(prev.center) + centerCap, center));
+								halfWidth = Math.max(Number(prev.halfWidth) - widthCap, Math.min(Number(prev.halfWidth) + widthCap, halfWidth));
+							}
+							p.upper = center + halfWidth + upperBuffer;
+							p.lower = center - halfWidth - lowerBuffer;
+							timeframeState[key] = { center, halfWidth, upperBuffer, lowerBuffer, rawCenter, updatedAt: Date.now() };
+						});
+						Object.keys(timeframeState).forEach(key => {
+							if (!liveKeys.has(key) && Date.now() - Number(timeframeState[key].updatedAt || 0) > 35 * 86400000) delete timeframeState[key];
+						});
+						try { localStorage.setItem(BAND_SMOOTHING_STATE_KEY, JSON.stringify(bandSmoothingState)); } catch (e) { /* storage quota: chart still works */ }
+						return { upper: densifyBandAnchors(anchors, 'upper'), lower: densifyBandAnchors(anchors, 'lower') };
+					}
+
 					async function refreshBands() {
-						if (MINIMAL_CHART || !SHOW_BANDS) return;
-						const data = await (await fetch(BANDS_URL)).json();
-						// Re-check: "Bands" may have been switched off while this fetch
-						// was in flight — onToggleBands() already cleared everything
-						// synchronously in that case, so just bail without redrawing.
-						if (!SHOW_BANDS) return;
+						if (MINIMAL_CHART || (!SHOW_BANDS && !SHOW_SMART_LIQUIDITY)) return;
+						const data = await (await fetch(withOptionFlowWindow(BANDS_URL))).json();
+						if (!SHOW_BANDS && !SHOW_SMART_LIQUIDITY) return;
 						const rows = data.bands || [];
-						gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
-						// 0.0 means absent (see dankbit.bands' smart_liq_upper_price/
-						// smart_liq_lower_price) — filtered out rather than plotted,
-						// same principle setBoxData()'s "0.0 = no crossing" already
-						// applies to the zones boxes, so a legless/degenerate point
-						// doesn't render as a spurious price-0 dip in the line.
-						const smartLiqUpperRows = rows.filter(r => r.smart_liq_upper_price);
-						const smartLiqLowerRows = rows.filter(r => r.smart_liq_lower_price);
-						smartLiqUpperPoints = smartLiqUpperRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_upper_price }));
-						smartLiqLowerPoints = smartLiqLowerRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.smart_liq_lower_price }));
-						smartLiqUpperSeries.setData(smartLiqUpperPoints);
-						smartLiqLowerSeries.setData(smartLiqLowerPoints);
 
-						// Per-point marker on each future expiry point: size is
-						// the dominance dot restored from before the Bands
-						// rework (a visible circle, size 1, wherever that
-						// side's own smart_liq_upper_strength/
-						// smart_liq_lower_strength beats its counterpart at
-						// that SAME expiry — dominance can flip from one
-						// tracked expiry to the next, so each point is
-						// compared only against itself; size 0/invisible
-						// otherwise), text is the +/- marker (whether the
-						// payoff at that High/Resistance or Low/Support
-						// intersection sits above or below the zero-payoff
-						// line) restored alongside it — both re-attached to
-						// the Smart Liquidity lines since High/Resistance/
-						// Low/Support no longer have their own line series on
-						// this chart. position:'inBar' keeps the dot centered
-						// on the line's own value so it reads as a normal
-						// point sitting on the line. Scoped to
-						// smartLiqUpperRows/smartLiqLowerRows (not the full
-						// rows list) since a marker's time must match an
-						// existing data point on that series.
-						smartLiqUpperSeries.setMarkers(smartLiqUpperRows.map(r => ({
-							time: Math.floor(r.t / 1000) + tzOffset,
-							position: 'inBar',
-							color: chartColors.highResistance,
-							shape: 'circle',
-							size: r.smart_liq_upper_strength > r.smart_liq_lower_strength ? 1 : 0,
-							text: r.high_resistance_positive ? '+' : '-',
-						})));
-						smartLiqLowerSeries.setMarkers(smartLiqLowerRows.map(r => ({
-							time: Math.floor(r.t / 1000) + tzOffset,
-							position: 'inBar',
-							color: chartColors.lowSupport,
-							shape: 'circle',
-							size: r.smart_liq_lower_strength > r.smart_liq_upper_strength ? 1 : 0,
-							text: r.low_support_positive ? '+' : '-',
-						})));
+						if (SHOW_BANDS) {
+							gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
+							const upperRows = rows.filter(r => r.high_resistance);
+							const lowerRows = rows.filter(r => r.low_support);
+							const adaptiveBands = buildAdaptiveBands(rows);
+							bandUpperSeries.setData(adaptiveBands.upper);
+							bandLowerSeries.setData(adaptiveBands.lower);
+							bandUpperSeries.setMarkers(upperRows.map(r => ({
+								time: Math.floor(r.t / 1000) + tzOffset,
+								position: 'inBar',
+								color: chartColors.bandUpper,
+								shape: 'circle',
+								size: 1,
+								text: r.high_resistance_positive ? '+' : '-',
+							})));
+							bandLowerSeries.setMarkers(lowerRows.map(r => ({
+								time: Math.floor(r.t / 1000) + tzOffset,
+								position: 'inBar',
+								color: chartColors.bandLower,
+								shape: 'circle',
+								size: 1,
+								text: r.low_support_positive ? '+' : '-',
+							})));
+						} else {
+							clearBandOnlyLines();
+						}
+
+						// Smart Liquidity is sourced exclusively from dankbit.live.band's
+						// own hourly history (see refreshLiveBandDots) — dankbit.bands'
+						// per-instrument term structure used to be mixed in here as a
+						// second, independently-computed data source for the same lines,
+						// which is what was producing two visibly different dotted routes.
+						// This function no longer touches Smart Liquidity data at all; it
+						// only clears the lines when the checkbox is off or while in the
+						// 2h/4h option-flow preview (refreshLiveBandDots has no equivalent
+						// for that window, so there is nothing to draw there either).
+						if (!SHOW_SMART_LIQUIDITY || selectedOptionFlowHours() !== null) {
+							clearSmartLiquidityLines();
+						}
 					}
 
-					// Live Band rows are computed hourly, but a dot must land on
-					// whatever candle width is currently selected — collapses
-					// multiple hourly rows into one per bucket of the CURRENT
-					// timeframe (the later row wins on a collision), same
-					// technique the old /z/<asset> page's own bucketTime() used.
-					function liveBandBucketTime(epochMs) {
-						const rawSeconds = Math.floor(epochMs / 1000);
+					function median(values) {
+						if (!values.length) return null;
+						const sorted = values.slice().sort((a, b) => a - b);
+						const mid = Math.floor(sorted.length / 2);
+						return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+					}
+
+					function candleCloseAt(time) {
+						if (!realCandles.length) return null;
+						let lo = 0, hi = realCandles.length - 1, found = null;
+						while (lo <= hi) {
+							const mid = Math.floor((lo + hi) / 2);
+							if (realCandles[mid].time <= time) { found = realCandles[mid]; lo = mid + 1; }
+							else hi = mid - 1;
+						}
+						return found ? Number(found.close) : null;
+					}
+
+					function smartLiqDisplayBucket(time) {
 						const bucket = INTERVAL_SECONDS[INTERVAL] || 3600;
-						return Math.floor(rawSeconds / bucket) * bucket + tzOffset;
+						const utcTime = time - tzOffset;
+						return Math.floor(utcTime / bucket) * bucket + tzOffset;
 					}
 
-					// Part of the "Bands" checkbox (SHOW_BANDS) — one dot per
-					// hour/candle bucket for whichever side of
-					// dankbit.live.band's smart_liq_upper/smart_liq_lower was
-					// dominant that hour, via smart_liq_upper_strength/
-					// smart_liq_lower_strength (not the raw prices — upper is,
-					// by construction, always a higher price than lower, so
-					// comparing prices would always pick "upper"). Read-only —
-					// never triggers a new dankbit.live.band row; only that
-					// model's own hourly cron does.
-					async function refreshLiveBandDots() {
-						if (MINIMAL_CHART || !SHOW_BANDS) return;
-						const data = await (await fetch(LIVE_BAND_URL)).json();
-						if (!SHOW_BANDS) return;
-						const rawPoints = data.points || [];
-						const byBucket = new Map();
-						rawPoints.forEach(p => byBucket.set(liveBandBucketTime(p.t), p));
-						const points = Array.from(byBucket.keys())
-							.sort((a, b) => a - b)
-							.map(time => Object.assign({ time }, byBucket.get(time)));
-
-						const upperDominant = [];
-						const lowerDominant = [];
-						points.forEach(p => {
-							const hasUpper = !!p.smart_liq_upper;
-							const hasLower = !!p.smart_liq_lower;
-							if (!hasUpper && !hasLower) return;
-							let upperWins = false, lowerWins = false;
-							if (hasUpper && hasLower) {
-								if (p.smart_liq_upper_strength > p.smart_liq_lower_strength) upperWins = true;
-								else if (p.smart_liq_lower_strength > p.smart_liq_upper_strength) lowerWins = true;
-							} else if (hasUpper) {
-								upperWins = true;
-							} else {
-								lowerWins = true;
+					// One route only: keep the accepted hourly observations on their
+					// native path and connect the latest observation directly to E1,
+					// then E1→E2→E3. No eased/ATR-smoothed bridge is generated.
+					// Missing historical buckets break the historical line, while
+					// expiry points are deliberately connected across their wider gaps.
+					function directSmartLiqPath(history, termPoints) {
+						const result = [];
+						const stepSeconds = INTERVAL_SECONDS[INTERVAL] || 3600;
+						let previousTime = null;
+						(history || []).slice().sort((a, b) => a.time - b.time).forEach(p => {
+							if (previousTime !== null && p.time - previousTime > stepSeconds * 1.5) {
+								result.push({ time: previousTime + stepSeconds, isGap: true });
 							}
-							// Plotted position is snapped onto the green/red Smart
-							// Liquidity line itself (via interpolateOnLine()) rather
-							// than this dot's own real smart_liq_upper/lower price —
-							// a display-only change for a cleaner chart; the
-							// dominance decision above (upperWins/lowerWins) and
-							// every other calculation are untouched. Skipped if
-							// that line has no points loaded at all. realPrice (the
-							// actual smart_liq_upper/lower value, not the on-line
-							// plotted position) is kept alongside so the "current"
-							// point below can still label its true price.
-							if (upperWins) {
-								const v = interpolateOnLine(smartLiqUpperPoints, p.time);
-								if (v !== null) upperDominant.push({ time: p.time, value: v, realPrice: p.smart_liq_upper });
-							}
-							if (lowerWins) {
-								const v = interpolateOnLine(smartLiqLowerPoints, p.time);
-								if (v !== null) lowerDominant.push({ time: p.time, value: v, realPrice: p.smart_liq_lower });
+							result.push({ time: p.time, value: Number(p.value), isTerm: false });
+							previousTime = p.time;
+						});
+						const cutoff = previousTime === null ? -Infinity : previousTime;
+						(termPoints || []).slice().sort((a, b) => a.time - b.time).forEach(p => {
+							if (p.time > cutoff && Number.isFinite(Number(p.value))) {
+								result.push({ time: p.time, value: Number(p.value), isTerm: true });
 							}
 						});
-						liveBandUpperSeries.setData(upperDominant.map(p => ({ time: p.time, value: p.value })));
-						liveBandLowerSeries.setData(lowerDominant.map(p => ({ time: p.time, value: p.value })));
+						return result;
+					}
 
-						// Only the single most-recent hourly dot (today's/now's
-						// dominant side, whichever bucket is latest across both
-						// series) gets a text label of its real Smart Liquidity
-						// price — every older hourly dot keeps its plain circle
-						// with no text, and the green/red line's own (future)
-						// term-structure points are untouched entirely. Drawn via
-						// the marker's own "text" (on the chart body, next to the
-						// point), never the axis label, so it can't land on the
-						// price panel.
-						const latestUpper = upperDominant.length ? upperDominant[upperDominant.length - 1] : null;
-						const latestLower = lowerDominant.length ? lowerDominant[lowerDominant.length - 1] : null;
-						let currentSide = null;
-						if (latestUpper && latestLower) currentSide = latestUpper.time >= latestLower.time ? 'upper' : 'lower';
-						else if (latestUpper) currentSide = 'upper';
-						else if (latestLower) currentSide = 'lower';
+					// Marks the dominant side directly on the single Smart Liquidity line
+					// via setMarkers() rather than a second overlapping line series.
+					// A prior version drew a thicker line only on the dominant side's own
+					// points, leaving the rest as blank "whitespace" points on that same
+					// series — relying on Lightweight Charts breaking the line at those
+					// blanks. It does not: confirmed empirically that a whitespace point
+					// (however many in a row) does not stop the library from drawing a
+					// straight connector to the next real value, so whenever dominance
+					// flipped more than once, both the base and "dominant" series ended up
+					// drawing false diagonals connecting non-adjacent points — read as two
+					// lines. Markers don't have that failure mode: they're independent of
+					// how the line itself connects. size 2 on the dominant side's own
+					// points, size 0 (invisible) elsewhere.
+					function smartLiqDominanceMarkers(path, wantedState, dominanceAt) {
+						const color = wantedState === 'upper' ? chartColors.smartLiqUpper : chartColors.smartLiqLower;
+						const markers = [];
+						(path || []).forEach(p => {
+							if (p.isGap || dominanceAt(p.time) !== wantedState) return;
+							markers.push({ time: p.time, position: 'inBar', color, shape: 'circle', size: 0.5 });
+						});
+						return markers;
+					}
 
-						function liveBandMarker(p, color, isCurrent) {
-							const marker = { time: p.time, position: 'inBar', color, shape: 'circle', size: 1 };
-							// Lightweight Charts has no horizontal marker-text
-							// offset — text is centered on the marker's own time
-							// position — so leading spaces are used to push the
-							// (still-centered) text visually off to the right of
-							// the point instead of straddling it.
-							if (isCurrent) marker.text = '      ' + String(Math.round(p.realPrice));
-							return marker;
+					// Clean Smart Liquidity envelope: native hourly scans determine
+					// dominance, while geometry is validated against price, resampled to
+					// the selected timeframe, smoothed, and only then bridged to future
+					// expiry points. Historical and term-structure data are never directly
+					// concatenated again.
+					// Retained temporarily as a named compatibility reference for old
+					// deployments; never called. The active renderer below is the only
+					// function bound to refreshLiveBandDots.
+					async function refreshLiveBandDotsLegacyDisabled() {
+						if (MINIMAL_CHART || !SHOW_SMART_LIQUIDITY) return;
+						if (selectedOptionFlowHours() !== null) {
+							liveBandUpperSeries.setData([]); liveBandLowerSeries.setData([]);
+							liveBandUpperSeries.setMarkers([]); liveBandLowerSeries.setMarkers([]);
+							return;
 						}
-						liveBandUpperSeries.setMarkers(
-							upperDominant.map(p => liveBandMarker(p, chartColors.highResistance, currentSide === 'upper' && p.time === latestUpper.time))
-						);
-						liveBandLowerSeries.setMarkers(
-							lowerDominant.map(p => liveBandMarker(p, chartColors.lowSupport, currentSide === 'lower' && p.time === latestLower.time))
-						);
+						const data = await (await fetch(LIVE_BAND_URL)).json();
+						if (!SHOW_SMART_LIQUIDITY) return;
+						const allLivePoints = data.points || [];
+						const atr = recentAtr();
+						const earliest = realCandles.length ? realCandles[0].time : -Infinity;
+						const byHour = new Map();
+						allLivePoints.forEach(p => {
+							// The rolling historical envelope follows E1. E2/E3 have
+							// their own hourly histories, but their latest confirmed readings
+							// belong to the future 24–48h/48–72h sections below.
+							if (Number(p.expiry_index || 0) !== 0) return;
+							const time = Math.floor(Math.floor(p.t / 1000) / 3600) * 3600 + tzOffset;
+							if (time >= earliest) byHour.set(time, Object.assign({ time }, p));
+						});
+						const hourly = Array.from(byHour.values()).sort((a, b) => a.time - b.time);
+
+						let confirmed = 'neutral', lastDominant = null;
+						let candidate = null, candidateCount = 0;
+						const accepted = [];
+						hourly.forEach(p => {
+							const price = candleCloseAt(p.time);
+							const rawUpper = Number(p.smart_liq_upper || 0), rawLower = Number(p.smart_liq_lower || 0);
+							const maxDistance = atr > 0 ? 4 * atr : Infinity;
+							const upperValid = price && rawUpper > price && rawUpper - price <= maxDistance;
+							const lowerValid = price && rawLower < price && price - rawLower <= maxDistance;
+							if (!upperValid || !lowerValid || rawUpper <= rawLower) return;
+
+							const upperStrength = Math.max(0, Number(p.smart_liq_upper_strength || 0));
+							const lowerStrength = Math.max(0, Number(p.smart_liq_lower_strength || 0));
+							const total = upperStrength + lowerStrength;
+							const upperShare = total > 0 ? upperStrength / total : 0.5;
+							// The raw share sits within a few points of 50/50 almost every
+							// hour, so flipping "confirmed" on a bare >50% crossing thickened
+							// and thinned the line dozens of times across the visible window
+							// instead of holding clean, meaningful stretches. A transfer now
+							// needs two consecutive hourly scans clearing a 60/40 band before
+							// it's confirmed — same debounce a since-removed earlier draft of
+							// this renderer already used for the same reason.
+							const target = upperShare >= 0.60 ? 'upper' : (upperShare <= 0.40 ? 'lower' : 'neutral');
+							let transfer = null;
+							if (target === 'neutral' || target === confirmed) {
+								candidate = null;
+								candidateCount = 0;
+							} else {
+								candidateCount = candidate === target ? candidateCount + 1 : 1;
+								candidate = target;
+								if (candidateCount >= 2) {
+									if (lastDominant && lastDominant !== target) transfer = lastDominant === 'upper' ? 'U→L' : 'L→U';
+									confirmed = target;
+									lastDominant = target;
+									candidate = null;
+									candidateCount = 0;
+								}
+							}
+							accepted.push({ time: p.time, upper: rawUpper, lower: rawLower, price, upperShare, lowerShare: 1 - upperShare, total, state: confirmed, transfer });
+						});
+
+						const bucketMap = new Map();
+						accepted.forEach(p => {
+							const time = smartLiqDisplayBucket(p.time);
+							if (!bucketMap.has(time)) bucketMap.set(time, []);
+							bucketMap.get(time).push(p);
+						});
+						const buckets = Array.from(bucketMap.keys()).sort((a, b) => a - b).map(time => {
+							const group = bucketMap.get(time), last = group[group.length - 1];
+							return {
+								time, upper: median(group.map(p => p.upper)), lower: median(group.map(p => p.lower)),
+								price: median(group.map(p => p.price)), state: last.state,
+								upperShare: group.reduce((s, p) => s + p.upperShare, 0) / group.length,
+								lowerShare: group.reduce((s, p) => s + p.lowerShare, 0) / group.length,
+								total: group.reduce((s, p) => s + p.total, 0),
+								transfer: (group.filter(p => p.transfer).slice(-1)[0] || {}).transfer || null,
+							};
+						});
+
+						// No geometric smoothing: display the validated median reading of
+						// each chart bucket directly. This makes the base and thickness
+						// layers share one unambiguous route.
+						const upperHistory = buckets.map(p => ({ time: p.time, value: p.upper }));
+						const lowerHistory = buckets.map(p => ({ time: p.time, value: p.lower }));
+
+						const liveByExpiry = new Map();
+						allLivePoints.forEach(p => {
+							const idx = Number(p.expiry_index || 0);
+							if (!liveByExpiry.has(idx)) liveByExpiry.set(idx, []);
+							liveByExpiry.get(idx).push(p);
+						});
+						const liveTerms = [];
+						for (let idx = 0; idx < 3; idx++) {
+							const history = (liveByExpiry.get(idx) || []).slice().sort((a, b) => a.t - b.t);
+							const latestRow = history.length ? history[history.length - 1] : null;
+							if (!latestRow || !latestRow.expiration) continue;
+							let state = 'neutral';
+							history.forEach(row => {
+								const u = Math.max(0, Number(row.smart_liq_upper_strength || 0));
+								const l = Math.max(0, Number(row.smart_liq_lower_strength || 0));
+								const share = u + l > 0 ? u / (u + l) : 0.5;
+								state = share > 0.50 ? 'upper' : (share < 0.50 ? 'lower' : 'neutral');
+							});
+							liveTerms.push({
+								idx, time: Math.floor(latestRow.expiration / 1000) + tzOffset,
+								upper: Number(latestRow.smart_liq_upper || 0), lower: Number(latestRow.smart_liq_lower || 0), state,
+							});
+						}
+						liveTerms.sort((a, b) => a.time - b.time);
+						const liveUpperTerms = liveTerms.filter(p => p.upper > 0).map(p => ({ time: p.time, value: p.upper }));
+						const liveLowerTerms = liveTerms.filter(p => p.lower > 0).map(p => ({ time: p.time, value: p.lower }));
+						// dankbit.bands' own per-instrument term structure is a separate,
+						// independently-computed data source and is no longer mixed in
+						// here — the future E1/E2/E3 bridge is built solely from this
+						// same dankbit.live.band response's own per-expiry rows above.
+						const upperPath = directSmartLiqPath(upperHistory, liveUpperTerms);
+						const lowerPath = directSmartLiqPath(lowerHistory, liveLowerTerms);
+
+						const historicalState = new Map(buckets.map(p => [p.time, p.state]));
+						const lastHistoricalTime = buckets.length ? buckets[buckets.length - 1].time : -Infinity;
+						function dominanceAt(time) {
+							if (time <= lastHistoricalTime) return historicalState.get(time) || 'neutral';
+							for (const term of liveTerms) if (time <= term.time) return term.state;
+							return liveTerms.length ? liveTerms[liveTerms.length - 1].state : 'neutral';
+						}
+						// One single dotted line per side, always fully connected — no more
+						// second "dominant" series relying on whitespace breaks (see
+						// smartLiqDominanceMarkers). Dominance is a marker overlay on this
+						// same line instead.
+						smartLiqUpperSeries.setData(upperPath.map(p => p.isGap ? { time: p.time } : { time: p.time, value: p.value }));
+						smartLiqLowerSeries.setData(lowerPath.map(p => p.isGap ? { time: p.time } : { time: p.time, value: p.value }));
+						smartLiqUpperSeries.setMarkers(smartLiqDominanceMarkers(upperPath, 'upper', dominanceAt));
+						smartLiqLowerSeries.setMarkers(smartLiqDominanceMarkers(lowerPath, 'lower', dominanceAt));
+
+						// The dominance markers above already communicate every U↔L
+						// transfer. Keep only the latest percentage label so old transfer
+						// text can't clutter the line.
+						const upperData = [], lowerData = [], upperMarkers = [], lowerMarkers = [];
+						const latest = buckets.length ? buckets[buckets.length - 1] : null;
+						if (latest) {
+							const onUpper = latest.state !== 'lower', value = onUpper ? latest.upper : latest.lower;
+							const marker = { time: latest.time, position: 'inBar', shape: 'circle', size: 1, color: onUpper ? chartColors.smartLiqUpper : chartColors.smartLiqLower, text: `U ${Math.round(latest.upperShare * 100)}% | L ${Math.round(latest.lowerShare * 100)}%` };
+							if (onUpper) { upperData.push({ time: latest.time, value }); upperMarkers.push(marker); }
+							else { lowerData.push({ time: latest.time, value }); lowerMarkers.push(marker); }
+						}
+						liveBandUpperSeries.setData(upperData); liveBandLowerSeries.setData(lowerData);
+						liveBandUpperSeries.setMarkers(upperMarkers); liveBandLowerSeries.setMarkers(lowerMarkers);
+					}
+
+					// Final Smart Liquidity renderer. The two dashed envelope lines keep
+					// one fixed user-selected color/opacity. Hourly scans control only the
+					// three moving E1/E2/E3 circles; they never recolor a line or add
+					// hourly price points to its geometry.
+
+					function ensureSmartLiqMarkerLayer() {
+						if (!smartLiqMarkerLayer) {
+							const host = document.getElementById('chart-container');
+							if (!host) return null;
+							if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+							smartLiqMarkerLayer = document.createElement('div');
+							Object.assign(smartLiqMarkerLayer.style, {
+								position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '8', overflow: 'hidden',
+							});
+							host.appendChild(smartLiqMarkerLayer);
+						}
+						if (!smartLiqMarkerObserversInstalled) {
+							smartLiqMarkerObserversInstalled = true;
+							chart.timeScale().subscribeVisibleLogicalRangeChange(() => positionSmartLiqTermMarkers());
+							window.addEventListener('resize', () => positionSmartLiqTermMarkers());
+						}
+						return smartLiqMarkerLayer;
+					}
+
+					function positionSmartLiqTermMarkers() {
+						const layer = ensureSmartLiqMarkerLayer();
+						if (!layer || !SHOW_SMART_LIQUIDITY || smartLiqTermState.length !== 3) {
+							if (layer) layer.replaceChildren();
+							return;
+						}
+						layer.replaceChildren();
+						// All three circles advance by one twenty-fourth of their own
+						// interval at every UTC hourly scan. Their x position is a DOM
+						// overlay interpolated between existing expiry coordinates, so it
+						// never inserts off-grid timestamps or gaps into 4H/1D candles.
+						const nowSeconds = Date.now() / 1000;
+						const secondsIntoUtcDay = ((nowSeconds % 86400) + 86400) % 86400;
+						// Step once per completed UTC hourly scan, rather than drifting
+						// continuously between scans when the chart is resized or panned.
+						const utcDayProgress = Math.floor(secondsIntoUtcDay / 3600) / 24;
+						const defaultSpan = smartLiqTermState[1].time - smartLiqTermState[0].time || 86400;
+						smartLiqTermState.forEach((term, idx) => {
+							const start = idx === 0
+								? Object.assign({}, term, { time: term.time - defaultSpan })
+								: smartLiqTermState[idx - 1];
+							const x0 = chart.timeScale().timeToCoordinate(start.time);
+							const x1 = chart.timeScale().timeToCoordinate(term.time);
+							if (x0 === null || x1 === null) return;
+							const state = term.state;
+							const upperValue = start.upper + utcDayProgress * (term.upper - start.upper);
+							const lowerValue = start.lower + utcDayProgress * (term.lower - start.lower);
+							const value = state === 'upper' ? upperValue : (state === 'lower' ? lowerValue : (upperValue + lowerValue) / 2);
+							const priceSeries = state === 'lower' ? smartLiqLowerSeries : smartLiqUpperSeries;
+							const y = priceSeries.priceToCoordinate(value);
+							if (y === null) return;
+							const x = x0 + utcDayProgress * (x1 - x0);
+							const color = state === 'upper' ? chartColors.smartLiqUpper : (state === 'lower' ? chartColors.smartLiqLower : '#777777');
+							const marker = document.createElement('div');
+							Object.assign(marker.style, {
+								position: 'absolute', left: (x - 5) + 'px', top: (y - 5) + 'px',
+								width: '10px', height: '10px', borderRadius: '50%', background: color,
+								boxShadow: '0 0 0 1px rgba(255,255,255,0.9)', pointerEvents: 'auto',
+							});
+							const label = document.createElement('span');
+							label.textContent = 'E' + (idx + 1);
+							Object.assign(label.style, {
+								position: 'absolute', left: '-3px', top: '-18px', color,
+								font: '600 11px monospace', whiteSpace: 'nowrap',
+							});
+							marker.title = `E${idx + 1} · ${state === 'neutral' ? '50/50' : state + ' dominant'} · U ${Math.round(term.upperShare * 100)}% / L ${Math.round(term.lowerShare * 100)}% · scan ${term.scanTimeText}`;
+							marker.appendChild(label);
+							layer.appendChild(marker);
+						});
+					}
+
+					async function refreshLiveBandDots() {
+						if (MINIMAL_CHART || !SHOW_SMART_LIQUIDITY) {
+							clearSmartLiquidityLines();
+							return;
+						}
+						const previewHours = selectedOptionFlowHours();
+						// The standard view reads the hourly Smart-Liquidity log. A 2h/4h
+						// preview instead reads the fresh term structure already returned by
+						// /api/bands?hours=N. Both sources are normalized into the same three
+						// E1/E2/E3 row shape below; changing the window never hides the layer.
+						const data = previewHours === null
+							? await (await fetch(LIVE_BAND_URL)).json()
+							: await (await fetch(withOptionFlowWindow(BANDS_URL))).json();
+						if (!SHOW_SMART_LIQUIDITY) return;
+						const byExpiry = new Map();
+						const sourceRows = previewHours === null
+							? (data.points || [])
+							: (data.bands || []).slice(-3).map((row, idx) => ({
+								expiry_index: idx,
+								t: Date.parse(data.generated_at || new Date().toISOString()),
+								expiration: Number(row.t),
+								smart_liq_upper: row.smart_liq_upper_price,
+								smart_liq_lower: row.smart_liq_lower_price,
+								smart_liq_upper_strength: row.smart_liq_upper_strength,
+								smart_liq_lower_strength: row.smart_liq_lower_strength,
+							}));
+						sourceRows.forEach(row => {
+							const idx = Number(row.expiry_index);
+							if (!Number.isInteger(idx) || idx < 0 || idx > 2 || !row.expiration) return;
+							if (!byExpiry.has(idx)) byExpiry.set(idx, []);
+							byExpiry.get(idx).push(row);
+						});
+
+						const gridSeconds = INTERVAL_SECONDS[INTERVAL] || 3600;
+						const terms = [];
+						for (let idx = 0; idx < 3; idx++) {
+							const history = (byExpiry.get(idx) || []).slice().sort((a, b) => Number(a.t) - Number(b.t));
+							const row = history.length ? history[history.length - 1] : null;
+							if (!row) continue;
+							const upper = Number(row.smart_liq_upper || 0);
+							const lower = Number(row.smart_liq_lower || 0);
+							if (!(upper > lower && lower > 0)) continue;
+							const u = Math.max(0, Number(row.smart_liq_upper_strength || 0));
+							const l = Math.max(0, Number(row.smart_liq_lower_strength || 0));
+							const upperShare = u + l > 0 ? u / (u + l) : 0.5;
+							const rawTime = Math.floor(Number(row.expiration) / 1000) + tzOffset;
+							const utcTime = rawTime - tzOffset;
+							terms.push({
+								idx, time: Math.floor(utcTime / gridSeconds) * gridSeconds + tzOffset,
+								upper, lower, upperShare, lowerShare: 1 - upperShare,
+								state: upperShare > 0.5 ? 'upper' : (upperShare < 0.5 ? 'lower' : 'neutral'),
+								scanTimeText: new Date(Number(row.t)).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+									+ (previewHours === null ? '' : ` · ${previewHours}h window`),
+							});
+						}
+						terms.sort((a, b) => a.idx - b.idx);
+						if (terms.length !== 3) {
+							clearSmartLiquidityLines();
+							return;
+						}
+
+						const firstSpan = terms[1].time - terms[0].time || 86400;
+						const start = {
+							time: terms[0].time - firstSpan,
+							upper: terms[0].upper, lower: terms[0].lower,
+							upperShare: terms[0].upperShare, lowerShare: terms[0].lowerShare,
+						};
+						const lineTerms = [start].concat(terms);
+						smartLiqUpperPoints = lineTerms.map(p => ({ time: p.time, value: p.upper }));
+						smartLiqLowerPoints = lineTerms.map(p => ({ time: p.time, value: p.lower }));
+						smartLiqUpperSeries.setData(smartLiqUpperPoints);
+						smartLiqLowerSeries.setData(smartLiqLowerPoints);
+						smartLiqUpperSeries.setMarkers([]);
+						smartLiqLowerSeries.setMarkers([]);
+						liveBandUpperSeries.setData([]); liveBandLowerSeries.setData([]);
+						liveBandUpperSeries.setMarkers([]); liveBandLowerSeries.setMarkers([]);
+						smartLiqTermState = terms;
+						requestAnimationFrame(() => positionSmartLiqTermMarkers());
 					}
 
 					function setBoxData(boxSeries, bottomLineSeries, top, bottom, fromTime, toTime) {
@@ -1545,13 +2002,11 @@
 						if (MINIMAL_CHART || !SHOW_ZONES_BOXES) return;
 						// Live lookup — computed fresh by the server on every call (see
 						// dankbit.bands.get_box), not read from stored history.
-						// Persisted (feeding the Bands lines' history) unless
-						// ZONES_BOX_WINDOW_MODE is 'hours', in which case the ?hours=
-						// override makes the server compute display-only instead — see
+						// The midnight path serves the persisted confirmed zone. Any
+						// trailing selection adds ?hours= and makes the server compute a
+						// display-only live preview instead — see
 						// ZONES_BOX_WINDOW_MODE above.
-						const url = ZONES_BOX_WINDOW_MODE === 'hours'
-							? ZB_URL + '?hours=' + ZONES_BOX_WINDOW_HOURS
-							: ZB_URL;
+						const url = withOptionFlowWindow(ZB_URL);
 						const data = await (await fetch(url)).json();
 						// Re-check: the "Zones" checkbox may have been switched off
 						// while this fetch was in flight (e.g. a periodic poll or a
@@ -1564,8 +2019,18 @@
 							clearZonesBoxes();
 							return;
 						}
-						const fromTime = Math.floor(Date.now() / 1000) + tzOffset - 10 * 86400;
-						const toTime   = Math.floor(data.expiration / 1000) + tzOffset;
+						// Every visible series must use the selected candle grid. An
+						// option expiration commonly lands at 08:00 UTC; placing that raw
+						// timestamp on a 1D chart inserts an extra logical slot between two
+						// consecutive daily forecast candles. Bucket both zone endpoints
+						// onto the same 1H/4H/1D grid as the market and forecast series.
+						const gridSeconds = INTERVAL_SECONDS[INTERVAL] || 3600;
+						const bucketToChartGrid = time => {
+							const utcTime = time - tzOffset;
+							return Math.floor(utcTime / gridSeconds) * gridSeconds + tzOffset;
+						};
+						const fromTime = bucketToChartGrid(Math.floor(Date.now() / 1000) + tzOffset - 10 * 86400);
+						const toTime   = bucketToChartGrid(Math.floor(data.expiration / 1000) + tzOffset);
 
 						const aboveTop    = Math.max(data.short_zero_above_price, data.long_zero_above_price);
 						const aboveBottom = Math.min(data.short_zero_above_price, data.long_zero_above_price);
@@ -1622,30 +2087,36 @@
 					function onToggleBands() {
 						SHOW_BANDS = document.getElementById('bands-toggle').checked;
 						if (SHOW_BANDS) {
-							// Sequenced (not fired in parallel) — refreshLiveBandDots()
-							// now reads smartLiqUpperPoints/smartLiqLowerPoints, which
-							// only refreshBands() populates.
+							refreshBands();
+						} else {
+							clearBandOnlyLines();
+						}
+					}
+
+					function onToggleSmartLiquidity() {
+						SHOW_SMART_LIQUIDITY = document.getElementById('smart-liquidity-toggle').checked;
+						if (SHOW_SMART_LIQUIDITY) {
 							refreshBands().then(refreshLiveBandDots);
 						} else {
-							clearBandsLines();
+							clearSmartLiquidityLines();
 						}
 					}
 
 					function clearForecastLines() {
 						forecastSeries.setData([]);
+						forecastSeries.setMarkers([]);
+						const label = document.getElementById('forecast-status-label');
+						if (label) label.textContent = '';
 					}
 
-					// The Thales Forecast candles are 4h resolution and only
-					// make visual sense lined up against real 4h-spaced
-					// candles, so both the checkbox and the series itself
-					// are restricted to the 4h timeframe — shown/hidden by
-					// updateForecastVisibility() on every timeframe switch.
+					// Unified Forecast follows the selected real-candle grid:
+					// 1H (up to 72), 4H (up to 18), or 1D (up to 3).
 					// Called from setTf()/init() on both Delta and Gamma
 					// Chart (both share setTf()), but the checkbox itself
 					// only exists on the Delta Chart — guarded with a null
 					// check rather than assuming the element is present.
 					function updateForecastVisibility() {
-						const visible = INTERVAL === '4h';
+						const visible = ['1h', '4h', '1d'].includes(INTERVAL);
 						const wrap = document.getElementById('forecast-toggle-wrap');
 						if (wrap) wrap.style.display = visible ? '' : 'none';
 						refreshForecast();
@@ -1654,8 +2125,8 @@
 					// "Thales Forecast" checkbox (Delta Chart only) —
 					// fetches /api/forecast/<asset> and draws the forecast
 					// candles (see FORECAST_URL, forecastSeries above). Stops
-					// fetching entirely while off, or while not on the 4h
-					// timeframe (see updateForecastVisibility above), same
+					// fetching entirely while off. On a timeframe switch it
+					// requests the matching 1H/4H/1D engine and candle count,
 					// server-load-reducing pattern as every other optional
 					// indicator here. Display time is NOT taken from the
 					// server's `t` (an arbitrary now-relative timestamp) — it's
@@ -1678,27 +2149,83 @@
 					// "now"), which would silently break if Deribit or the
 					// 5s updateLatestCandle() poll ever returned a stale
 					// last-closed candle instead. This guarantees the first
-					// forecast candle is always the next 4h candle after
+					// forecast candle is always the next selected-timeframe candle after
 					// now, on the correct grid, regardless of which one
 					// realCandles[last] actually is.
 					async function refreshForecast() {
-						if (!SHOW_FORECAST || INTERVAL !== '4h' || !realCandles.length) { clearForecastLines(); return; }
-						const data = await (await fetch(FORECAST_URL)).json();
+						if (!SHOW_FORECAST || !['1h', '4h', '1d'].includes(INTERVAL) || !realCandles.length) { clearForecastLines(); return; }
+						const requestedTf = INTERVAL;
+						const requestedCount = forecastCandleCounts[requestedTf];
+						const data = await (await fetch(withOptionFlowWindow(
+							FORECAST_URL + '?timeframe=' + requestedTf + '&count=' + requestedCount
+						))).json();
 						// Re-check: "Thales Forecast" may have been switched off (or the
 						// timeframe changed away from 4h) while this fetch was in
 						// flight — onToggleForecast() already cleared the series
 						// synchronously in that case, so just bail without redrawing.
-						if (!SHOW_FORECAST || INTERVAL !== '4h') return;
-						const points = data.points || [];
+						if (!SHOW_FORECAST || INTERVAL !== requestedTf) return;
+						// The selected timeframe owns the hard display cap. In
+						// particular, Daily can never draw more than the three
+						// tracked expiries (E1/E2/E3), even if a stale server or
+						// browser response happens to contain additional points.
+						const points = (data.points || []).slice(0, requestedCount);
 						if (!points.length) { clearForecastLines(); return; }
 						const intervalSec = INTERVAL_SECONDS[INTERVAL];
-						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
-						let firstTime = realCandles[realCandles.length - 1].time;
-						while (firstTime <= nowShifted) firstTime += intervalSec;
-						forecastSeries.setData(points.map((p, i) => ({
-							time: firstTime + i * intervalSec,
-							open: p.open, high: p.high, low: p.low, close: p.close,
+						// Always start on the candle immediately following the last
+						// market candle supplied by the API. The previous while-loop could
+						// skip a whole daily slot when the current forming 1D candle was
+						// temporarily absent, leaving a visible empty candle.
+						const firstTime = realCandles[realCandles.length - 1].time + intervalSec;
+						// Re-anchor the forecast geometry to the live chart. The
+						// first forecast Open is exactly the latest real Close and
+						// every later Open is exactly the preceding forecast Close.
+						// Greek Flow still determines body direction/size and wick
+						// geometry; only the absolute vertical anchor is translated.
+						let chainedOpen = Number(realCandles[realCandles.length - 1].close);
+						const renderedForecast = points.map((p, i) => {
+							const rawOpen = Number(p.open);
+							const rawClose = Number(p.close);
+							const rawHigh = Number(p.high);
+							const rawLow = Number(p.low);
+							const body = rawClose - rawOpen;
+							const upperWick = Math.max(0, rawHigh - Math.max(rawOpen, rawClose));
+							const lowerWick = Math.max(0, Math.min(rawOpen, rawClose) - rawLow);
+							const open = chainedOpen;
+							const close = open + body;
+							const candle = {
+								time: firstTime + i * intervalSec,
+								open, close,
+								high: Math.max(open, close) + upperWick,
+								low: Math.min(open, close) - lowerWick,
+							};
+							chainedOpen = close;
+							return candle;
+						});
+						forecastSeries.setData(renderedForecast);
+						const perDay = { '1h': 24, '4h': 6, '1d': 1 }[requestedTf];
+						const anchors = data.anchors || [];
+						// E1/E2/E3 identify the three expiry locations in the path, not
+						// merely whether a persisted Greek-Flow revision is available.
+						// Always label their deterministic slots; availability continues
+						// to affect the candle engine/status text, never marker visibility.
+						const anchorSlots = [0, 1, 2].map(expiryIndex =>
+							anchors.find(a => Number(a.expiry_index) === expiryIndex) || { expiry_index: expiryIndex, available: false }
+						);
+						forecastSeries.setMarkers(anchorSlots.filter(a => a.expiry_index * perDay < points.length).map(a => ({
+							time: firstTime + Number(a.expiry_index) * perDay * intervalSec,
+							position: 'aboveBar', shape: 'circle', color: chartColors.gammaBand,
+							text: 'E' + (Number(a.expiry_index) + 1),
 						})));
+						const label = document.getElementById('forecast-status-label');
+						if (label) {
+							const availableAnchors = anchors.filter(a => a.available);
+							label.textContent = !availableAnchors.length
+								? requestedTf.toUpperCase() + ' Forecast · ' + points.length + ' candle' + (points.length === 1 ? '' : 's')
+								: requestedTf.toUpperCase() + ' Forecast · Anchors ' + availableAnchors.length + '/3 · '
+									+ availableAnchors.map(a => 'E' + (a.expiry_index + 1) + (a.expiry_instrument ? ' ' + a.expiry_instrument : '') + ' R' + a.revision + '/' + a.max_revisions + ' C' + Math.round(a.confidence) + '%').join(' · ')
+									+ (availableAnchors[0].is_preview ? ' · ' + availableAnchors[0].window_hours + 'h Preview' : '')
+									+ ' · ' + points.length + ' candle' + (points.length === 1 ? '' : 's');
+						}
 					}
 
 					function onToggleForecast() {
@@ -1710,96 +2237,13 @@
 						}
 					}
 
-					function clearNextCandleForecastCandle() {
-						nextCandleForecastSeries.setData([]);
-					}
-
-					function onToggleNextCandleForecast() {
-						SHOW_NEXT_CANDLE_FORECAST = document.getElementById('next-candle-forecast-toggle').checked;
-						if (SHOW_NEXT_CANDLE_FORECAST) {
-							refreshNextCandleForecast();
-						} else {
-							const label = document.getElementById('next-candle-forecast-label');
-							if (label) label.textContent = '';
-							clearNextCandleForecastCandle();
-						}
-					}
-
-					// "Next Candle Forecast" checkbox — a separate feature from
-					// the 18-candle Thales Forecast series above:
-					// dankbit.forecast.next_candle tracks exactly ONE target
-					// candle at a time PER TIMEFRAME (1H/4H/1D), each revised
-					// on its own fixed cadence while its current candle is
-					// still forming (see controllers/next_candle_forecast.py).
-					// Draws both the status pill text AND one candle
-					// (nextCandleForecastSeries) at the upcoming slot for
-					// WHICHEVER timeframe the chart's own "Timeframe" dropdown
-					// is currently showing (INTERVAL is already exactly
-					// '1h'/'4h'/'1d', a 1:1 match with the backend's own
-					// `timeframe` values — no translation needed beyond the
-					// label's own display name below) — switching timeframe
-					// naturally reveals that timeframe's own forecast instead
-					// of three overlapping/mismatched-width candles at once.
-					// Checked by default (unlike every other optional
-					// indicator here), since it was already always-on before
-					// this checkbox existed — unchecking stops
-					// refreshNextCandleForecast() from fetching at all, same
-					// server-load-reducing pattern as every other checkbox on
-					// this page. The label element doesn't exist on
-					// /oi/<asset> or /mp/<instrument> (see the t-if in the
-					// template), so this null-checks before touching it, same
-					// convention updateForecastVisibility() uses for
-					// #forecast-toggle-wrap; MINIMAL_CHART is checked directly
-					// too so the candle series (created unconditionally, same
-					// as forecastSeries) never gets data there either. The
-					// candle is positioned via the same real-candle-time-grid
-					// anchor refreshForecast() uses (realCandles[last].time,
-					// stepped by intervalSec) rather than the server's own
-					// `target_time`, for the same shared-logical-time-axis
-					// reason — this already works correctly at any timeframe
-					// since intervalSec always matches whichever grid is
-					// currently displayed.
-					const NEXT_CANDLE_FORECAST_LABELS = { '1h': '1H', '4h': '4H', '1d': 'Daily' };
-					async function refreshNextCandleForecast() {
-						const label = document.getElementById('next-candle-forecast-label');
-						if (MINIMAL_CHART || !SHOW_NEXT_CANDLE_FORECAST) { if (label) label.textContent = ''; clearNextCandleForecastCandle(); return; }
-
-						const tf = INTERVAL;
-						const data = await (await fetch(NEXT_CANDLE_FORECAST_URL + '?timeframe=' + tf)).json();
-						// Re-check: the checkbox may have been switched off, or
-						// the timeframe changed, while this fetch was in flight
-						// — onToggleNextCandleForecast() already cleared
-						// synchronously in the former case, so bail without
-						// redrawing; a timeframe change mid-flight just means
-						// this response is stale, so bail too (the newer
-						// in-flight/next-poll fetch will draw the right one).
-						if (!SHOW_NEXT_CANDLE_FORECAST || INTERVAL !== tf) return;
-						const row = data.row;
-						if (label) {
-							label.textContent = row
-								? 'Next ' + (NEXT_CANDLE_FORECAST_LABELS[row.timeframe] || row.timeframe.toUpperCase()) + ' Forecast · Revision '
-									+ row.revision + '/' + row.max_revisions + ' · Confidence ' + Math.round(row.confidence) + '%'
-								: '';
-						}
-
-						if (!row || !realCandles.length) { clearNextCandleForecastCandle(); return; }
-						const intervalSec = INTERVAL_SECONDS[INTERVAL];
-						const nowShifted = Math.floor(Date.now() / 1000) + tzOffset;
-						let slotTime = realCandles[realCandles.length - 1].time;
-						while (slotTime <= nowShifted) slotTime += intervalSec;
-						nextCandleForecastSeries.setData([{
-							time: slotTime,
-							open: row.forecast_open, high: row.forecast_high, low: row.forecast_low, close: row.forecast_close,
-						}]);
-					}
-
-					// "Zones from" dropdown — 00:00-UTC-vs-trailing-hours window for
-					// the zones boxes (see ZONES_BOX_WINDOW_MODE above) — re-fetches
-					// immediately on change rather than waiting for the next
-					// ZONES_BOX_REFRESH poll.
+					// Shared option-flow window for Zones, Gamma, Smart Liquidity and
+					// the unified Forecast layer. Trailing selections are non-persisted.
 					function onZonesBoxWindowChange() {
 						ZONES_BOX_WINDOW_MODE = document.getElementById('zones-box-window-select').value;
 						refreshZonesBoxes();
+						refreshBands().then(refreshLiveBandDots);
+						refreshForecast();
 					}
 
 					// "Light"/"Dark" radio (see DARK_MODE/axisBlack()/rulerColor()
@@ -1840,11 +2284,12 @@
 					}
 
 					// "Settings" button/dialog (after Ruler, all 3 TV chart pages) —
-					// re-applies the current chartColors to every already-created
+					// re-applies the current colors and line styles to every already-created
 					// series/line via applyOptions() rather than needing a
 					// server round-trip or a full chart rebuild.
 					function applyChartColors() {
 						const c = chartColors;
+						const s = chartLineStyles;
 						const zonesRgba = hexToRgba(c.zonesBox, 0.25);
 						aboveBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
 						belowBoxSeries.applyOptions({ topLineColor: c.zonesBox, topFillColor1: zonesRgba, topFillColor2: zonesRgba, bottomLineColor: c.zonesBox, bottomFillColor1: zonesRgba, bottomFillColor2: zonesRgba });
@@ -1855,9 +2300,15 @@
 						smpBmlBoxSeries.applyOptions({ topLineColor: c.middleZone, topFillColor1: middleRgba, topFillColor2: middleRgba, bottomLineColor: c.middleZone, bottomFillColor1: middleRgba, bottomFillColor2: middleRgba });
 						smpBmlBoxBottomLine.applyOptions({ color: c.middleZone });
 
-						gammaBandSeries.applyOptions({ color: c.gammaBand });
-						smartLiqUpperSeries.applyOptions({ color: c.highResistance });
-						smartLiqLowerSeries.applyOptions({ color: c.lowSupport });
+						gammaBandSeries.applyOptions({ color: c.gammaBand, lineStyle: lineStyleFromName(s.gammaBand) });
+						bandUpperSeries.applyOptions({ color: c.bandUpper, lineStyle: lineStyleFromName(s.bandUpper) });
+						bandLowerSeries.applyOptions({ color: c.bandLower, lineStyle: lineStyleFromName(s.bandLower) });
+						smartLiqUpperSeries.applyOptions({ color: c.smartLiqUpper, lineStyle: lineStyleFromName(s.smartLiqUpper) });
+						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower, lineStyle: lineStyleFromName(s.smartLiqLower) });
+						forecastSeries.applyOptions({
+							upColor: c.forecastUp, downColor: c.forecastDown,
+							wickUpColor: c.forecastWickUp, wickDownColor: c.forecastWickDown,
+						});
 
 						// The dominance dots bake their color in at draw time (see
 						// refreshLiveBandDots() above) rather than reading a
@@ -1865,7 +2316,7 @@
 						// changed color immediately — harmless no-op if Bands is
 						// currently off/not fetched yet. Sequenced, same reason as
 						// onToggleBands() above.
-						if (SHOW_BANDS) { refreshBands().then(refreshLiveBandDots); }
+						if (SHOW_BANDS || SHOW_SMART_LIQUIDITY) { refreshBands().then(refreshLiveBandDots); }
 
 						// Max Pain also bakes its color in at draw time via
 						// createPriceLine (see drawStrikeGammaLines), same
@@ -1880,6 +2331,22 @@
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
 						});
+						Object.keys(DEFAULT_LINE_STYLES).forEach(key => {
+							const input = document.getElementById('style-' + key);
+							if (input) input.value = chartLineStyles[key];
+						});
+						const countInput = document.getElementById('forecast-candle-count');
+						const maxCount = FORECAST_MAX_COUNTS[INTERVAL];
+						if (countInput) {
+							countInput.max = maxCount;
+							countInput.value = forecastCandleCounts[INTERVAL];
+						}
+						const title = document.getElementById('forecast-settings-title');
+						if (title) title.textContent = 'Forecast Candles (' + INTERVAL.toUpperCase() + ')';
+						const countLabel = document.getElementById('forecast-count-label');
+						if (countLabel) countLabel.textContent = 'Candle Count (1–' + maxCount + ')';
+						const smoothingInput = document.getElementById('band-adaptive-smoothing');
+						if (smoothingInput) smoothingInput.checked = bandAdaptiveSmoothing;
 						document.getElementById('settings-modal').style.display = 'flex';
 					}
 
@@ -1892,19 +2359,51 @@
 							const input = document.getElementById('color-' + key);
 							if (input) chartColors[key] = input.value;
 						});
+						Object.keys(DEFAULT_LINE_STYLES).forEach(key => {
+							const input = document.getElementById('style-' + key);
+							if (input) chartLineStyles[key] = input.value;
+						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
+						localStorage.setItem(LINE_STYLE_STORAGE_KEY, JSON.stringify(chartLineStyles));
+						const smoothingInput = document.getElementById('band-adaptive-smoothing');
+						if (smoothingInput) bandAdaptiveSmoothing = smoothingInput.checked;
+						localStorage.setItem(BAND_SMOOTHING_STORAGE_KEY, String(bandAdaptiveSmoothing));
+						const countInput = document.getElementById('forecast-candle-count');
+						if (countInput) {
+							const maxCount = FORECAST_MAX_COUNTS[INTERVAL];
+							forecastCandleCounts[INTERVAL] = Math.max(1, Math.min(parseInt(countInput.value, 10) || maxCount, maxCount));
+						}
+						localStorage.setItem(FORECAST_COUNT_STORAGE_KEY, JSON.stringify(forecastCandleCounts));
 						applyChartColors();
+						refreshForecast();
 						closeSettingsModal();
 					}
 
 					function resetChartColors() {
 						chartColors = Object.assign({}, DEFAULT_COLORS);
+						chartLineStyles = Object.assign({}, DEFAULT_LINE_STYLES);
 						localStorage.removeItem(COLOR_STORAGE_KEY);
+						localStorage.removeItem(LINE_STYLE_STORAGE_KEY);
+						localStorage.removeItem(FORECAST_COUNT_STORAGE_KEY);
+						localStorage.removeItem(BAND_SMOOTHING_STORAGE_KEY);
+						localStorage.removeItem(BAND_SMOOTHING_STATE_KEY);
+						bandAdaptiveSmoothing = true;
+						bandSmoothingState = {};
+						forecastCandleCounts = { '1h': 72, '4h': 18, '1d': 3 };
 						Object.keys(DEFAULT_COLORS).forEach(key => {
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
 						});
+						Object.keys(DEFAULT_LINE_STYLES).forEach(key => {
+							const input = document.getElementById('style-' + key);
+							if (input) input.value = chartLineStyles[key];
+						});
+						const countInput = document.getElementById('forecast-candle-count');
+						if (countInput) countInput.value = forecastCandleCounts[INTERVAL];
+						const smoothingInput = document.getElementById('band-adaptive-smoothing');
+						if (smoothingInput) smoothingInput.checked = true;
 						applyChartColors();
+						refreshForecast();
 					}
 
 					let rulerActive = false;
@@ -1948,7 +2447,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); await refreshNextCandleForecast(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
@@ -1968,16 +2467,16 @@
 					// with zero loss of real freshness, which matters more now
 					// that this addon is heading toward more concurrent users.
 					// refreshLiveBandDots() shares the same rationale — its own
-					// dankbit.live.band rows are also hourly-cron-fed. Sequenced
-					// into one interval (rather than two independent ones) since
-					// refreshLiveBandDots() now reads smartLiqUpperPoints/
-					// smartLiqLowerPoints, which only refreshBands() populates.
+					// dankbit.live.band rows are also hourly-cron-fed. Chained after
+					// refreshBands() (rather than its own independent interval) just
+					// to avoid both firing a fetch in the same tick; the two no longer
+					// share any data — refreshLiveBandDots() reads only
+					// dankbit.live.band, refreshBands() only dankbit.bands.
 					setInterval(() => { refreshBands().then(refreshLiveBandDots); }, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
-					setInterval(refreshNextCandleForecast, REFRESH);
 				//]]></script>
 			</body>
 		</html>

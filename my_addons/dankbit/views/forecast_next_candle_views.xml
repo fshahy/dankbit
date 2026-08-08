@@ -9,6 +9,8 @@
                 <sheet>
                     <group>
                         <field name="asset" />
+                        <field name="expiry_index" />
+                        <field name="expiry_instrument" />
                         <field name="timeframe" />
                         <field name="current_candle_start" />
                         <field name="target_time" />
@@ -57,6 +59,8 @@
         <field name="arch" type="xml">
             <list string="Next Candle Forecast">
                 <field name="asset" />
+                <field name="expiry_index" />
+                <field name="expiry_instrument" />
                 <field name="timeframe" />
                 <field name="target_time" />
                 <field name="revision" />
@@ -93,6 +97,7 @@
         <field name="arch" type="xml">
             <pivot string="Next Candle Forecast Accuracy">
                 <field name="asset" type="row"/>
+                <field name="expiry_index" type="row"/>
                 <field name="revision" type="row"/>
                 <field name="is_final" type="col"/>
                 <field name="close_error" type="measure"/>
@@ -111,6 +116,8 @@
         <field name="arch" type="xml">
             <search string="Search Next Candle Forecast">
                 <field name="asset" string="Asset"/>
+                <field name="expiry_index" string="Expiry Index"/>
+                <field name="expiry_instrument" string="Expiry Instrument"/>
                 <field name="target_time" string="Target Time"/>
                 <field name="generated_at" string="Generated At"/>
 
@@ -126,6 +133,7 @@
 
                 <group expand="0" string="Group By">
                     <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
+                    <filter string="Expiry" name="expiry_index" context="{'group_by':'expiry_index'}"/>
                     <filter string="Timeframe" name="timeframe" context="{'group_by':'timeframe'}"/>
                     <filter string="Target Time" name="target_time" context="{'group_by':'target_time'}"/>
                     <filter string="Revision" name="revision" context="{'group_by':'revision'}"/>

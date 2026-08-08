@@ -43,6 +43,8 @@ class ForecastNextCandle(models.Model):
     # existing 18-candle engine).
     asset = fields.Char(required=True, index=True)
     timeframe = fields.Char(required=True, default="4h", index=True)
+    expiry_index = fields.Integer(required=True, default=0, index=True)
+    expiry_instrument = fields.Char(index=True)
 
     target_time = fields.Datetime(required=True, index=True)
     current_candle_start = fields.Datetime(required=True)
@@ -104,9 +106,9 @@ class ForecastNextCandle(models.Model):
     checked_at = fields.Datetime()
 
     _sql_constraints = [
-        ("asset_timeframe_target_revision_uniq",
-         "unique (asset, timeframe, target_time, revision)",
-         "Only one row is kept per asset/timeframe/target candle/revision."),
+        ("instrument_timeframe_target_revision_uniq",
+         "unique (asset, expiry_index, expiry_instrument, timeframe, target_time, revision)",
+         "Only one row is kept per asset/expiry instrument/timeframe/target/revision."),
     ]
 
     def compute_and_log(self, timeframe="4h"):
@@ -114,10 +116,21 @@ class ForecastNextCandle(models.Model):
         timeframe's own revision cadence (1H every 15min, 4H hourly, 1D
         every 4h — see data/ir_cron.xml). Loops BTC/ETH, mirroring
         dankbit.bands.compute_snapshot()'s own asset-loop pattern."""
+        tracked = self.env["dankbit.bands"].TRACKED_EXPIRY_COUNT
         for asset in ("BTC", "ETH"):
-            self._compute_and_log_asset(asset, timeframe)
+            for expiry_index in range(tracked):
+                try:
+                    # One bad/thin expiry must not prevent the remaining daily
+                    # anchors from being produced in the same cron cycle.
+                    with self.env.cr.savepoint():
+                        self._compute_and_log_asset(asset, timeframe, expiry_index=expiry_index)
+                except Exception:
+                    _logger.exception(
+                        "forecast.next_candle: isolated failure for %s/%s E%s",
+                        asset, timeframe, expiry_index + 1,
+                    )
 
-    def _compute_and_log_asset(self, asset, timeframe):
+    def _compute_and_log_asset(self, asset, timeframe, expiry_index=0):
         cfg_tf = next_candle_forecast.TIMEFRAME_CONFIG[timeframe]
         Snapshot = self.env["dankbit.forecast.snapshot"]
         Trade = self.env["dankbit.trade"]
@@ -126,7 +139,9 @@ class ForecastNextCandle(models.Model):
         # (dankbit.bands._compute_asset() under the hood) regardless of
         # timeframe — also a harmless side-effect keep-alive for the
         # unrelated 18-candle engine's own hourly bucket table.
-        current_record = Snapshot.compute_and_persist(asset)
+        current_record = Snapshot.compute_and_persist(
+            asset, expiry_index=expiry_index, future_days_only=True,
+        )
         if not current_record:
             _logger.info("forecast.next_candle: nothing computable yet for %s/%s, skipping", asset, timeframe)
             return
@@ -140,10 +155,17 @@ class ForecastNextCandle(models.Model):
         current_candle_start, target_time, _elapsed = next_candle_forecast.current_candle_bounds(
             now_utc, cfg_tf["candle_span_hours"],
         )
+        # Each expiry owns one daily anchor in the three-day path.  Expiry 0
+        # predicts the immediate next candle; expiry 1/2 predict the
+        # corresponding first candle one/two days farther out while keeping
+        # the same revision cadence during the current source candle.
+        anchor_offset = timedelta(hours=24 * expiry_index)
+        target_time += anchor_offset
         current_candle_start_naive = current_candle_start.replace(tzinfo=None)
         target_time_naive = target_time.replace(tzinfo=None)
 
         current_dict = current_record.to_dict()
+        expiry_instrument = current_record.expiry_instrument
 
         # Self-referencing chain: baseline (this cycle's own "point 0",
         # i.e. the Greeks as of this candle's own open) is the PREVIOUS
@@ -153,10 +175,15 @@ class ForecastNextCandle(models.Model):
         # this cycle, then the current live reading as the newest point.
         prior_final_row = self.sudo().search([
             ("asset", "=", asset), ("timeframe", "=", timeframe),
-            ("target_time", "=", current_candle_start_naive), ("is_final", "=", True),
+            ("expiry_index", "=", expiry_index),
+            ("expiry_instrument", "=", expiry_instrument),
+            ("target_time", "=", (current_candle_start + anchor_offset).replace(tzinfo=None)),
+            ("is_final", "=", True),
         ], limit=1)
         this_cycle_rows = self.sudo().search([
             ("asset", "=", asset), ("timeframe", "=", timeframe),
+            ("expiry_index", "=", expiry_index),
+            ("expiry_instrument", "=", expiry_instrument),
             ("target_time", "=", target_time_naive),
         ], order="revision asc")
 
@@ -192,7 +219,9 @@ class ForecastNextCandle(models.Model):
                 current_dict, current_dict["top"], current_dict["low"], band_width, index_price, cfg=cfg,
             )
         score = forecast_lib.session_activity_score(current_dict, synthetic_liq, cfg=cfg)
-        historical_scores = Snapshot.session_activity_history(asset, now_utc.hour, cfg=cfg)
+        historical_scores = Snapshot.session_activity_history(
+            asset, now_utc.hour, cfg=cfg, expiry_index=expiry_index,
+        )
         activity = forecast_lib.session_activity_regime(score, historical_scores)
 
         is_weekend = current_candle_start.weekday() >= 5
@@ -201,9 +230,12 @@ class ForecastNextCandle(models.Model):
             asset, timeframe, now_utc, index_price, current_dict, points, real_candles,
             prior_flow, activity, is_weekend, cfg=cfg,
         )
+        result["target_time"] = target_time_naive
 
         existing = self.sudo().search([
             ("asset", "=", asset), ("timeframe", "=", result["timeframe"]),
+            ("expiry_index", "=", expiry_index),
+            ("expiry_instrument", "=", expiry_instrument),
             ("target_time", "=", result["target_time"]), ("revision", "=", result["revision"]),
         ], limit=1)
         if existing:
@@ -211,6 +243,8 @@ class ForecastNextCandle(models.Model):
 
         self.sudo().create({
             "asset": asset,
+            "expiry_index": expiry_index,
+            "expiry_instrument": expiry_instrument,
             "timeframe": result["timeframe"],
             "target_time": result["target_time"],
             "current_candle_start": result["current_candle_start"],
@@ -293,10 +327,81 @@ class ForecastNextCandle(models.Model):
             checked += 1
         _logger.info("forecast.next_candle: checked accuracy for %s rows", checked)
 
-    def latest_for_dashboard(self, asset, timeframe="4h"):
+    def latest_for_dashboard(self, asset, timeframe="4h", expiry_index=0):
         """The single latest (highest generated_at) row for `asset`'s
         currently-open target candle at `timeframe` — for the Delta
         Chart's small status pill (see /api/next-candle-forecast/<asset>)."""
         return self.sudo().search([
             ("asset", "=", asset), ("timeframe", "=", timeframe),
+            ("expiry_index", "=", expiry_index),
         ], order="generated_at desc", limit=1)
+
+    def preview_for_dashboard(self, asset, timeframe="4h", hours=2, expiry_index=0):
+        """Compute one non-persisted Next Candle preview from only the
+        selected trailing option-flow window.  Saved revision chains are not
+        mixed into this preview and no accuracy/log table is written."""
+        cfg_tf = next_candle_forecast.TIMEFRAME_CONFIG[timeframe]
+        Snapshot = self.env["dankbit.forecast.snapshot"]
+        Trade = self.env["dankbit.trade"]
+        current_dict = Snapshot.live_snapshot_dict(
+            asset, hours, expiry_index=expiry_index, future_days_only=True,
+        )
+        index_price = Trade.get_index_price(asset)
+        if not current_dict or not index_price:
+            return None
+
+        now_utc = datetime.now(timezone.utc)
+        current_candle_start, _target_time, _elapsed = next_candle_forecast.current_candle_bounds(
+            now_utc, cfg_tf["candle_span_hours"],
+        )
+        real_candles = Trade.get_candles(asset, interval=cfg_tf["candle_interval"], limit=40)
+        cfg, _horizon = Snapshot.get_forecast_cfg(asset)
+
+        synthetic_liq = None
+        if current_dict.get("top") and current_dict.get("low"):
+            band_width = max(current_dict["top"] - current_dict["low"], 1e-9)
+            synthetic_liq = forecast_lib.smart_synthetic_liquidity(
+                current_dict, current_dict["top"], current_dict["low"], band_width, index_price, cfg=cfg,
+            )
+        score = forecast_lib.session_activity_score(current_dict, synthetic_liq, cfg=cfg)
+        historical_scores = Snapshot.session_activity_history(
+            asset, now_utc.hour, cfg=cfg, expiry_index=expiry_index,
+        )
+        activity = forecast_lib.session_activity_regime(score, historical_scores)
+
+        # Greek Flow for a 2h/4h preview comes from the scan-to-scan changes
+        # that actually occurred inside that selected window.  The structural
+        # snapshot above remains strictly trailing-window based; only the four
+        # Delta-Abs history fields are read from the hourly snapshot log.  This
+        # avoids mixing all-day levels into the preview geometry while still
+        # preserving the information the Greek-Flow engine is specifically
+        # designed to measure: how incoming option flow changed each hour.
+        since = (now_utc - timedelta(hours=hours)).replace(tzinfo=None)
+        flow_rows = Snapshot.sudo().search([
+            ("asset", "=", asset),
+            ("expiry_index", "=", expiry_index),
+            ("expiry_instrument", "=", current_dict.get("expiry_instrument")),
+            ("bucket_start", ">=", since),
+        ], order="bucket_start asc")
+        points = [{
+            "bcd_abs": row.bcd_abs, "bpd_abs": row.bpd_abs,
+            "scd_abs": row.scd_abs, "spd_abs": row.spd_abs,
+            "bucket_epoch": _epoch(row.bucket_start),
+        } for row in flow_rows]
+
+        # At least two scans are required for a rate of change.  A just-installed
+        # system safely starts neutral until the second hourly snapshot arrives.
+        if not points:
+            points = [{
+                "bcd_abs": current_dict["bcd_abs"], "bpd_abs": current_dict["bpd_abs"],
+                "scd_abs": current_dict["scd_abs"], "spd_abs": current_dict["spd_abs"],
+                "bucket_epoch": now_utc.timestamp(),
+            }]
+        result = next_candle_forecast.compute_revision(
+            asset, timeframe, now_utc, index_price, current_dict, points, real_candles,
+            0.0, activity, current_candle_start.weekday() >= 5, cfg=cfg,
+        )
+        result["window_hours"] = hours
+        result["expiry_index"] = expiry_index
+        result["expiry_instrument"] = current_dict.get("expiry_instrument")
+        return result

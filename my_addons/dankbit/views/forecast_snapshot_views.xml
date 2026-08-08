@@ -9,6 +9,8 @@
                 <sheet>
                     <group>
                         <field name="asset" />
+                        <field name="expiry_index" />
+                        <field name="expiry_instrument" />
                         <field name="bucket_start" />
                         <field name="index_price" />
                         <field name="top" />
@@ -67,6 +69,8 @@
         <field name="arch" type="xml">
             <list string="Forecast Snapshot">
                 <field name="asset" />
+                <field name="expiry_index" />
+                <field name="expiry_instrument" />
                 <field name="bucket_start" />
                 <field name="index_price" />
                 <field name="top" />
@@ -117,6 +121,7 @@
         <field name="arch" type="xml">
             <search string="Search Forecast Snapshot">
                 <field name="asset" string="Asset"/>
+                <field name="expiry_index" string="Expiry Index"/>
 
                 <separator/>
 

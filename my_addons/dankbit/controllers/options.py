@@ -364,6 +364,16 @@ def per_leg_greeks(STs, trades, r=0.0):
     page's Value lines divide gamma/delta/theta/vega by 1e6/10/1e4/100,
     forecast.per_leg_greeks() does the same for its own *_abs fields).
 
+    A leg with zero trades has no curve to peak/bottom at all — its
+    *_price fields are None (not a price grid edge; see below) and its
+    *_value fields are 0.0 (genuinely zero exposure). Callers that need a
+    single "absent" sentinel for a price field (e.g. for averaging or JSON
+    serialization) should collapse None the same way this addon already
+    treats 0.0 elsewhere (dankbit.bands's smart_liq_upper_price etc.) —
+    None isn't reused directly as that sentinel here since a genuine 0.0
+    price is impossible for BTC/ETH but None is a clearer "no data" signal
+    at the source.
+
     Single source of truth for this computation — shared by chart_png_zones
     (main.py), dankbit.bands's gamma_band/delta_band
     (models/bands.py), and forecast.per_leg_greeks()
@@ -380,6 +390,22 @@ def per_leg_greeks(STs, trades, r=0.0):
 
     result = {}
     for leg_name, leg_trades in legs.items():
+        # No trades at all for this leg means no curve to peak/bottom at
+        # — portfolio_gamma/theta/vega would return an all-zero array here,
+        # and np.argmax/np.argmin on an all-zero array both return index 0,
+        # silently reporting STs[0] (the configured price-range floor) as a
+        # fake "extremum" rather than genuine absence. Short-circuit before
+        # any of that curve math runs.
+        if not leg_trades:
+            result[leg_name] = {
+                "trades": leg_trades,
+                "gamma_price": None, "gamma_value": 0.0,
+                "delta_price": None, "delta_value": 0.0,
+                "theta_price": None, "theta_value": 0.0,
+                "vega_price": None, "vega_value": 0.0,
+            }
+            continue
+
         gamma_curve = gamma_lib.portfolio_gamma(STs, leg_trades, r=r)
         gamma_idx = int(_GAMMA_VEGA_ARGFN[leg_name](gamma_curve))
         gamma_price, gamma_value = float(STs[gamma_idx]), float(gamma_curve[gamma_idx])
@@ -403,29 +429,6 @@ def per_leg_greeks(STs, trades, r=0.0):
             "vega_price": vega_price, "vega_value": vega_value,
         }
     return result
-
-
-def option_type_gamma_extreme(STs, trades, option_type, r=0.0):
-    """Where the COMBINED portfolio dollar-gamma curve of every trade of
-    `option_type` ("call"/"put") — buy and sell together, unlike
-    per_leg_greeks()'s own 4-way long/short split — peaks or bottoms out.
-    portfolio_gamma() is already direction-agnostic (it sums signed
-    buy/sell contributions internally via each trade's own `direction`),
-    so this just filters by option_type and evaluates it directly, same
-    r=0.0 convention as per_leg_greeks(). Unlike a single leg, this
-    combined curve has no fixed peak-vs-bottom sign convention — a mixed
-    buy/sell book can be net long or net short gamma at either end of the
-    grid — so this reports whichever of the curve's own peak (argmax) or
-    bottom (argmin) has the larger |value|. Returns (price, value), or
-    (None, None) if `trades` has nothing of this option_type."""
-    leg_trades = trades.filtered(lambda t: t.option_type == option_type)
-    if not leg_trades:
-        return None, None
-    curve = gamma_lib.portfolio_gamma(STs, leg_trades, r=r)
-    peak_idx = int(np.argmax(curve))
-    bottom_idx = int(np.argmin(curve))
-    idx = peak_idx if abs(curve[peak_idx]) >= abs(curve[bottom_idx]) else bottom_idx
-    return float(STs[idx]), float(curve[idx])
 
 
 def zone_summary(STs, longs_curve, shorts_curve):

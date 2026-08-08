@@ -13,6 +13,20 @@ from ..controllers import forecast as forecast_lib
 _logger = logging.getLogger(__name__)
 
 
+def _avg_present(*values):
+    """Average of whichever of `values` are non-zero (0.0 is this
+    addon's standing "absent" sentinel for a price-like field — see
+    forecast.per_leg_greeks()), not a fixed division by len(values). A
+    leg with no trades in the window has no gamma/delta extremum at all;
+    blindly dividing by 4 would silently drag the average toward 0 for
+    every such absent leg, same bug the /4l and /mw AVG price line
+    (dankbit_four_leg_gamma_chart_templates.xml) was already written to
+    avoid on the frontend. 0.0 (not None) when nothing is present, same
+    convention every other "absent" field on this model already uses."""
+    present = [v for v in values if v]
+    return sum(present) / len(present) if present else 0.0
+
+
 class Bands(models.Model):
     _name = "dankbit.bands"
     _order = "instrument"
@@ -80,6 +94,26 @@ class Bands(models.Model):
     low_zone_max = fields.Float(string="Low Zone Max", digits=(16, 4))
     middle_zone_min = fields.Float(string="Middle Zone Min", digits=(16, 4))
     middle_zone_max = fields.Float(string="Middle Zone Max", digits=(16, 4))
+    # Official display-zone confirmation metadata.  The raw/live zone is
+    # still recomputed every hour for Forecast snapshots; these fields tell
+    # the chart when the persisted High/Low/Middle zones last passed the
+    # session/quality gate (or the two-snapshot structural override).
+    zones_confirmed_at = fields.Datetime(string="Zones Confirmed At")
+    zones_confirmation_reason = fields.Char(string="Zones Confirmation Reason")
+    # Pending hourly candidate used only to require two mutually consistent
+    # observations before an out-of-session structural replacement.  It is
+    # deliberately separate from the official *_zone_* fields, so an hourly
+    # noisy calculation can never leak onto the displayed chart.
+    zone_candidate_at = fields.Datetime(string="Zone Candidate At")
+    zone_candidate_hits = fields.Integer(string="Zone Candidate Hits", default=0)
+    candidate_high_zone_min = fields.Float(digits=(16, 4))
+    candidate_high_zone_max = fields.Float(digits=(16, 4))
+    candidate_low_zone_min = fields.Float(digits=(16, 4))
+    candidate_low_zone_max = fields.Float(digits=(16, 4))
+    candidate_middle_zone_min = fields.Float(digits=(16, 4))
+    candidate_middle_zone_max = fields.Float(digits=(16, 4))
+    candidate_seller_max_profit = fields.Float(digits=(16, 4))
+    candidate_buyer_max_loss = fields.Float(digits=(16, 4))
     # Per-leg gamma/delta/theta/vega prices + Abs strength values — same
     # forecast.per_leg_greeks() computation (a thin Pine-naming layer over
     # options.per_leg_greeks()) already used by dankbit.forecast.snapshot,
@@ -154,7 +188,7 @@ class Bands(models.Model):
         "scv_price", "scv_abs", "spv_price", "spv_abs",
     ]
 
-    def _distinct_expirations(self, asset, as_of, limit):
+    def _distinct_expirations(self, asset, as_of, limit, future_days_only=False):
         """The `limit` soonest distinct active expirations for `asset`,
         soonest-first. Raw SQL DISTINCT (not search_read+limit, and not
         read_group, which buckets Datetime fields by month by default) — a
@@ -163,6 +197,11 @@ class Bands(models.Model):
         isn't unusual), silently breaking "Nth expiry" semantics;
         DISTINCT+ORDER BY+LIMIT is also far cheaper than fetching enough rows
         to dedupe in Python on a live, frequently-polled route."""
+        lower_bound = as_of
+        if future_days_only:
+            # Forecast E1/E2/E3 are calendar-day anchors: today's still-open
+            # contract must never occupy E1 before its settlement hour.
+            lower_bound = as_of.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         self.env.cr.execute(
             """
             SELECT DISTINCT expiration FROM dankbit_trade
@@ -170,7 +209,7 @@ class Bands(models.Model):
             ORDER BY expiration ASC
             LIMIT %s
             """,
-            (f"{asset}-%", as_of, limit),
+            (f"{asset}-%", lower_bound, limit),
         )
         return [row[0] for row in self.env.cr.fetchall()]
 
@@ -197,7 +236,7 @@ class Bands(models.Model):
             return None
         return self._format_instrument(asset, expirations[0])
 
-    def _compute_asset(self, asset, expiry_index=0, hours=None):
+    def _compute_asset(self, asset, expiry_index=0, hours=None, future_days_only=False):
         """Compute index_price, the highest/lowest Longs-vs-Shorts curve
         intersection (high_resistance/low_support — not relative to
         index_price, see below), gamma_band (average of
@@ -238,7 +277,9 @@ class Bands(models.Model):
 
         Trade = self.env["dankbit.trade"].with_context(active_test=False)
 
-        expirations = self._distinct_expirations(asset, as_of, expiry_index + 1)
+        expirations = self._distinct_expirations(
+            asset, as_of, expiry_index + 1, future_days_only=future_days_only,
+        )
         if len(expirations) <= expiry_index:
             _logger.warning(
                 "_compute_asset: no active expiry at index %s for %s, skipping",
@@ -383,8 +424,12 @@ class Bands(models.Model):
         # Seller Call Gamma/Seller Put Gamma — BCG/BPG/SCG/SPG). Short
         # positions carry negative gamma (portfolio_gamma's sign for "sell"
         # is -1), so their extremum is a trough, not a peak — already
-        # accounted for by per_leg_greeks().
-        gamma_band = (legs["bcg_price"] + legs["bpg_price"] + legs["scg_price"] + legs["spg_price"]) / 4.0
+        # accounted for by per_leg_greeks(). Averaged via _avg_present(), not
+        # a fixed /4.0 — a leg with zero trades in this window reports
+        # *_price as 0.0/absent (see forecast.per_leg_greeks()), and a plain
+        # /4.0 would silently drag the whole band toward the configured
+        # chart price floor for every such quiet leg instead of excluding it.
+        gamma_band = _avg_present(legs["bcg_price"], legs["bpg_price"], legs["scg_price"], legs["spg_price"])
 
         # Delta band: average of the price where each leg's delta curve
         # reaches 90% of its own extreme value in this window (see
@@ -398,7 +443,9 @@ class Bands(models.Model):
         # be in the hundreds), not a single option's [-1, 1] range — shared
         # with the /<instrument>/lp,lc,sp,sc single-leg routes' own green
         # marker line, so the two can never disagree on where this point is.
-        delta_band = (legs["bcd_price"] + legs["bpd_price"] + legs["scd_price"] + legs["spd_price"]) / 4.0
+        # Same _avg_present() treatment as gamma_band above, for the same
+        # reason — a quiet leg must be excluded, not averaged in at 0.0.
+        delta_band = _avg_present(legs["bcd_price"], legs["bpd_price"], legs["scd_price"], legs["spd_price"])
 
         # Smart Role-Aware Synthetic Liquidity (see forecast.
         # smart_synthetic_liquidity) — against this same instrument's own
@@ -462,7 +509,7 @@ class Bands(models.Model):
             **legs,
         }
 
-    def _persist_extrema(self, data):
+    def _persist_extrema(self, data, zones_confirmation_reason="session-confirmed"):
         """Upsert the one record for `data['instrument']` — only the
         historical-line fields (computed_at/index_price/high_resistance/
         low_support/gamma_band/delta_band/smart_liq_upper_price/
@@ -470,10 +517,10 @@ class Bands(models.Model):
         seller_max_profit/buyer_max_loss, plus the 32 per-leg gamma/delta/
         theta/vega price+Abs fields — see _PER_LEG_GREEK_FIELDS);
         computed_at is refreshed to `data['computed_at']` (the moment
-        _compute_asset() ran) on every upsert, not just set once at
-        creation. The 4 box-boundary fields in `data` are never persisted, only ever read
-        live off the return value (see get_box), since nothing reads
-        box-boundary history.
+        _compute_asset() ran) on every confirmed upsert.  Zone boundaries,
+        SMP/BML, and their confirmation metadata are persisted as the
+        official display snapshot; raw hourly Forecast values are kept on
+        the separate forecast.snapshot path.
 
         Called only from compute_snapshot()'s hourly cron (see
         TRACKED_EXPIRY_COUNT below), for every tracked expiry_index
@@ -536,6 +583,18 @@ get_box_n() (the only caller of this method) is itself only ever
             "middle_zone_max": data["middle_zone_max"],
             "seller_max_profit": data["seller_max_profit"],
             "buyer_max_loss": data["buyer_max_loss"],
+            "zones_confirmed_at": data["computed_at"],
+            "zones_confirmation_reason": zones_confirmation_reason,
+            "zone_candidate_at": False,
+            "zone_candidate_hits": 0,
+            "candidate_high_zone_min": 0.0,
+            "candidate_high_zone_max": 0.0,
+            "candidate_low_zone_min": 0.0,
+            "candidate_low_zone_max": 0.0,
+            "candidate_middle_zone_min": 0.0,
+            "candidate_middle_zone_max": 0.0,
+            "candidate_seller_max_profit": 0.0,
+            "candidate_buyer_max_loss": 0.0,
             **{f: data[f] for f in self._PER_LEG_GREEK_FIELDS},
         }
         record = self.search([("instrument", "=", data["instrument"])], limit=1)
@@ -557,7 +616,313 @@ get_box_n() (the only caller of this method) is itself only ever
     # directly and never persists.
     TRACKED_EXPIRY_COUNT = 3
 
-    def get_box_n(self, asset, expiry_index):
+    # Thales online safety layer:
+    # Green/Red Bands are STRUCTURAL levels (upper/lower Longs-vs-Shorts
+    # intersections).  They should not be re-confirmed at 00:00 UTC when
+    # the since-midnight option-flow window is still thin, and they should
+    # not be pulled inward by Smart Liquidity.  The hourly cron may still
+    # compute raw values, but persisted/displayed Bands are confirmed only
+    # in mature market sessions and only when the data-quality gate passes.
+    # Times are UTC.
+    BAND_CONFIRMATION_WINDOWS_UTC = (
+        (8, 30, 10, 30, "London Mature"),
+        (14, 0, 15, 30, "NY/London Overlap"),
+    )
+
+    def _band_confirmation_session(self, when_utc=None):
+        """Return the session name if `when_utc` is inside a mature
+        Band-confirmation window; otherwise return None.  Midnight UTC is
+        deliberately never a confirmation point: at that moment the daily
+        trade window has just reset, so the curve intersections are often
+        under-sampled and can collapse into unrealistically tight bands."""
+        when_utc = when_utc or datetime.now(timezone.utc)
+        if when_utc.tzinfo is None:
+            when_utc = when_utc.replace(tzinfo=timezone.utc)
+        minute_of_day = when_utc.hour * 60 + when_utc.minute
+        for sh, sm, eh, em, name in self.BAND_CONFIRMATION_WINDOWS_UTC:
+            start = sh * 60 + sm
+            end = eh * 60 + em
+            if start <= minute_of_day <= end:
+                return name
+        return None
+
+    def _band_quality_gate(self, data):
+        """True when a freshly computed raw band is reliable enough to
+        replace the last confirmed Green/Red Bands.  This prevents the
+        common 00:00/low-flow failure mode where high_resistance and
+        low_support are produced from too few trades or collapse into a
+        narrow, non-structural range."""
+        icp = self.env["ir.config_parameter"].sudo()
+        asset = (data.get("asset") or "BTC").upper()
+        index_price = float(data.get("index_price") or 0.0)
+        high = float(data.get("high_resistance") or 0.0)
+        low = float(data.get("low_support") or 0.0)
+        if not index_price or not high or not low or high <= low:
+            return False, "missing-or-collapsed-intersections"
+
+        total_trades = int(data.get("long_trade_count") or 0) + int(data.get("short_trade_count") or 0)
+        long_trades = int(data.get("long_trade_count") or 0)
+        short_trades = int(data.get("short_trade_count") or 0)
+        min_total = int(icp.get_param(
+            "dankbit.band_min_total_trades_btc" if asset.startswith("BTC") else "dankbit.band_min_total_trades_eth",
+            default=80 if asset.startswith("BTC") else 40,
+        ))
+        min_side = int(icp.get_param(
+            "dankbit.band_min_side_trades_btc" if asset.startswith("BTC") else "dankbit.band_min_side_trades_eth",
+            default=10 if asset.startswith("BTC") else 5,
+        ))
+        if total_trades < min_total or long_trades < min_side or short_trades < min_side:
+            return False, "insufficient-long-short-sample"
+
+        min_width_pct = float(icp.get_param("dankbit.band_min_width_pct", default=0.015))
+        if (high - low) < index_price * min_width_pct:
+            return False, "band-width-below-minimum"
+
+        greek_abs_fields = [f for f in self._PER_LEG_GREEK_FIELDS if f.endswith("_abs")]
+        total_greek_abs = sum(abs(float(data.get(f) or 0.0)) for f in greek_abs_fields)
+        if total_greek_abs <= 0:
+            return False, "no-greek-strength"
+
+        return True, "confirmed"
+
+    def _zone_quality_gate(self, data):
+        """Validate the raw hourly High/Low/Middle zone geometry.
+
+        Thin High/Low zones are valid and are intentionally *not* rejected:
+        their width is the real distance between the Buyer and Seller
+        break-even crossings.  The gate instead requires both curves to
+        contribute a crossing, sane ordering, a bounded maximum width, a
+        valid SMP/BML middle zone, and the same trade/Greek reliability used
+        for structural Bands.
+        """
+        band_ok, band_reason = self._band_quality_gate(data)
+        if not band_ok:
+            return False, band_reason
+
+        required_crossings = (
+            "short_zero_above_price", "long_zero_above_price",
+            "short_zero_below_price", "long_zero_below_price",
+        )
+        if any(float(data.get(name) or 0.0) <= 0 for name in required_crossings):
+            return False, "missing-buyer-or-seller-break-even"
+
+        high_min = float(data.get("high_zone_min") or 0.0)
+        high_max = float(data.get("high_zone_max") or 0.0)
+        low_min = float(data.get("low_zone_min") or 0.0)
+        low_max = float(data.get("low_zone_max") or 0.0)
+        middle_min = float(data.get("middle_zone_min") or 0.0)
+        middle_max = float(data.get("middle_zone_max") or 0.0)
+        index_price = float(data.get("index_price") or 0.0)
+        if not all((high_min, high_max, low_min, low_max, middle_min, middle_max, index_price)):
+            return False, "missing-zone-boundary"
+        if high_max < high_min or low_max < low_min or middle_max < middle_min:
+            return False, "inverted-zone-boundary"
+        if low_max >= high_min:
+            return False, "overlapping-high-low-zones"
+        if not (low_max <= middle_max and middle_min <= high_min):
+            return False, "middle-zone-outside-outer-zones"
+
+        icp = self.env["ir.config_parameter"].sudo()
+        max_width_pct = float(icp.get_param("dankbit.zone_max_width_pct", default=0.03))
+        if (high_max - high_min) > index_price * max_width_pct:
+            return False, "high-zone-too-wide"
+        if (low_max - low_min) > index_price * max_width_pct:
+            return False, "low-zone-too-wide"
+
+        # The Green/Red intersections are independently computed, but under
+        # healthy curve geometry they sit inside or close to the corresponding
+        # break-even zone.  A generous tolerance catches broken/noisy curves
+        # without forcing genuinely thin zones to be widened.
+        proximity_pct = float(icp.get_param("dankbit.zone_band_proximity_pct", default=0.003))
+        proximity = index_price * proximity_pct
+        high_band = float(data.get("high_resistance") or 0.0)
+        low_band = float(data.get("low_support") or 0.0)
+        if high_band < high_min - proximity or high_band > high_max + proximity:
+            return False, "upper-band-not-near-high-zone"
+        if low_band < low_min - proximity or low_band > low_max + proximity:
+            return False, "lower-band-not-near-low-zone"
+
+        return True, "zone-quality-confirmed"
+
+    @staticmethod
+    def _zone_center(data, prefix):
+        return (
+            float(data.get(f"{prefix}_zone_min") or 0.0)
+            + float(data.get(f"{prefix}_zone_max") or 0.0)
+        ) / 2.0
+
+    def _zone_structural_change_gate(self, record, data):
+        """Whether a valid hourly candidate is materially different enough
+        to justify an out-of-session replacement after two matching scans."""
+        if not record or not (record.zones_confirmed_at or (record.high_zone_min and record.high_zone_max and record.low_zone_min and record.low_zone_max)):
+            return False, "no-confirmed-zone-baseline"
+
+        index_price = float(data.get("index_price") or 0.0)
+        if not index_price:
+            return False, "missing-index-price"
+        icp = self.env["ir.config_parameter"].sudo()
+        outer_shift_pct = float(icp.get_param("dankbit.zone_emergency_outer_shift_pct", default=0.006))
+        middle_shift_pct = float(icp.get_param("dankbit.zone_emergency_middle_shift_pct", default=0.004))
+        width_ratio = float(icp.get_param("dankbit.zone_emergency_width_ratio", default=1.75))
+        breakout_buffer_pct = float(icp.get_param("dankbit.zone_emergency_breakout_buffer_pct", default=0.002))
+
+        old_high_center = (record.high_zone_min + record.high_zone_max) / 2.0
+        old_low_center = (record.low_zone_min + record.low_zone_max) / 2.0
+        old_middle_center = (record.middle_zone_min + record.middle_zone_max) / 2.0
+        new_high_center = self._zone_center(data, "high")
+        new_low_center = self._zone_center(data, "low")
+        new_middle_center = self._zone_center(data, "middle")
+
+        if abs(new_high_center - old_high_center) >= index_price * outer_shift_pct:
+            return True, "upper-zone-center-shift"
+        if abs(new_low_center - old_low_center) >= index_price * outer_shift_pct:
+            return True, "lower-zone-center-shift"
+        if abs(new_middle_center - old_middle_center) >= index_price * middle_shift_pct:
+            return True, "middle-zone-center-shift"
+
+        def width_changed(old_min, old_max, new_min, new_max):
+            old_width = max(float(old_max) - float(old_min), 0.0)
+            new_width = max(float(new_max) - float(new_min), 0.0)
+            floor = max(index_price * 0.00025, 1.0)
+            old_width = max(old_width, floor)
+            new_width = max(new_width, floor)
+            return max(old_width, new_width) / min(old_width, new_width) >= width_ratio
+
+        if width_changed(record.high_zone_min, record.high_zone_max, data["high_zone_min"], data["high_zone_max"]):
+            return True, "upper-zone-width-regime-change"
+        if width_changed(record.low_zone_min, record.low_zone_max, data["low_zone_min"], data["low_zone_max"]):
+            return True, "lower-zone-width-regime-change"
+        if width_changed(record.middle_zone_min, record.middle_zone_max, data["middle_zone_min"], data["middle_zone_max"]):
+            return True, "middle-zone-width-regime-change"
+
+        breakout_buffer = index_price * breakout_buffer_pct
+        min_breakout_migration = index_price * middle_shift_pct
+        if (
+            index_price > record.high_zone_max + breakout_buffer
+            and new_high_center > old_high_center + min_breakout_migration
+        ):
+            return True, "price-accepted-above-confirmed-zone"
+        if (
+            index_price < record.low_zone_min - breakout_buffer
+            and new_low_center < old_low_center - min_breakout_migration
+        ):
+            return True, "price-accepted-below-confirmed-zone"
+        return False, "no-material-zone-change"
+
+    def _stage_zone_candidate(self, record, data):
+        """Store an hourly candidate and return its consecutive hit count.
+
+        A candidate counts as consecutive when all three zone centers remain
+        within the configured similarity distance of the previous candidate.
+        This prevents one noisy hourly curve from triggering the emergency
+        path outside the normal confirmation sessions.
+        """
+        if not record:
+            return 0
+        index_price = float(data.get("index_price") or 0.0)
+        icp = self.env["ir.config_parameter"].sudo()
+        tolerance = index_price * float(icp.get_param("dankbit.zone_candidate_similarity_pct", default=0.0025))
+        previous = {
+            "high_zone_min": record.candidate_high_zone_min,
+            "high_zone_max": record.candidate_high_zone_max,
+            "low_zone_min": record.candidate_low_zone_min,
+            "low_zone_max": record.candidate_low_zone_max,
+            "middle_zone_min": record.candidate_middle_zone_min,
+            "middle_zone_max": record.candidate_middle_zone_max,
+        }
+        has_previous = bool(record.zone_candidate_at and record.zone_candidate_hits)
+        matching = has_previous and all(
+            abs(self._zone_center(data, prefix) - self._zone_center(previous, prefix)) <= tolerance
+            for prefix in ("high", "low", "middle")
+        )
+        hits = int(record.zone_candidate_hits or 0) + 1 if matching else 1
+        record.sudo().write({
+            "zone_candidate_at": data["computed_at"],
+            "zone_candidate_hits": hits,
+            "candidate_high_zone_min": data["high_zone_min"],
+            "candidate_high_zone_max": data["high_zone_max"],
+            "candidate_low_zone_min": data["low_zone_min"],
+            "candidate_low_zone_max": data["low_zone_max"],
+            "candidate_middle_zone_min": data["middle_zone_min"],
+            "candidate_middle_zone_max": data["middle_zone_max"],
+            "candidate_seller_max_profit": data["seller_max_profit"],
+            "candidate_buyer_max_loss": data["buyer_max_loss"],
+        })
+        return hits
+
+    def _gamma_quality_gate(self, data):
+        """True when the freshly computed Gamma Average is reliable enough
+        to update the live Gamma Band independently from confirmed
+        Green/Red Bands.  This keeps the middle Gamma Magnet more current
+        than the structural Bands, while still avoiding the 00:00 UTC
+        low-volume distortion problem.
+
+        Unlike _band_quality_gate(), this does not require both Long and
+        Short sides to be well populated, because a one-sided gamma shock is
+        a useful live signal.  It only requires a minimum total sample, a
+        valid gamma price, and non-zero gamma strength.
+        """
+        icp = self.env["ir.config_parameter"].sudo()
+        asset = (data.get("asset") or "BTC").upper()
+        gamma_band = float(data.get("gamma_band") or 0.0)
+        if not gamma_band:
+            return False, "missing-gamma-band"
+
+        total_trades = int(data.get("long_trade_count") or 0) + int(data.get("short_trade_count") or 0)
+        min_total = int(icp.get_param(
+            "dankbit.gamma_live_min_total_trades_btc" if asset.startswith("BTC") else "dankbit.gamma_live_min_total_trades_eth",
+            default=40 if asset.startswith("BTC") else 20,
+        ))
+        if total_trades < min_total:
+            return False, "insufficient-gamma-sample"
+
+        gamma_abs = sum(abs(float(data.get(f) or 0.0)) for f in ("bcg_abs", "bpg_abs", "scg_abs", "spg_abs"))
+        min_gamma_abs = float(icp.get_param(
+            "dankbit.gamma_live_min_abs_btc" if asset.startswith("BTC") else "dankbit.gamma_live_min_abs_eth",
+            default=0.0001,
+        ))
+        if gamma_abs < min_gamma_abs:
+            return False, "no-live-gamma-strength"
+
+        return True, "live-gamma-confirmed"
+
+    def _persist_live_gamma(self, data):
+        """Update only the live middle Gamma Average and the per-leg gamma
+        values on an existing dankbit.bands row, without touching the
+        confirmed structural Green/Red Bands.
+
+        The row is not created here.  If an instrument has never passed the
+        session-confirmed Band gate, creating a row from a low-volume hourly
+        gamma-only update would still leak unconfirmed high/low values into
+        /api/bands.  In that case we skip until the first confirmed Band
+        snapshot exists.
+        """
+        self = self.sudo()
+        record = self.search([("instrument", "=", data["instrument"])], limit=1)
+        if not record:
+            _logger.info(
+                "dankbit.bands: skipped live gamma update for %s because no confirmed band row exists yet",
+                data.get("instrument"),
+            )
+            return False
+
+        vals = {
+            "computed_at": data["computed_at"],
+            "index_price": data["index_price"],
+            "gamma_band": data["gamma_band"],
+            "bcg_price": data["bcg_price"],
+            "bcg_abs": data["bcg_abs"],
+            "bpg_price": data["bpg_price"],
+            "bpg_abs": data["bpg_abs"],
+            "scg_price": data["scg_price"],
+            "scg_abs": data["scg_abs"],
+            "spg_price": data["spg_price"],
+            "spg_abs": data["spg_abs"],
+        }
+        record.write(vals)
+        return True
+
+    def get_box_n(self, asset, expiry_index, persist=True):
         """Bands computation for `asset`'s `expiry_index`-th soonest
         active expiry, computed fresh on every call and persisted via
         _persist_extrema. The *only* caller, for every expiry_index
@@ -567,31 +932,60 @@ get_box_n() (the only caller of this method) is itself only ever
         (the one that actually renders the yellow box on the chart) goes
         through get_box(), which calls _compute_asset() directly instead of
         this method, precisely so that live page views never persist
-        anything. The 4 box-boundary fields themselves are still never
-        persisted, only the computed_at moment's index_price/
-        high_resistance/low_support/gamma_band/delta_band (see
-        _persist_extrema)."""
+        anything.  This defensive legacy entry point now applies the same
+        session and quality gates as compute_snapshot() before persisting."""
         data = self._compute_asset(asset, expiry_index=expiry_index)
-        if data:
-            self._persist_extrema(data)
+        if data and persist:
+            session_name = self._band_confirmation_session(datetime.now(timezone.utc))
+            band_ok, _ = self._band_quality_gate(data)
+            zone_ok, _ = self._zone_quality_gate(data)
+            if session_name and band_ok and zone_ok:
+                self._persist_extrema(data, zones_confirmation_reason=f"session:{session_name}")
         return data
 
     def get_box(self, asset, hours=None):
-        """Live zones-box boundaries for `asset`'s nearest active expiry,
-        for /api/zones-box/<asset> — the one that actually renders the
-        yellow (and teal) box on the chart. Always computed via
-        _compute_asset() directly, never via get_box_n(), so a live page
-        view can never persist anything into dankbit.bands: the nearest
-        expiry's row (expiry_index 0) is refreshed *only* by
-        compute_snapshot()'s hourly cron, exactly like expiry_index 1/2
-        (see TRACKED_EXPIRY_COUNT) — no browser action, for any expiry_index,
-        ever writes to this model. An explicit `hours` overrides the default
-        since-00:00-UTC-through-now trade window with the trailing `hours`
-        hours instead — driven by /chart/<asset>'s 00:00-UTC-vs-trailing-
-        hours radio toggle (see dankbit_templates.xml); either way this is
-        display-only and doesn't touch the shared history other viewers/
-        expiries' term-structure lines depend on."""
-        return self._compute_asset(asset, expiry_index=0, hours=hours)
+        """Display boundaries for the nearest expiry's zone boxes.
+
+        The standard (since-00:00 UTC) chart path returns the last
+        session-confirmed/emergency-confirmed High/Low/Middle zones from the
+        persisted row.  A fresh computation is still made to resolve the
+        current nearest expiry and expiration, but its noisy hourly zone
+        values never replace the displayed fields here.  Forecast snapshots
+        continue to call _compute_asset() directly and therefore retain the
+        raw hourly zones for internal calculations.
+
+        An explicit trailing `hours` request remains an intentional live
+        analytical preview of that alternate trade window; it is never
+        persisted and never changes the official confirmed zones.
+        """
+        data = self._compute_asset(asset, expiry_index=0, hours=hours)
+        if not data or hours is not None:
+            if data:
+                data["zone_confirmation_mode"] = "live-trailing-window"
+            return data
+
+        record = self.sudo().search([("instrument", "=", data["instrument"])], limit=1)
+        if not record or not (record.zones_confirmed_at or (record.high_zone_min and record.high_zone_max and record.low_zone_min and record.low_zone_max)):
+            # Never fabricate a confirmed box before the first valid session.
+            return None
+
+        data.update({
+            "computed_at": record.zones_confirmed_at or record.computed_at,
+            "short_zero_above_price": record.high_zone_min,
+            "long_zero_above_price": record.high_zone_max,
+            "short_zero_below_price": record.low_zone_min,
+            "long_zero_below_price": record.low_zone_max,
+            "high_zone_min": record.high_zone_min,
+            "high_zone_max": record.high_zone_max,
+            "low_zone_min": record.low_zone_min,
+            "low_zone_max": record.low_zone_max,
+            "middle_zone_min": record.middle_zone_min,
+            "middle_zone_max": record.middle_zone_max,
+            "seller_max_profit": record.seller_max_profit,
+            "buyer_max_loss": record.buyer_max_loss,
+            "zone_confirmation_mode": record.zones_confirmation_reason or "legacy-confirmed",
+        })
+        return data
 
     def gamma_band_term_structure(self, asset):
         """The forward points of the chart's own violet dashed Gamma Band
@@ -632,20 +1026,94 @@ get_box_n() (the only caller of this method) is itself only ever
         return term_structure
 
     def compute_snapshot(self):
-        """Cron entry point (hourly — see data/ir_cron.xml; tightened from an
-        initial 4 hours per Thales dev request, for fresher Bands-lines/
-        gamma-band-term-structure history) — the
-        *sole* source of truth for every tracked expiry_index, including 0
-        (the nearest expiry): no browser action ever computes or persists
-        into dankbit.bands, for any expiry_index (see TRACKED_EXPIRY_COUNT/
-        get_box_n/get_box). /api/zones-box/<asset>'s own live polling still
-        computes the yellow box's boundaries fresh on every request for
-        instant rendering, but via get_box() -> _compute_asset() directly,
-        never through get_box_n(), so it never writes here — this cron is
-        the only path that keeps dankbit.bands rows updating at all. Only
-        touches dankbit.bands (via _persist_extrema) — the TradingView
-        horizontal price lines (delta=0, gamma peak/bottom) are untouched by
-        this or any cron."""
+        """Cron entry point for confirmed structural Bands/Zones plus live Gamma.
+
+        Raw zones are calculated hourly.  Official displayed High/Low/Middle
+        zones update with the Green/Red Bands only inside a mature session
+        after both quality gates pass.  Outside those sessions, a material
+        structural change needs two consistent hourly candidates before it
+        can replace the official snapshot.  The middle Gamma Average remains
+        independently live behind its lighter quality gate.
+        """
+        now_utc = datetime.now(timezone.utc)
+        session_name = self._band_confirmation_session(now_utc)
+
+        if not session_name:
+            _logger.info(
+                "dankbit.bands: outside mature band session (%s UTC); confirmed bands stay unchanged, live gamma may update",
+                now_utc.strftime("%H:%M"),
+            )
+
         for asset in ("BTC", "ETH"):
             for expiry_index in range(self.TRACKED_EXPIRY_COUNT):
-                self.get_box_n(asset, expiry_index)
+                data = self._compute_asset(asset, expiry_index=expiry_index)
+                if not data:
+                    continue
+
+                structural_confirmed = False
+                if session_name:
+                    band_ok, band_reason = self._band_quality_gate(data)
+                    zone_ok, zone_reason = self._zone_quality_gate(data)
+                    if band_ok and zone_ok:
+                        self._persist_extrema(data, zones_confirmation_reason=f"session:{session_name}")
+                        structural_confirmed = True
+                        _logger.info(
+                            "dankbit.bands: confirmed Bands/Zones for %s expiry_index=%s in %s "
+                            "(high=%s low=%s high_zone=%s..%s low_zone=%s..%s middle=%s..%s gamma=%s)",
+                            asset, expiry_index, session_name,
+                            data.get("high_resistance"), data.get("low_support"),
+                            data.get("high_zone_min"), data.get("high_zone_max"),
+                            data.get("low_zone_min"), data.get("low_zone_max"),
+                            data.get("middle_zone_min"), data.get("middle_zone_max"),
+                            data.get("gamma_band"),
+                        )
+                    else:
+                        _logger.warning(
+                            "dankbit.bands: raw %s expiry_index=%s not confirmed in %s: band=%s zone=%s "
+                            "(high=%s low=%s longs=%s shorts=%s)",
+                            asset, expiry_index, session_name, band_reason, zone_reason,
+                            data.get("high_resistance"), data.get("low_support"),
+                            data.get("long_trade_count"), data.get("short_trade_count"),
+                        )
+                else:
+                    zone_ok, zone_reason = self._zone_quality_gate(data)
+                    record = self.sudo().search([("instrument", "=", data["instrument"])], limit=1)
+                    if zone_ok and record:
+                        structural_change, structural_reason = self._zone_structural_change_gate(record, data)
+                        hits = self._stage_zone_candidate(record, data)
+                        if structural_change and hits >= 2:
+                            reason = f"emergency:{structural_reason}:two-hour-confirmed"
+                            self._persist_extrema(data, zones_confirmation_reason=reason)
+                            structural_confirmed = True
+                            _logger.warning(
+                                "dankbit.bands: emergency Bands/Zones replacement for %s expiry_index=%s "
+                                "after %s consistent hourly candidates (%s)",
+                                asset, expiry_index, hits, structural_reason,
+                            )
+                        elif structural_change:
+                            _logger.info(
+                                "dankbit.bands: staged structural zone candidate for %s expiry_index=%s "
+                                "(%s, hits=%s/2)",
+                                asset, expiry_index, structural_reason, hits,
+                            )
+                    elif not zone_ok:
+                        _logger.info(
+                            "dankbit.bands: hourly zone candidate rejected for %s expiry_index=%s: %s",
+                            asset, expiry_index, zone_reason,
+                        )
+
+                if structural_confirmed:
+                    continue
+
+                gamma_ok, gamma_reason = self._gamma_quality_gate(data)
+                if not gamma_ok:
+                    _logger.info(
+                        "dankbit.bands: skipped live gamma for %s expiry_index=%s: %s",
+                        asset, expiry_index, gamma_reason,
+                    )
+                    continue
+                if self._persist_live_gamma(data):
+                    _logger.info(
+                        "dankbit.bands: live gamma updated for %s expiry_index=%s (gamma=%s)",
+                        asset, expiry_index, data.get("gamma_band"),
+                    )

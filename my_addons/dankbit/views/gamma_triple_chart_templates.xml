@@ -139,14 +139,12 @@
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
-					// Candles are Kraken Futures on this page only (see
-					// dankbit.trade.get_candles_kraken_futures) — mirrors the
-					// server-side _KRAKEN_FUTURES_SYMBOL_MAP (PF_XBTUSD/
-					// PF_ETHUSD) rather than a naive 'PF_' + ASSET + 'USD'
-					// concat, since Kraken uses "XBT" (not "BTC") as
-					// Bitcoin's own ticker.
-					const KRAKEN_FUTURES_SYMBOL = { BTC: 'PF_XBTUSD', ETH: 'PF_ETHUSD' }[ASSET] || ('PF_' + ASSET + 'USD');
-					document.getElementById('exchange-label').textContent = 'Kraken Futures · ' + KRAKEN_FUTURES_SYMBOL;
+					// Candles are Deribit perpetual futures on this page only
+					// (see dankbit.trade.get_candles_deribit_perpetual) —
+					// mirrors the server-side
+					// _DERIBIT_PERPETUAL_SYMBOL_MAP.
+					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
+					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					// Recomputed from scratch on every request (no persisted
 					// history behind this page at all — see
 					// ChartController.gamma_triple_json) — polls on the same
@@ -160,10 +158,11 @@
 					// server-side by ChartController.gamma_triple_json's
 					// own ?hours= handling.
 					let   WINDOW_HOURS = 12;
-					// Kraken Futures, not Binance spot — /gt/<asset> only, per
-					// product decision; every other TradingView page in this
-					// addon keeps reading candles from /api/klines/<asset>
-					// (Binance spot, see ChartController.klines_proxy).
+					// Deribit perpetual futures, not Binance spot —
+					// /gt/<asset> only, per product decision; every other
+					// TradingView page in this addon keeps reading candles
+					// from /api/klines/<asset> (Binance spot, see
+					// ChartController.klines_proxy).
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					const gammaTripleUrl = h => '/api/gamma-triple/' + ASSET + '?hours=' + h;
 					// Same "Last trade:" footer field the Delta Chart uses —

@@ -21,25 +21,145 @@ from . import next_candle_forecast
 Y_CHART_DEFAULT_WINDOW_HOURS = 12
 Y_CHART_WINDOW_HOURS_CHOICES = (12, 24, 48)
 
-# /4l/<asset>'s own "Window" dropdown default — same choice set as
-# Y_CHART_WINDOW_HOURS_CHOICES above (shared, since both dropdowns offer
-# 12h/24h/48h) and, currently, the same value as /gt's own default —
-# kept as its own constant since the two pages' defaults are
-# independent product decisions, not meant to move together, even
-# though they happen to agree right now.
-FOUR_LEG_DEFAULT_WINDOW_HOURS = 12
+# /4l/<asset>'s own "Window" dropdown numeric choice set — 8h/12h/24h —
+# split out from Y_CHART_WINDOW_HOURS_CHOICES (which /gt/<asset> still
+# uses unchanged) once this page's own choice set grew past that shared
+# 12/24/48 tuple, so /gt/<asset>'s own "Window" dropdown is unaffected.
+# 16h/20h/48h/72h and the "All" (no-window-bound) option were offered at
+# one point and removed per product decision; 3h/5h/7h were added later,
+# filling in the gaps left in the original 1h/2h/4h/6h/8h/12h set; 24h
+# and "All" were both re-added afterwards per later product decisions;
+# 1h/2h/3h/4h/5h/6h/7h/8h were then removed in a further round, leaving
+# only 12h/24h in this tuple; 8h was then re-added per a later product
+# decision. "All" (`?hours=all`) is handled as a separate string sentinel
+# in four_leg_gamma_json, not a member of this tuple — it skips the
+# trailing-hours trade filter entirely rather than mapping to a number
+# of hours.
+FOUR_LEG_WINDOW_HOURS_CHOICES = (8, 12, 24)
 
-# /mw/<asset>'s own "Window" dropdown choice set — 12h/24h/48h plus a 72h
-# option Y_CHART_WINDOW_HOURS_CHOICES doesn't offer (kept as its own
-# constant rather than extending that shared tuple, so /gt's and /4l's
-# own "Window" dropdowns are unaffected).
-MW_WINDOW_HOURS_CHOICES = (12, 24, 48, 72)
+# /4l/<asset>'s own "Window" dropdown default — also the fallback used
+# by four_leg_gamma_json when `?hours=` is missing/malformed, same as
+# every other *_DEFAULT_WINDOW_HOURS fallback in this file. Was a number
+# (8, i.e. 8h) until 1h-8h were removed from FOUR_LEG_WINDOW_HOURS_CHOICES
+# above, at which point the default moved to the "all" string sentinel
+# (see four_leg_gamma_json) rather than to another numeric choice.
+FOUR_LEG_DEFAULT_WINDOW_HOURS = "all"
+
+# /mw/<asset>'s own "Window" dropdown numeric choice set — 12h/24h, kept
+# as its own constant rather than extending Y_CHART_WINDOW_HOURS_CHOICES,
+# so /gt's and /4l's own "Window" dropdowns are unaffected. Both this
+# tuple and /4l/<asset>'s own FOUR_LEG_WINDOW_HOURS_CHOICES were reduced
+# to 12h/24h independently, in separate product decisions, then 8h was
+# re-added to /4l/<asset>'s own tuple only (a further independent
+# decision) — the two are kept as independent constants, not aliased to
+# each other, so they no longer have to stay identical.
+# Previously 4h/8h/12h/16h/20h/24h/48h/72h plus a no-window-bound "All"
+# option; 16h/20h/48h/72h/All were removed and 1h/2h/6h/12h added per
+# product decision, across three rounds (12h was dropped in the first
+# round, then re-added — alongside 24h being dropped — in a second, then
+# 6h added in a third; the "All" no-window-bound mode — `?hours=all` —
+# was removed along with its dropdown option; see mw_gamma_json). 24h and
+# "All" were both re-added afterwards per later product decisions, then
+# 1h/2h/4h/6h/8h were removed in a further round, leaving only 12h/24h in
+# this tuple. "All" is handled as a separate string sentinel in
+# mw_gamma_json, not a member of this tuple, and skips the trailing-hours
+# trade filter entirely rather than mapping to a number of hours.
+MW_WINDOW_HOURS_CHOICES = (12, 24)
 
 # /mw/<asset>'s own "Window" dropdown default — kept as its own constant
-# since this page's own default is an independent product decision (48h,
-# unlike /gt's and /4l's own 12h default — /mw's cumulative-through-
-# expiry domain benefits from a wider trailing-hours window by default).
-MW_DEFAULT_WINDOW_HOURS = 48
+# since this page's own default is an independent product decision.
+# Was a number (4, i.e. 4h) until 4h was removed from
+# MW_WINDOW_HOURS_CHOICES above, at which point the default moved to the
+# "all" string sentinel (see mw_gamma_json) rather than to another
+# numeric choice.
+MW_DEFAULT_WINDOW_HOURS = "all"
+
+
+def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, timeframe="4h"):
+    """Build a continuous three-expiry path around up to three anchors.
+
+    Anchor 0 is the immediate Next-Candle result. Anchor 1/2 use the Greek
+    Flow/Gamma/Zones/Smart-Liquidity candle shape computed independently from
+    the second/third expiry and sit one/two days farther into the path. Raw
+    Thales bodies between anchors are smoothly corrected so the path reaches
+    the next anchor without a discontinuity; their wick geometry is retained.
+    """
+    limit = max(1, min(int(count or max_count), int(max_count)))
+    source = list(raw_points or [])[:limit]
+    if not source:
+        return []
+
+    anchors = anchors or {}
+    candles_per_day = {"1h": 24, "4h": 6, "1d": 1}.get(timeframe, 6)
+    anchor_by_index = {
+        expiry_index * candles_per_day: candle
+        for expiry_index, candle in anchors.items()
+        if candle and expiry_index * candles_per_day < len(source)
+    }
+
+    def geometry(raw, new_open, body=None, wick_source=None, mode=None):
+        old_open = float(raw["open"])
+        old_close = float(raw["close"])
+        old_high = float(raw["high"])
+        old_low = float(raw["low"])
+        candle_body = old_close - old_open if body is None else float(body)
+        wick = wick_source or raw
+        wick_open = float(wick["open"])
+        wick_close = float(wick["close"])
+        wick_high = float(wick["high"])
+        wick_low = float(wick["low"])
+        upper_wick = max(0.0, wick_high - max(wick_open, wick_close))
+        lower_wick = max(0.0, min(wick_open, wick_close) - wick_low)
+        new_close = float(new_open) + candle_body
+        return {
+            "hours": raw.get("hours"), "open": float(new_open),
+            "high": max(float(new_open), new_close) + upper_wick,
+            "low": min(float(new_open), new_close) - lower_wick,
+            "close": new_close, "mode": mode or raw.get("mode"),
+        }
+
+    output = []
+    first_anchor = anchor_by_index.get(0)
+    if first_anchor:
+        output.append(geometry(
+            # Greek Flow owns the first candle's body and wick geometry, but
+            # never its absolute opening price.  The opening price belongs to
+            # the continuous market/forecast chain.  Anchoring here to the raw
+            # forecast path also prevents an older persisted E1 revision from
+            # creating a price gap before the first forecast candle.
+            source[0], float(source[0]["open"]),
+            body=first_anchor["close"] - first_anchor["open"],
+            wick_source=first_anchor, mode="expiry_anchor_1",
+        ))
+    else:
+        output.append(dict(source[0]))
+
+    cursor = 1
+    for anchor_index in sorted(i for i in anchor_by_index if i > 0):
+        anchor = anchor_by_index[anchor_index]
+        intermediate = source[cursor:anchor_index]
+        target_open = float(source[anchor_index]["open"])
+        if intermediate:
+            raw_total = sum(float(p["close"]) - float(p["open"]) for p in intermediate)
+            correction = (target_open - float(output[-1]["close"]) - raw_total) / len(intermediate)
+            for raw in intermediate:
+                adjusted_body = float(raw["close"]) - float(raw["open"]) + correction
+                output.append(geometry(raw, output[-1]["close"], body=adjusted_body))
+        # With adjacent anchors (Daily), continuity takes precedence. With
+        # intermediate candles, the distributed correction lands exactly on
+        # the structural raw target-open for this expiry anchor.
+        anchor_open = float(output[-1]["close"])
+        output.append(geometry(
+            source[anchor_index], anchor_open,
+            body=float(anchor["close"]) - float(anchor["open"]),
+            wick_source=anchor, mode="expiry_anchor_%s" % (anchor_index // candles_per_day + 1),
+        ))
+        cursor = anchor_index + 1
+
+    for raw in source[cursor:]:
+        new_open = float(output[-1]["close"])
+        output.append(geometry(raw, new_open))
+    return output
 
 
 class _AggTrade:
@@ -334,6 +454,14 @@ class ChartController(http.Controller):
         def _line(text, color=None):
             return {"text": text, "color": color}
 
+        # A leg with zero trades in this window has no gamma/delta/theta/
+        # vega curve to peak/bottom at — options.per_leg_greeks() reports
+        # that as price=None rather than a fake price-grid-edge value (see
+        # its own docstring). "n/a", same as High/Resistance's/
+        # Low/Support's own None-handling just above.
+        def _price(p):
+            return "n/a" if p is None else "${:,.0f}".format(p)
+
         zone_info_lines = [
             _line("Seller Max Profit (SMP): ${:,.0f}".format(summary["seller_max_profit"])),
             _line("Buyer Max Loss (BML): ${:,.0f}".format(summary["buyer_max_loss"])),
@@ -346,10 +474,10 @@ class ChartController(http.Controller):
             _line(f"Low/Support: {low_support}"),
             _line(" "),
             _line("Gamma", color="violet"),
-            _line("Buyer Call Gamma (BCG): ${:,.0f}".format(bcg_price)),
-            _line("Buyer Put Gamma (BPG): ${:,.0f}".format(bpg_price)),
-            _line("Seller Call Gamma (SCG): ${:,.0f}".format(scg_price)),
-            _line("Seller Put Gamma (SPG): ${:,.0f}".format(spg_price)),
+            _line(f"Buyer Call Gamma (BCG): {_price(bcg_price)}"),
+            _line(f"Buyer Put Gamma (BPG): {_price(bpg_price)}"),
+            _line(f"Seller Call Gamma (SCG): {_price(scg_price)}"),
+            _line(f"Seller Put Gamma (SPG): {_price(spg_price)}"),
             _line(" "),
             _line("BCG Abs.: {:,.0f}".format(abs(bcg_value) / 1_000_000)),
             _line("BPG Abs.: {:,.0f}".format(abs(bpg_value) / 1_000_000)),
@@ -357,10 +485,10 @@ class ChartController(http.Controller):
             _line("SPG Abs.: {:,.0f}".format(abs(spg_value) / 1_000_000)),
             _line(" "),
             _line("Delta", color="green"),
-            _line("Buyer Call Delta (BCD): ${:,.0f}".format(bcd_price)),
-            _line("Buyer Put Delta (BPD): ${:,.0f}".format(bpd_price)),
-            _line("Seller Call Delta (SCD): ${:,.0f}".format(scd_price)),
-            _line("Seller Put Delta (SPD): ${:,.0f}".format(spd_price)),
+            _line(f"Buyer Call Delta (BCD): {_price(bcd_price)}"),
+            _line(f"Buyer Put Delta (BPD): {_price(bpd_price)}"),
+            _line(f"Seller Call Delta (SCD): {_price(scd_price)}"),
+            _line(f"Seller Put Delta (SPD): {_price(spd_price)}"),
             _line(" "),
             _line("BCD Abs.: {:,.0f}".format(abs(bcd_value) / 10)),
             _line("BPD Abs.: {:,.0f}".format(abs(bpd_value) / 10)),
@@ -373,10 +501,10 @@ class ChartController(http.Controller):
         # top-left zone_info_lines column with everything else.
         right_info_lines = [
             _line("Theta", color="orange"),
-            _line("Buyer Call Theta (BCT): ${:,.0f}".format(bct_price)),
-            _line("Buyer Put Theta (BPT): ${:,.0f}".format(bpt_price)),
-            _line("Seller Call Theta (SCT): ${:,.0f}".format(sct_price)),
-            _line("Seller Put Theta (SPT): ${:,.0f}".format(spt_price)),
+            _line(f"Buyer Call Theta (BCT): {_price(bct_price)}"),
+            _line(f"Buyer Put Theta (BPT): {_price(bpt_price)}"),
+            _line(f"Seller Call Theta (SCT): {_price(sct_price)}"),
+            _line(f"Seller Put Theta (SPT): {_price(spt_price)}"),
             _line(" "),
             _line("BCT Abs.: {:,.0f}".format(abs(bct_value) / 10_000)),
             _line("BPT Abs.: {:,.0f}".format(abs(bpt_value) / 10_000)),
@@ -384,10 +512,10 @@ class ChartController(http.Controller):
             _line("SPT Abs.: {:,.0f}".format(abs(spt_value) / 10_000)),
             _line(" "),
             _line("Vega", color="blue"),
-            _line("Buyer Call Vega (BCV): ${:,.0f}".format(bcv_price)),
-            _line("Buyer Put Vega (BPV): ${:,.0f}".format(bpv_price)),
-            _line("Seller Call Vega (SCV): ${:,.0f}".format(scv_price)),
-            _line("Seller Put Vega (SPV): ${:,.0f}".format(spv_price)),
+            _line(f"Buyer Call Vega (BCV): {_price(bcv_price)}"),
+            _line(f"Buyer Put Vega (BPV): {_price(bpv_price)}"),
+            _line(f"Seller Call Vega (SCV): {_price(scv_price)}"),
+            _line(f"Seller Put Vega (SPV): {_price(spv_price)}"),
             _line(" "),
             # Raw portfolio-vega values sit in the low thousands here — an
             # order of magnitude below theta's ten-thousands and well above
@@ -620,6 +748,7 @@ class ChartController(http.Controller):
             WHERE name ILIKE %s
               AND expiration >= NOW()
               AND active = TRUE
+              AND iv <> 0
             GROUP BY strike, option_type, direction, expiration
         """, (f'%{instrument}%',))
         rows = cr.fetchall()
@@ -813,6 +942,7 @@ class ChartController(http.Controller):
               AND expiration >= NOW()
               AND expiration <= %s
               AND active = TRUE
+              AND iv <> 0
             GROUP BY strike, option_type, direction, expiration
         """, (f'%{asset}%', expiry_dt))
         rows = cr.fetchall()
@@ -1024,6 +1154,7 @@ class ChartController(http.Controller):
               AND expiration >= NOW()
               AND expiration <= %s
               AND active = TRUE
+              AND iv <> 0
             GROUP BY strike, option_type, direction, expiration
         """, (f'%{asset}%', expiry_dt))
         rows = cr.fetchall()
@@ -1091,6 +1222,7 @@ class ChartController(http.Controller):
             WHERE name ILIKE %s
               AND expiration >= NOW()
               AND active = TRUE
+              AND iv <> 0
             GROUP BY strike, option_type, direction, expiration
         """, (f'%{asset}%',))
         rows = cr.fetchall()
@@ -1162,6 +1294,7 @@ class ChartController(http.Controller):
             WHERE name ILIKE %s
               AND active = TRUE
               AND deribit_ts >= NOW() - INTERVAL '24 hours'
+              AND iv <> 0
             GROUP BY strike, option_type, direction, expiration
         """, (f'{asset}-{expiry_str}-%',))
         rows = cr.fetchall()
@@ -1279,6 +1412,7 @@ class ChartController(http.Controller):
             WHERE name ILIKE %s
               AND expiration >= NOW()
               AND active = TRUE
+              AND iv <> 0
               {cutoff_sql}
             GROUP BY name, strike, option_type, direction, expiration
         """, query_params)
@@ -1525,6 +1659,14 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
+        hours_param = request.httprequest.args.get("hours")
+        try:
+            hours = int(hours_param) if hours_param else None
+        except (TypeError, ValueError):
+            hours = None
+        if hours is not None and not 1 <= hours <= 168:
+            hours = None
+
         cr = request.env.cr
         cr.execute("""
             SELECT instrument, index_price, high_resistance, low_support,
@@ -1561,6 +1703,7 @@ class ChartController(http.Controller):
                 continue
             ts = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
             series.append({
+                "instrument": instrument,
                 "t": int(ts.timestamp() * 1000),
                 "index_price": float(index_price or 0.0),
                 "high_resistance": float(high_resistance or 0.0),
@@ -1577,11 +1720,47 @@ class ChartController(http.Controller):
                 "smart_liq_upper_strength": float(smart_liq_upper_strength or 0.0),
                 "smart_liq_lower_strength": float(smart_liq_lower_strength or 0.0),
             })
+
+        # In trailing-window preview mode the structural Green/Red Bands
+        # remain the persisted session-confirmed values, while Gamma and
+        # Smart Liquidity are replaced by a fresh computation using only
+        # the selected option-flow window.  Nothing is persisted here.
+        if hours is not None:
+            by_instrument = {row["instrument"]: row for row in series}
+            for expiry_index in range(request.env["dankbit.bands"].TRACKED_EXPIRY_COUNT):
+                live = request.env["dankbit.bands"]._compute_asset(
+                    asset, expiry_index=expiry_index, hours=hours,
+                    future_days_only=True,
+                )
+                if not live:
+                    continue
+                expiration = live["expiration"]
+                expiration = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
+                row = by_instrument.get(live["instrument"])
+                if row is None:
+                    row = {
+                        "instrument": live["instrument"],
+                        "t": int(expiration.timestamp() * 1000),
+                        "index_price": float(live["index_price"] or 0.0),
+                        "high_resistance": 0.0, "low_support": 0.0,
+                        "high_resistance_positive": False, "low_support_positive": False,
+                        "delta_band": 0.0,
+                    }
+                    series.append(row)
+                    by_instrument[live["instrument"]] = row
+                row.update({
+                    "gamma_band": float(live["gamma_band"] or 0.0),
+                    "smart_liq_upper_price": float(live["smart_liq_upper_price"] or 0.0),
+                    "smart_liq_lower_price": float(live["smart_liq_lower_price"] or 0.0),
+                    "smart_liq_upper_strength": float(live["smart_liq_upper_strength"] or 0.0),
+                    "smart_liq_lower_strength": float(live["smart_liq_lower_strength"] or 0.0),
+                })
         series.sort(key=lambda r: r["t"])
 
         payload = {
             "asset": asset,
             "bands": series,
+            "window_hours": hours,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         return request.make_response(
@@ -1591,19 +1770,14 @@ class ChartController(http.Controller):
 
     @http.route("/api/zones-box/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def zones_box_json(self, asset):
-        """Live zones-box boundaries for the nearest active expiry —
-        computed fresh on every request via dankbit.bands.get_box(), which
-        always calls _compute_asset() directly and never persists, on the
-        default since-00:00-UTC-through-now path or with an explicit
-        `?hours=` override (get_box()'s `hours` param overrides the trade
-        window with the trailing-hours one instead) — neither path ever
-        writes to dankbit.bands; only compute_snapshot()'s cron does (see
-        dankbit.bands.get_box/_persist_extrema). Nothing reads box-boundary
-        history either: only the latest value is ever drawn, so those 4
-        fields are never persisted regardless. Driven by /chart/<asset>'s
-        00:00-UTC-vs-trailing-hours radio toggle (see dankbit_templates.xml);
-        omitting `hours` leaves this endpoint's behavior exactly as
-        before."""
+        """Nearest-expiry zones for the chart.
+
+        The default since-00:00 path serves the last session-confirmed (or
+        two-hour emergency-confirmed) High/Low/Middle zones.  `?hours=` is an
+        explicit non-persisted live analytical preview of a trailing window.
+        Forecast snapshots use their own hourly raw computation and are not
+        constrained by this display endpoint.
+        """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -1612,7 +1786,14 @@ class ChartController(http.Controller):
             )
 
         hours_param = request.httprequest.args.get("hours")
-        hours = int(hours_param) if hours_param else None
+        try:
+            hours = int(hours_param) if hours_param else None
+        except (TypeError, ValueError):
+            hours = None
+        # Prevent malformed/manual requests from creating an unbounded trade
+        # query.  The chart currently sends 2, 4, or the configured window.
+        if hours is not None and not 1 <= hours <= 168:
+            hours = None
 
         data = request.env["dankbit.bands"].get_box(asset, hours=hours)
         if not data:
@@ -1631,6 +1812,7 @@ class ChartController(http.Controller):
                 "long_zero_below_price": float(data["long_zero_below_price"]),
                 "seller_max_profit": float(data["seller_max_profit"]),
                 "buyer_max_loss": float(data["buyer_max_loss"]),
+                "zone_confirmation_mode": data.get("zone_confirmation_mode", "unknown"),
             }
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
         return request.make_response(
@@ -1711,17 +1893,19 @@ class ChartController(http.Controller):
 
         cr = request.env.cr
         cr.execute("""
-            SELECT computed_at, instrument, high_resistance, low_support,
+            SELECT computed_at, expiry_index, instrument, expiration,
+                   high_resistance, low_support,
                    gamma_band, smart_liq_upper, smart_liq_lower,
                    smart_liq_upper_strength, smart_liq_lower_strength,
                    smart_liq_upper_avg, smart_liq_lower_avg
             FROM dankbit_live_band
             WHERE asset = %s
-            ORDER BY computed_at ASC
+            ORDER BY computed_at ASC, expiry_index ASC
         """, (asset,))
         points = []
         for (
-            computed_at, instrument, high_resistance, low_support,
+            computed_at, expiry_index, instrument, expiration,
+            high_resistance, low_support,
             gamma_band, smart_liq_upper, smart_liq_lower,
             smart_liq_upper_strength, smart_liq_lower_strength,
             smart_liq_upper_avg, smart_liq_lower_avg,
@@ -1729,7 +1913,9 @@ class ChartController(http.Controller):
             ts = computed_at if computed_at.tzinfo else computed_at.replace(tzinfo=timezone.utc)
             points.append({
                 "t": int(ts.timestamp() * 1000),
+                "expiry_index": int(expiry_index or 0),
                 "instrument": instrument,
+                "expiration": int((expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)).timestamp() * 1000) if expiration else None,
                 "high_resistance": float(high_resistance or 0.0),
                 "low_support": float(low_support or 0.0),
                 "gamma_band": float(gamma_band or 0.0),
@@ -1895,13 +2081,13 @@ class ChartController(http.Controller):
 
     @http.route("/api/klines-futures/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def klines_futures_proxy(self, asset, interval="4h", limit="500"):
-        """Kraken Futures equivalent of klines_proxy above — sourced from
-        dankbit.trade.get_candles_kraken_futures() instead of get_candles()
-        (Binance spot). Used by /gt/<asset>'s and /4l/<asset>'s own candle
-        series, per product decision to keep those two pages on Kraken
-        Futures rather than switching every TradingView page's candle
-        source."""
-        candles = request.env["dankbit.trade"].get_candles_kraken_futures(asset, interval=interval, limit=int(limit))
+        """Deribit perpetual-futures equivalent of klines_proxy above —
+        sourced from dankbit.trade.get_candles_deribit_perpetual() instead
+        of get_candles() (Binance spot). Used by /gt/<asset>'s,
+        /4l/<asset>'s, and /mw/<asset>'s own candle series, per product
+        decision to keep those three pages on Deribit's own perpetuals
+        rather than switching every TradingView page's candle source."""
+        candles = request.env["dankbit.trade"].get_candles_deribit_perpetual(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
@@ -1924,11 +2110,7 @@ class ChartController(http.Controller):
         _format_instrument() directly rather than
         dankbit.bands._compute_asset(), since this route only needs the
         instrument string, not a full curve build — any other/missing
-        value falls back to "nearest". Also returns call_gamma_price/value
-        and put_gamma_price/value — the combined (buy+sell) portfolio
-        dollar-gamma curve for that expiry's calls and puts respectively,
-        via options.option_type_gamma_extreme() — feeds /4l/<asset>'s 2
-        violet "All Calls"/"All Puts" lines. This route originally also offered
+        value falls back to "nearest". This route originally also offered
         "weekly"/"monthly" (the configured weekly_expiry/monthly_expiry
         instrument) and "all" (every active instrument for `asset`, no
         expiry restriction — this route's original, pre-dropdown
@@ -1936,13 +2118,21 @@ class ChartController(http.Controller):
         "nearest_plus_1"/"nearest_plus_2". The trailing-hours trade window
         is independently user-selectable via the page's own "Window"
         dropdown — an optional `?hours=` query param, restricted to
-        Y_CHART_WINDOW_HOURS_CHOICES (12/24/48; any other/missing value
-        falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS=12 — this page's own
-        default, kept as its own constant from /api/gamma-triple/<asset>'s
-        Y_CHART_DEFAULT_WINDOW_HOURS even though both are 12 today, since
-        the two pages' defaults are independent product decisions), same
-        defensive restriction pattern /api/gamma-triple/<asset>
-        already uses for its own "Window" dropdown. Trades are restricted
+        FOUR_LEG_WINDOW_HOURS_CHOICES (8/12/24 — or the literal string
+        "all", skipping the trailing-hours trade filter entirely; any
+        other/missing value falls back to
+        FOUR_LEG_DEFAULT_WINDOW_HOURS="all" — this page's own choice
+        set/default, split out from /api/gamma-triple/<asset>'s own
+        Y_CHART_WINDOW_HOURS_CHOICES/Y_CHART_DEFAULT_WINDOW_HOURS once
+        this page's own set grew past that shared 12/24/48 tuple, since
+        the two pages' choice sets are independent product decisions).
+        48h/72h were offered at one point and removed per product
+        decision; `?hours=all` was removed alongside them and later
+        re-added per a later product decision; 1h/2h/3h/4h/5h/6h/7h/8h
+        were removed in a further round, leaving 12h/24h/All, and the
+        default moved from 8h to "All" at that point; 8h was then
+        re-added per a still later product decision (default stayed
+        "All"). Trades are restricted
         to the
         resolved instrument via the same anchored `=ilike` domain
         chart_png_zones uses (`f"{instrument}-%"`, left-prefix match so
@@ -1978,13 +2168,19 @@ class ChartController(http.Controller):
             expiry_mode = "nearest"
         expiry_index = expiry_ordinals[expiry_mode]
 
+        # "all" (?hours=all) skips the trailing-hours trade filter entirely
+        # — checked before the int() parse below so it isn't mistaken for
+        # a malformed value and overwritten with the default.
         hours_param = request.httprequest.args.get("hours")
-        try:
-            hours = int(hours_param)
-        except (TypeError, ValueError):
-            hours = None
-        if hours not in Y_CHART_WINDOW_HOURS_CHOICES:
-            hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
+        if hours_param == "all":
+            hours = "all"
+        else:
+            try:
+                hours = int(hours_param)
+            except (TypeError, ValueError):
+                hours = None
+            if hours not in FOUR_LEG_WINDOW_HOURS_CHOICES:
+                hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -1995,30 +2191,30 @@ class ChartController(http.Controller):
             instrument = bands_model._format_instrument(asset, expirations[expiry_index])
         name_prefix = instrument
 
-        window_start = as_of - timedelta(hours=hours)
         trades = request.env["dankbit.trade"]
         if name_prefix:
-            trades = trades.with_context(active_test=False).search([
-                ("name", "=ilike", f"{name_prefix}-%"),
-                ("deribit_ts", ">=", window_start),
-                ("deribit_ts", "<=", as_of),
-            ])
+            domain = [("name", "=ilike", f"{name_prefix}-%")]
+            if hours != "all":
+                window_start = as_of - timedelta(hours=hours)
+                domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+            trades = trades.with_context(active_test=False).search(domain)
 
         points = []
         if trades:
             STs = np.arange(from_price, to_price, step, dtype=np.float64)
             legs = options.per_leg_greeks(STs, trades)
-            call_gamma_price, call_gamma_value = options.option_type_gamma_extreme(STs, trades, "call")
-            put_gamma_price, put_gamma_value = options.option_type_gamma_extreme(STs, trades, "put")
+            # A leg with zero trades reports gamma_price as None (no curve
+            # to peak/bottom at) — collapsed to 0.0 here, same "0.0 =
+            # absent" sentinel the client's own `if (latest.bcg_price)`
+            # falsy checks (and its AVG-line filter(Boolean)) already
+            # expect (dankbit_four_leg_gamma_chart_templates.xml).
             points.append({
                 "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
                 "trade_count": len(trades),
-                "bcg_price": legs["long_call"]["gamma_price"], "bcg_value": legs["long_call"]["gamma_value"],
-                "bpg_price": legs["long_put"]["gamma_price"], "bpg_value": legs["long_put"]["gamma_value"],
-                "scg_price": legs["short_call"]["gamma_price"], "scg_value": legs["short_call"]["gamma_value"],
-                "spg_price": legs["short_put"]["gamma_price"], "spg_value": legs["short_put"]["gamma_value"],
-                "call_gamma_price": call_gamma_price, "call_gamma_value": call_gamma_value,
-                "put_gamma_price": put_gamma_price, "put_gamma_value": put_gamma_value,
+                "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
+                "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
+                "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
+                "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
             })
 
         payload = {"asset": asset, "instrument": instrument, "points": points}
@@ -2034,27 +2230,44 @@ class ChartController(http.Controller):
         dollar-gamma curve, over trailing trades restricted to one
         expiry, peaks or bottoms), recomputed live on every poll via
         /api/four-leg-gamma (no model/table behind this page), alongside
-        real Kraken Futures perpetual candles (dankbit.trade.
-        get_candles_kraken_futures(), same /api/klines-futures/<asset>
-        proxy /gt/<asset> uses — Kraken Futures has native 15m/1h/4h/1d
-        resolution strings matching this addon's own interval values 1:1).
-        This page originally sourced Deribit perpetual-futures candles at
-        a fixed 1h timeframe, then briefly moved to Binance spot candles
-        since Deribit's chart API has no native 4h resolution — moved
-        again, to Kraken Futures, to keep this page on perpetuals (not
-        spot) while still getting a native 4h/1d resolution. Own
-        "Timeframe" dropdown (4h default, plus 15m/1h/1d — 15m added to
-        match /gt/<asset>'s own dropdown, since Kraken Futures natively
-        supports it too; 1h/4h/1d options/default otherwise match the
-        Delta/Gamma/Strike Gamma charts' own dropdown),
+        real Deribit perpetual-futures candles (dankbit.trade.
+        get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
+        proxy /gt/<asset> uses — Deribit has no native 4h resolution, so
+        "4h" is built server-side by fetching native 60-minute bars and
+        bucketing every 4 into one; 15m/1h/1d map directly onto Deribit's
+        own resolution strings). This page originally sourced Deribit
+        perpetual-futures candles at a fixed 1h timeframe, then moved to
+        Binance spot candles since Deribit's chart API has no native 4h
+        resolution, then moved to Kraken Futures to keep this page on
+        perpetuals (not spot) while still getting a native 4h/1d
+        resolution — moved back to Deribit perpetuals per product
+        decision, now that the 4h bucket is built server-side instead.
+        Own "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m was
+        added to match /gt/<asset>'s own dropdown, since Deribit natively
+        supports it too, and was originally also this page's own default
+        until it was changed to 4h per product decision, matching the
+        Delta/Gamma/Strike Gamma charts' own default),
         own "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default
         — this route originally also offered Weekly/Monthly/All, removed
         per product decision in favor of Nearest+1/Nearest+2, same
         nearest+1/nearest+2 ordinal notion /gt/<asset>'s own 2nd/3rd price
         lines use), and own "Window"
-        dropdown (12h/24h/48h, 12h default — same choices/default as
-        /gt/<asset>'s own "Window" dropdown, independent of the "Expiry"
-        dropdown; see four_leg_gamma_json for how each option resolves).
+        dropdown (8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
+        CHOICES plus the "All" no-window-bound option, split out from
+        /gt/<asset>'s own Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once
+        this page's own set grew, "All" default, independent of the
+        "Expiry" dropdown; 16h/20h/48h/72h/All were offered at one point
+        and removed per product decision; 3h/5h/7h were added later,
+        filling in the gaps left in the original 1h/2h/4h/6h/8h/12h set,
+        and 24h and "All" were both re-added afterwards per later
+        product decisions; 1h/2h/3h/4h/5h/6h/7h/8h were then removed in
+        a further round, leaving only 12h/24h/All, and the default moved
+        from 8h to "All" at that point; 8h was then re-added per a still
+        later product decision (default stayed "All"); see
+        four_leg_gamma_json for how each option resolves). A vertical
+        marker line showing where the selected Window's trailing-hours
+        cutoff falls used to be drawn on the candle chart (#window-vline)
+        but was removed per product decision.
         Renders its own standalone template
         (dankbit_four_leg_gamma_chart). Polls on the general
         dankbit.refresh_interval, same as every other page's own refresh
@@ -2089,10 +2302,14 @@ class ChartController(http.Controller):
         Weekly/Monthly scopes, not a per-instrument name match) — further
         restricted, same query-param convention as /api/four-leg-gamma/
         <asset>'s own "Window" dropdown, to a trailing-hours trade window
-        (?hours=, one of MW_WINDOW_HOURS_CHOICES — 12/24/48/72, a 72h
-        option that page's own Y_CHART_WINDOW_HOURS_CHOICES doesn't offer
-        — falling back to MW_DEFAULT_WINDOW_HOURS=48 for any other/
-        missing value). Feeds
+        (?hours=, one of MW_WINDOW_HOURS_CHOICES — 12/24 — or the literal
+        string "all", skipping the `deribit_ts` filter entirely; falling
+        back to MW_DEFAULT_WINDOW_HOURS="all" for any other/missing
+        value). The no-window-bound "All" option existed at one point and
+        was removed per product decision along with 12h/16h/20h/48h/72h,
+        then re-added per a later product decision; 1h/2h/4h/6h/8h were
+        removed in a further round, leaving 12h/24h/All.
+        Feeds
         /mw/<asset>'s 4 horizontal gamma-price lines. No points at all
         (same nothing-computable-yet convention every other route in this
         addon follows) when the selected expiry isn't configured for
@@ -2124,16 +2341,22 @@ class ChartController(http.Controller):
             expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
         instrument = icp.get_param(expiry_param, default="").upper()
 
+        # "all" (?hours=all) skips the trailing-hours trade filter entirely
+        # — checked before the int() parse below so it isn't mistaken for
+        # a malformed value and overwritten with the default (see
+        # four_leg_gamma_json's own identical handling).
         hours_param = request.httprequest.args.get("hours")
-        try:
-            hours = int(hours_param)
-        except (TypeError, ValueError):
-            hours = None
-        if hours not in MW_WINDOW_HOURS_CHOICES:
-            hours = MW_DEFAULT_WINDOW_HOURS
+        if hours_param == "all":
+            hours = "all"
+        else:
+            try:
+                hours = int(hours_param)
+            except (TypeError, ValueError):
+                hours = None
+            if hours not in MW_WINDOW_HOURS_CHOICES:
+                hours = MW_DEFAULT_WINDOW_HOURS
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-        window_start = as_of - timedelta(hours=hours)
 
         # Naive UTC, same as every other `expiration` domain comparison
         # in this file (see chart_png_until's own as_of/window_start
@@ -2148,26 +2371,35 @@ class ChartController(http.Controller):
 
         points = []
         if expiry_dt:
-            trades = request.env["dankbit.trade"].search([
+            domain = [
                 ("name", "=ilike", f"{asset}-%"),
                 ("expiration", ">=", as_of),
                 ("expiration", "<=", expiry_dt),
-                ("deribit_ts", ">=", window_start),
-                ("deribit_ts", "<=", as_of),
-            ])
+            ]
+            if hours != "all":
+                window_start = as_of - timedelta(hours=hours)
+                domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+            trades = request.env["dankbit.trade"].search(domain)
             if trades:
                 STs = np.arange(from_price, to_price, step, dtype=np.float64)
                 legs = options.per_leg_greeks(STs, trades)
+                # See four_leg_gamma_json's own comment above — a leg with
+                # zero trades reports gamma_price as None, collapsed to 0.0
+                # here to match the client's existing 0.0-means-absent
+                # falsy checks.
                 points.append({
                     "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
                     "trade_count": len(trades),
-                    "bcg_price": legs["long_call"]["gamma_price"], "bcg_value": legs["long_call"]["gamma_value"],
-                    "bpg_price": legs["long_put"]["gamma_price"], "bpg_value": legs["long_put"]["gamma_value"],
-                    "scg_price": legs["short_call"]["gamma_price"], "scg_value": legs["short_call"]["gamma_value"],
-                    "spg_price": legs["short_put"]["gamma_price"], "spg_value": legs["short_put"]["gamma_value"],
+                    "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
+                    "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
+                    "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
+                    "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
                 })
 
-        payload = {"asset": asset, "instrument": instrument or None, "expiry_mode": expiry_mode, "points": points}
+        payload = {
+            "asset": asset, "instrument": instrument or None, "expiry_mode": expiry_mode,
+            "window_hours": hours, "points": points,
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
@@ -2176,20 +2408,29 @@ class ChartController(http.Controller):
     @http.route("/mw/<string:asset>", type="http", auth="user", website=True)
     def mw_gamma_chart(self, asset):
         """Standalone TradingView page — same shape as /4l/<asset> (own
-        template, Kraken Futures perpetual candles via
-        get_candles_kraken_futures()/api/klines-futures/<asset>, no
+        template, Deribit perpetual-futures candles via
+        get_candles_deribit_perpetual()/api/klines-futures/<asset>, no
         model/table behind this page, refreshed live on every poll), but
         its own "Expiry" dropdown offers Weekly/Monthly (the configured
-        weekly_expiry/monthly_expiry instrument for `asset`, Weekly
+        weekly_expiry/monthly_expiry instrument for `asset`, Monthly
         default) instead of Nearest/Nearest+1/Nearest+2, and the
         underlying trade domain for the 4 gamma legs is CUMULATIVE
         through the selected expiry rather than isolated to one
         instrument — see mw_gamma_json. Own "Window" dropdown
-        (12h/24h/48h/72h — MW_WINDOW_HOURS_CHOICES, a 72h option
-        /4l/<asset>'s own "Window" dropdown doesn't offer — 48h default,
-        MW_DEFAULT_WINDOW_HOURS, unlike /4l/<asset>'s own 12h default)
-        and "Timeframe" dropdown (15m/1h/4h/1d, 4h
-        default, same as /4l/<asset>'s own). Renders its own standalone template
+        (12h/24h/All — MW_WINDOW_HOURS_CHOICES plus the "All"
+        no-window-bound option, kept as its own constant/product decision
+        independent of /4l/<asset>'s own "Window" dropdown
+        (FOUR_LEG_WINDOW_HOURS_CHOICES, which additionally offers 8h,
+        re-added there per a later product decision that did not apply
+        to this page — the two pages' dropdowns were both reduced to
+        12h/24h/All independently and aren't aliased to each other, so
+        one page's dropdown changing doesn't imply the other's does too)
+        — "All" default, MW_DEFAULT_WINDOW_HOURS; 1h/2h/4h/6h/8h were
+        removed from this page's own dropdown per product decision, at
+        which point the default moved from 4h to "All")
+        and "Timeframe" dropdown (15m/1h/4h/1d, same options as
+        /4l/<asset>'s own, but 1d default here — an independent product
+        decision from that page's own 4h default). Renders its own standalone template
         (dankbit_mw_gamma_chart). Polls on the general
         dankbit.refresh_interval, same as every other page's own refresh
         rate."""
@@ -2204,7 +2445,11 @@ class ChartController(http.Controller):
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def forecast_json(self, asset, **kw):
-        """The Thales Forecast candle engine — full port of Thales's
+        """Unified 4H Forecast path.  Candle one is the revised Next Candle
+        Greek-Flow result; later candles retain the deterministic Thales
+        Gamma/Bands/Zones/Smart-Liquidity geometry and continue from its close.
+
+        The Thales Forecast candle engine is a full port of Thales's
         "Thales Bands" Pine indicator's forecast-candle engine (see
         forecast.py) onto Dankbit's own live per-leg gamma/delta/theta/vega
         Greeks, rather than Thales's manually-typed-in daily CSV rows.
@@ -2213,7 +2458,7 @@ class ChartController(http.Controller):
         anywhere, matching the source script, which has none either; every
         candle is a direct function of the current Greeks, the last couple
         of persisted dankbit.forecast.snapshot rows (for the Gamma-Band
-        Consensus slope), recent real 4h candles (for ATR/momentum/
+        Consensus slope), recent real candles matching the selected timeframe (for ATR/momentum/
         liquidity-sweep detection), and the forward Gamma Band dashed-line
         points (so the forecast trends the same direction as that line —
         see forecast.gamma_band_term_slope). The actual computation lives
@@ -2231,7 +2476,88 @@ class ChartController(http.Controller):
                 headers=[("Content-Type", "application/json")],
             )
 
-        result = request.env["dankbit.forecast.snapshot"].get_forecast_points(asset)
+        hours_param = request.httprequest.args.get("hours")
+        try:
+            hours = int(hours_param) if hours_param else None
+        except (TypeError, ValueError):
+            hours = None
+        if hours is not None and not 1 <= hours <= 168:
+            hours = None
+
+        timeframe = request.httprequest.args.get("timeframe", "4h")
+        if timeframe not in next_candle_forecast.TIMEFRAME_CONFIG:
+            timeframe = "4h"
+        max_counts = {"1h": 72, "4h": 18, "1d": 3}
+        max_count = max_counts[timeframe]
+        count_param = request.httprequest.args.get("count")
+        try:
+            forecast_count = max(1, min(int(count_param or max_count), max_count))
+        except (TypeError, ValueError):
+            forecast_count = max_count
+
+        result = request.env["dankbit.forecast.snapshot"].get_forecast_points(
+            asset, hours=hours, timeframe=timeframe,
+        )
+        ForecastNext = request.env["dankbit.forecast.next_candle"]
+        bands_model = request.env["dankbit.bands"]
+        forecast_expirations = bands_model._distinct_expirations(
+            asset, datetime.now(timezone.utc).replace(tzinfo=None), 3,
+            future_days_only=True,
+        )
+        anchors = {}
+        anchor_meta = []
+        for expiry_index in range(3):
+            preview = ForecastNext.preview_for_dashboard(
+                asset, timeframe=timeframe, hours=hours, expiry_index=expiry_index,
+            ) if hours is not None else None
+            next_row = ForecastNext.latest_for_dashboard(
+                asset, timeframe=timeframe, expiry_index=expiry_index,
+            ) if hours is None else None
+            meta = {
+                "expiry_index": expiry_index, "available": False,
+                "expiry_instrument": (
+                    bands_model._format_instrument(asset, forecast_expirations[expiry_index])
+                    if expiry_index < len(forecast_expirations) else None
+                ),
+                "revision": None, "max_revisions": None, "confidence": None,
+                "is_preview": False, "window_hours": None,
+                "unavailable_reason": "not-generated-yet",
+            }
+            if next_row and meta["expiry_instrument"] and next_row.expiry_instrument != meta["expiry_instrument"]:
+                # Never leak today's stale ordinal row into tomorrow's E1.
+                next_row = None
+                meta["unavailable_reason"] = "stale-expiry-row"
+            if preview:
+                anchors[expiry_index] = {
+                    "open": preview["forecast_open"], "high": preview["forecast_high"],
+                    "low": preview["forecast_low"], "close": preview["forecast_close"],
+                }
+                meta.update({
+                    "available": True, "revision": preview["revision"],
+                    "expiry_instrument": preview.get("expiry_instrument"),
+                    "max_revisions": preview["max_revisions"],
+                    "confidence": preview["confidence"], "is_preview": True,
+                    "window_hours": preview["window_hours"],
+                    "unavailable_reason": None,
+                })
+            elif next_row:
+                anchors[expiry_index] = {
+                    "open": next_row.forecast_open, "high": next_row.forecast_high,
+                    "low": next_row.forecast_low, "close": next_row.forecast_close,
+                }
+                meta.update({
+                    "available": True, "revision": next_row.revision,
+                    "expiry_instrument": next_row.expiry_instrument,
+                    "max_revisions": next_row.max_revisions,
+                    "confidence": next_row.confidence,
+                    "unavailable_reason": None,
+                })
+            anchor_meta.append(meta)
+
+        unified = _compose_unified_forecast(
+            result["points"], anchors, forecast_count,
+            max_count=max_count, timeframe=timeframe,
+        )
         generated_at = result["generated_at"]
         now_ms = int(generated_at.timestamp() * 1000)
         points = [
@@ -2240,13 +2566,19 @@ class ChartController(http.Controller):
                 "open": p["open"], "high": p["high"], "low": p["low"], "close": p["close"],
                 "mode": p["mode"],
             }
-            for p in result["points"]
+            for p in unified
         ]
 
         payload = {
             "asset": asset,
             "index_price": result["index_price"],
             "sigma_annual": result["sigma_annual"],
+            "window_hours": result.get("window_hours"),
+            "timeframe": timeframe,
+            "max_forecast_count": max_count,
+            "forecast_count": len(points),
+            "first_candle": anchor_meta[0],
+            "anchors": anchor_meta,
             "points": points,
             "generated_at": generated_at.isoformat(),
         }
@@ -2278,12 +2610,49 @@ class ChartController(http.Controller):
         timeframe = request.httprequest.args.get("timeframe", "4h")
         if timeframe not in next_candle_forecast.TIMEFRAME_CONFIG:
             timeframe = "4h"
+        try:
+            expiry_index = max(0, min(int(request.httprequest.args.get("expiry_index", 0)), 2))
+        except (TypeError, ValueError):
+            expiry_index = 0
 
-        row = request.env["dankbit.forecast.next_candle"].latest_for_dashboard(asset, timeframe=timeframe)
-        payload = {
-            "asset": asset,
-            "row": {
+        hours_param = request.httprequest.args.get("hours")
+        try:
+            hours = int(hours_param) if hours_param else None
+        except (TypeError, ValueError):
+            hours = None
+        if hours is not None and not 1 <= hours <= 168:
+            hours = None
+
+        ForecastNext = request.env["dankbit.forecast.next_candle"]
+        preview = ForecastNext.preview_for_dashboard(
+            asset, timeframe=timeframe, hours=hours, expiry_index=expiry_index,
+        ) if hours is not None else None
+        row = ForecastNext.latest_for_dashboard(
+            asset, timeframe=timeframe, expiry_index=expiry_index,
+        ) if hours is None else None
+        row_payload = None
+        if preview:
+            row_payload = {
+                "timeframe": preview["timeframe"],
+                "expiry_index": expiry_index,
+                "expiry_instrument": preview.get("expiry_instrument"),
+                "target_time": preview["target_time"].isoformat(),
+                "revision": preview["revision"],
+                "max_revisions": preview["max_revisions"],
+                "is_final": preview["is_final"],
+                "confidence": preview["confidence"],
+                "forecast_open": preview["forecast_open"],
+                "forecast_close": preview["forecast_close"],
+                "forecast_high": preview["forecast_high"],
+                "forecast_low": preview["forecast_low"],
+                "window_hours": preview["window_hours"],
+                "is_preview": True,
+            }
+        elif row:
+            row_payload = {
                 "timeframe": row.timeframe,
+                "expiry_index": row.expiry_index,
+                "expiry_instrument": row.expiry_instrument,
                 "target_time": row.target_time.isoformat(),
                 "revision": row.revision,
                 "max_revisions": row.max_revisions,
@@ -2293,7 +2662,12 @@ class ChartController(http.Controller):
                 "forecast_close": row.forecast_close,
                 "forecast_high": row.forecast_high,
                 "forecast_low": row.forecast_low,
-            } if row else None,
+                "window_hours": None,
+                "is_preview": False,
+            }
+        payload = {
+            "asset": asset,
+            "row": row_payload,
         }
         return request.make_response(
             json.dumps(payload),

@@ -65,25 +65,32 @@ def per_leg_greeks(STs, trades):
     delta-saturation side per leg) lives there now, shared with
     chart_png_zones (main.py) and dankbit.bands's gamma_band/
     delta_band, so all three can never quietly disagree on these numbers
-    for the same trades."""
+    for the same trades.
+
+    options.per_leg_greeks() reports a leg with zero trades as
+    *_price=None (no curve to peak/bottom at). Collapsed to 0.0 here via
+    `or 0.0` — the *_price fields returned by this function feed straight
+    into dankbit.bands's persisted Float columns (which can't hold None)
+    and are the same fields this addon already treats 0.0 as "absent"
+    for elsewhere (e.g. smart_liq_upper_price)."""
     legs = options_lib.per_leg_greeks(STs, trades)
     lc, lp, sc, sp = legs["long_call"], legs["long_put"], legs["short_call"], legs["short_put"]
 
     return {
-        "bcg_price": lc["gamma_price"], "bpg_price": lp["gamma_price"],
-        "scg_price": sc["gamma_price"], "spg_price": sp["gamma_price"],
+        "bcg_price": lc["gamma_price"] or 0.0, "bpg_price": lp["gamma_price"] or 0.0,
+        "scg_price": sc["gamma_price"] or 0.0, "spg_price": sp["gamma_price"] or 0.0,
         "bcg_abs": abs(lc["gamma_value"]) / 1_000_000, "bpg_abs": abs(lp["gamma_value"]) / 1_000_000,
         "scg_abs": abs(sc["gamma_value"]) / 1_000_000, "spg_abs": abs(sp["gamma_value"]) / 1_000_000,
-        "bcd_price": lc["delta_price"], "bpd_price": lp["delta_price"],
-        "scd_price": sc["delta_price"], "spd_price": sp["delta_price"],
+        "bcd_price": lc["delta_price"] or 0.0, "bpd_price": lp["delta_price"] or 0.0,
+        "scd_price": sc["delta_price"] or 0.0, "spd_price": sp["delta_price"] or 0.0,
         "bcd_abs": abs(lc["delta_value"]) / 10, "bpd_abs": abs(lp["delta_value"]) / 10,
         "scd_abs": abs(sc["delta_value"]) / 10, "spd_abs": abs(sp["delta_value"]) / 10,
-        "bct_price": lc["theta_price"], "bpt_price": lp["theta_price"],
-        "sct_price": sc["theta_price"], "spt_price": sp["theta_price"],
+        "bct_price": lc["theta_price"] or 0.0, "bpt_price": lp["theta_price"] or 0.0,
+        "sct_price": sc["theta_price"] or 0.0, "spt_price": sp["theta_price"] or 0.0,
         "bct_abs": abs(lc["theta_value"]) / 10_000, "bpt_abs": abs(lp["theta_value"]) / 10_000,
         "sct_abs": abs(sc["theta_value"]) / 10_000, "spt_abs": abs(sp["theta_value"]) / 10_000,
-        "bcv_price": lc["vega_price"], "bpv_price": lp["vega_price"],
-        "scv_price": sc["vega_price"], "spv_price": sp["vega_price"],
+        "bcv_price": lc["vega_price"] or 0.0, "bpv_price": lp["vega_price"] or 0.0,
+        "scv_price": sc["vega_price"] or 0.0, "spv_price": sp["vega_price"] or 0.0,
         "bcv_abs": abs(lc["vega_value"]) / 100, "bpv_abs": abs(lp["vega_value"]) / 100,
         "scv_abs": abs(sc["vega_value"]) / 100, "spv_abs": abs(sp["vega_value"]) / 100,
     }
@@ -137,6 +144,14 @@ def trade_weighted_per_leg_greeks(trades, index_price, open_interest):
     as per_leg_greeks() (bcg_price/bcg_abs/.../spv_price/spv_abs)."""
     buckets = defaultdict(list)  # "{B|S}{C|P}{G|D|T|V}" -> [(strike, weight), ...]
     for t in trades:
+        # iv=0 is bad/missing Deribit data, not a real zero-vol trade —
+        # same skip gamma.py's portfolio_gamma (and delta/theta/vega's
+        # own portfolio_* siblings) apply, for the same reason: the
+        # bs_*'s own sigma_eps floor would otherwise turn this single
+        # trade's weighted Greek force into a wildly overstated outlier.
+        if not t.iv:
+            continue
+
         weight_base = max(t.amount or 0.0, 0.0001) * max(open_interest.get(t.name) or 1, 1)
         T = t.get_hours_to_expiry() / (24.0 * 365.0)
         sigma = (t.iv or 0.0) / 100.0

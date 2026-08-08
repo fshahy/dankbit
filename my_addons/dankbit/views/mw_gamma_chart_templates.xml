@@ -1,9 +1,12 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /mw/<asset> — its own file,
 	     structurally a near-copy of four_leg_gamma_chart_templates.xml
-	     (/4l/<asset>). "Timeframe" dropdown (15m/1h/4h/1d, 4h default),
-	     candles from Kraken Futures perpetuals (dankbit.trade.
-	     get_candles_kraken_futures(), same /api/klines-futures/<asset>
+	     (/4l/<asset>). "Timeframe" dropdown (15m/1h/4h/1d, 1d default —
+	     same options as /4l/<asset>'s own dropdown, but this page's own
+	     default, unlike that page's 15m default, is an independent
+	     product decision),
+	     candles from Deribit perpetual futures (dankbit.trade.
+	     get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
 	     proxy /gt/<asset> and /4l/<asset> use). 4 horizontal reference
 	     lines redrawn fresh on every poll from /api/mw-gamma's own latest
 	     reading (BCG/BPG/SCG/SPG — where each of the 4 trade legs' own
@@ -11,16 +14,21 @@
 	     (whose "Expiry" dropdown picks Nearest/Nearest+1/Nearest+2 and
 	     restricts trades to that one exact instrument), this page's own
 	     "Expiry" dropdown picks Weekly/Monthly (the configured
-	     weekly_expiry/monthly_expiry instrument, Weekly default) and the
+	     weekly_expiry/monthly_expiry instrument, Monthly default) and the
 	     4 gamma legs are computed CUMULATIVE through that expiry — every
 	     active instrument up to and including it, not just one — see
-	     mw_gamma_json. "Window" dropdown (12h/24h/48h/72h —
-	     MW_WINDOW_HOURS_CHOICES, a 72h option /4l/<asset>'s own "Window"
-	     dropdown doesn't offer — 48h default, unlike /4l/<asset>'s own
-	     12h default) picks
+	     mw_gamma_json. "Window" dropdown (12h/24h/All —
+	     MW_WINDOW_HOURS_CHOICES plus the "All" no-window-bound option,
+	     own independent choice set from /4l/<asset>'s own "Window"
+	     dropdown — "All" default) picks
 	     the trailing-hours trade window fed into that same cumulative
 	     domain, independent of "Expiry", via ?hours= on
-	     /api/mw-gamma/<asset>. -->
+	     /api/mw-gamma/<asset> (?hours=all skips the trailing-hours filter
+	     entirely). The "All" option existed at one point and was removed
+	     per product decision along with 12h/16h/20h/48h/72h, then 24h and
+	     "All" were both re-added per a later product decision; 1h/2h/4h/
+	     6h/8h were removed in a further round, leaving 12h/24h/All, and
+	     the default moved from 4h to "All" at that point. -->
 
 	<template id="dankbit_mw_gamma_chart" name="Dankbit MW Gamma Chart">
 		<html>
@@ -33,30 +41,6 @@
 					* { margin: 0; padding: 0; box-sizing: border-box; }
 					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
 					#chart-container { width: 100%; height: 100%; }
-					/* "Window" boundary marker — Lightweight Charts v4 has
-					   no native vertical-line primitive (a price line is
-					   horizontal-only, and a line series needs unique/
-					   ascending time values so it can't render a single
-					   vertical stroke), so this is a plain absolutely-
-					   positioned overlay div, repositioned in JS via
-					   chart.timeScale().timeToCoordinate() — same
-					   HTML-overlay approach every other fixed annotation on
-					   this page (#status, #ruler-info, #exchange-label)
-					   already uses, rather than fighting the chart's own
-					   series data model. */
-					#window-vline {
-						position: fixed; top: 0; width: 1px;
-						background: #555; z-index: 5; pointer-events: none; display: none;
-					}
-					#window-vline-label {
-						position: fixed;
-						font-family: monospace; font-size: 10pt;
-						color: #555; background: rgba(255,255,255,0.85);
-						padding: 1px 6px; border-radius: 3px; border: 1px solid #ccc;
-						z-index: 6; pointer-events: none; display: none; white-space: nowrap;
-					}
-					body.dark #window-vline { background: #aaaaaa; }
-					body.dark #window-vline-label { color: #ccc; background: rgba(0,0,0,0.8); border-color: #555; }
 					#status {
 						position: fixed; bottom: 32px; left: 12px;
 						font-family: monospace; font-size: 11pt;
@@ -148,8 +132,6 @@
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
-				<div id="window-vline"/>
-				<div id="window-vline-label"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -158,20 +140,19 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
-						<option value="1d">1d</option>
+						<option value="4h">4h</option>
+						<option value="1d" selected="selected">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-						<option value="weekly" selected="selected">Weekly</option>
-						<option value="monthly">Monthly</option>
+						<option value="weekly">Weekly</option>
+						<option value="monthly" selected="selected">Monthly</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="12">12h</option>
 						<option value="24">24h</option>
-						<option value="48" selected="selected">48h</option>
-						<option value="72">72h</option>
+						<option value="all" selected="selected">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -188,18 +169,17 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
-					// "Timeframe" dropdown, 4h default — same options/
-					// default as /4l/<asset>'s own dropdown (see TF_WINDOW
-					// below for the per-timeframe visible-window convention
-					// it shares with those pages).
-					let INTERVAL = '4h';
-					// Kraken Futures perpetuals, same symbol convention
+					// "Timeframe" dropdown — same options as /4l/<asset>'s own
+					// dropdown (see TF_WINDOW below for the per-timeframe
+					// visible-window convention it shares with those pages),
+					// but 1d default here, an independent product decision
+					// from that page's own 15m default.
+					let INTERVAL = '1d';
+					// Deribit perpetual futures, same symbol convention
 					// /gt/<asset> and /4l/<asset> use (server-side
-					// _KRAKEN_FUTURES_SYMBOL_MAP — Kraken uses "XBT" not
-					// "BTC", hence the explicit map rather than a plain
-					// ASSET + 'USD' concat).
-					const KRAKEN_FUTURES_SYMBOL = { BTC: 'PF_XBTUSD', ETH: 'PF_ETHUSD' }[ASSET] || ('PF_' + ASSET + 'USD');
-					document.getElementById('exchange-label').textContent = 'Kraken Futures · ' + KRAKEN_FUTURES_SYMBOL;
+					// _DERIBIT_PERPETUAL_SYMBOL_MAP).
+					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
+					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which expiry's trades feed the 4
 					// gamma legs, "weekly" default. Unlike /4l/<asset>'s own
@@ -207,16 +187,18 @@
 					// instrument), the server resolves this to the
 					// configured weekly_expiry/monthly_expiry instrument and
 					// computes CUMULATIVE through it — see mw_gamma_json.
-					let EXPIRY_MODE = 'weekly';
+					let EXPIRY_MODE = 'monthly';
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same cumulative domain, independent of
-					// EXPIRY_MODE. Choice set (12h/24h/48h/72h) also carries
-					// a 72h option /4l/<asset>'s own "Window" dropdown
-					// doesn't offer, and defaults to 48h here (unlike /4l's
-					// own 12h default) — this page's
-					// cumulative-through-expiry domain benefits from a
-					// wider trailing-hours window by default.
-					let WINDOW_HOURS = 48;
+					// EXPIRY_MODE. Choice set (12h/24h/All), own independent
+					// choice set from /4l/<asset>'s own "Window" dropdown —
+					// 1h/2h/4h/6h/8h were removed per product decision,
+					// which is also when the default moved from 4h to
+					// "All" here. WINDOW_HOURS is the string 'all' when
+					// "All" is selected (?hours=all, skipping the
+					// trailing-hours trade filter entirely — see
+					// mw_gamma_json), a number otherwise.
+					let WINDOW_HOURS = 'all';
 					const mwGammaUrl = () => '/api/mw-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart/gt/4l
 					// pages use — a growing gap between this and "now" is
@@ -226,6 +208,12 @@
 					// dankbit_ws_batch.py).
 					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
 					let   lastTradeTs = null;
+					// Trade count for the currently selected Window/Expiry —
+					// same `trade_count` field /api/mw-gamma already returns
+					// (len(trades) over the resolved cumulative domain), same
+					// convention /4l/<asset>'s own tradeCount uses. null until
+					// the first refreshMwGamma() resolves.
+					let   tradeCount = null;
 
 					// Shown in real UTC (not a browser-local shift) — this is a
 					// staleness check against server time, not a chart position.
@@ -270,6 +258,7 @@
 					// product decision, not distinct hues per leg.
 					const SCG_COLOR = '#fb8c00'; // Seller Call Gamma — orange
 					const SPG_COLOR = '#fb8c00'; // Seller Put Gamma — orange
+					const AVG_GAMMA_COLOR = '#bdbdbd'; // Average of LC/LP/SC/SP prices — light gray
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -301,6 +290,22 @@
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
 					});
 
+					// Invisible helper series solely to extend the shared time
+					// axis past the last real candle, same mechanism the Delta
+					// Chart's own futureAxisSeries uses (dankbit_templates.xml)
+					// and /4l/<asset>'s own copy — candlestick setData()
+					// silently drops OHLC-less "whitespace" points, so a real,
+					// fully-valued (if invisible) line series is used instead;
+					// all series on a chart share one time scale, so its
+					// future points extend the same axis the candlesticks and
+					// the 5 gamma price lines are drawn on, leaving room to
+					// see those lines extend forward instead of ending flush
+					// at the last bar.
+					const futureAxisSeries = chart.addLineSeries({
+						color: 'rgba(0,0,0,0)', lineWidth: 1,
+						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+
 					// The 4 gamma "lines" are horizontal reference lines at the
 					// CURRENT (latest) value only — same createPriceLine()
 					// pattern /gt/<asset> and /4l/<asset> use for their own
@@ -308,7 +313,7 @@
 					// Redrawn fresh on every poll (REFRESH, from
 					// dankbit.refresh_interval), each replacing its own
 					// previous line rather than accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -317,9 +322,18 @@
 						return label ? '  ·  Last trade: ' + label : '';
 					}
 
+					// Same "N trades" convention /4l/<asset>'s own footer
+					// uses — placed after the "Last trade:" timestamp since
+					// it's the count feeding the same Window that
+					// timestamp's own staleness matters for.
+					function tradeCountSuffix() {
+						return tradeCount !== null ? '  ·  ' + tradeCount + ' trades' : '';
+					}
+
 					function statusText() {
 						const expiryLabel = EXPIRY_MODE === 'monthly' ? 'Monthly' : 'Weekly';
-						return ASSET + ' · MW Gamma (' + expiryLabel + ', ' + WINDOW_HOURS + 'h trailing window, live)' + lastTradeSuffix();
+						const windowLabel = WINDOW_HOURS === 'all' ? 'all trades' : (WINDOW_HOURS + 'h trailing window');
+						return ASSET + ' · MW Gamma (' + expiryLabel + ', ' + windowLabel + ', live)' + lastTradeSuffix() + tradeCountSuffix();
 					}
 
 					async function refreshLastTrade() {
@@ -342,12 +356,44 @@
 					// (15m entry matches /gt/<asset>'s and /4l/<asset>'s own
 					// TF_WINDOW).
 					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
+					// Seconds per bar at each Timeframe — feeds the future-axis
+					// tick spacing below (INTERVAL_SECONDS isn't needed
+					// anywhere else on this page, unlike the Delta Chart's own
+					// copy, which also uses it for its logical-range math).
+					const INTERVAL_SECONDS = { '15m': 15 * 60, '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
+					// Same future-margin length as the Delta Chart's own
+					// FUTURE_MARGIN_DAYS.
+					const FUTURE_MARGIN_DAYS = 5;
 
 					function applyVisibleRange() {
 						if (!realCandles.length) return;
 						const days = TF_WINDOW[INTERVAL] || 15;
-						const lastTime = realCandles[realCandles.length - 1].time;
-						chart.timeScale().setVisibleRange({ from: lastTime - days * 86400, to: lastTime });
+						// Ends at the future-axis edge (see futureAxisSeries
+						// above), not at the last real candle, so the visible
+						// window always includes the future margin rather than
+						// leaving it just off-screen to the right.
+						const futureEdge = realCandles[realCandles.length - 1].time + FUTURE_MARGIN_DAYS * 86400;
+						chart.timeScale().setVisibleRange({ from: futureEdge - days * 86400, to: futureEdge });
+					}
+
+					// Rebuilds both the real candle series and the invisible
+					// future-axis extension together, so the two never fall
+					// out of sync (same pattern the Delta Chart's own
+					// rebuildSeriesData() uses).
+					function rebuildSeriesData() {
+						series.setData(realCandles);
+
+						const intervalSec = INTERVAL_SECONDS[INTERVAL] || 3600;
+						const lastClose = realCandles.length ? realCandles[realCandles.length - 1].close : 0;
+						const lastTime = realCandles.length
+							? realCandles[realCandles.length - 1].time
+							: (Math.floor(Date.now() / 1000) + tzOffset);
+						const count = Math.round(FUTURE_MARGIN_DAYS * 86400 / intervalSec);
+						const futureTicks = [];
+						for (let i = 1; i <= count; i++) {
+							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
+						}
+						futureAxisSeries.setData(futureTicks);
 					}
 
 					function resetChartView() {
@@ -386,68 +432,12 @@
 					window.addEventListener('resize', hideContextMenu);
 					window.addEventListener('scroll', hideContextMenu, true);
 
-					const vLineEl = document.getElementById('window-vline');
-					const vLineLabelEl = document.getElementById('window-vline-label');
-
-					function vLineColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
-
-					// Where the selected "Window" dropdown's own trailing-
-					// hours cutoff falls — snapped to the UTC 4h-candle
-					// grid regardless of the chart's own currently-displayed
-					// Timeframe (INTERVAL): WINDOW_HOURS=48 always lands
-					// exactly 12 four-hour candles back from the current
-					// (still-forming) 4h bucket, 24 -> 6 candles back, 12 ->
-					// 3 candles back (WINDOW_HOURS / 4 in every case).
-					// Computed independently of, but conceptually mirrors,
-					// the same window_start boundary mw_gamma_json uses
-					// server-side to filter trades for the 4 gamma legs —
-					// this line exists purely to make that boundary visible
-					// on the chart, not to feed anything back into the
-					// gamma computation itself.
-					function windowLineTargetTime() {
-						const FOUR_HOURS = 4 * 3600;
-						const nowSec = Math.floor(Date.now() / 1000);
-						const currentBucketStart = Math.floor(nowSec / FOUR_HOURS) * FOUR_HOURS;
-						const candlesBack = WINDOW_HOURS / 4;
-						return currentBucketStart - candlesBack * FOUR_HOURS + tzOffset;
-					}
-
-					function updateWindowVLine() {
-						if (!realCandles.length) {
-							vLineEl.style.display = 'none';
-							vLineLabelEl.style.display = 'none';
-							return;
-						}
-						const x = chart.timeScale().timeToCoordinate(windowLineTargetTime());
-						if (x === null) {
-							vLineEl.style.display = 'none';
-							vLineLabelEl.style.display = 'none';
-							return;
-						}
-						const rect = chartContainerEl.getBoundingClientRect();
-						const color = vLineColor();
-						vLineEl.style.left = Math.round(rect.left + x) + 'px';
-						vLineEl.style.top = rect.top + 'px';
-						vLineEl.style.height = rect.height + 'px';
-						vLineEl.style.background = color;
-						vLineEl.style.display = 'block';
-						vLineLabelEl.style.left = Math.round(rect.left + x + 4) + 'px';
-						vLineLabelEl.style.top = (rect.top + 4) + 'px';
-						vLineLabelEl.style.color = color;
-						vLineLabelEl.textContent = WINDOW_HOURS + 'h';
-						vLineLabelEl.style.display = 'block';
-					}
-
-					window.addEventListener('resize', updateWindowVLine);
-					chart.timeScale().subscribeVisibleTimeRangeChange(updateWindowVLine);
-
 					async function loadCandles() {
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
 						realCandles = klines.map(toCandle);
-						series.setData(realCandles);
+						rebuildSeriesData();
 						applyVisibleRange();
-						updateWindowVLine();
 					}
 
 					async function updateLatestCandle() {
@@ -460,8 +450,7 @@
 						} else {
 							realCandles.push(updated);
 						}
-						series.setData(realCandles);
-						updateWindowVLine();
+						rebuildSeriesData();
 					}
 
 					async function setTf(iv) {
@@ -476,10 +465,9 @@
 					}
 
 					async function setWindow(hours) {
-						WINDOW_HOURS = parseInt(hours, 10);
+						WINDOW_HOURS = hours === 'all' ? 'all' : parseInt(hours, 10);
 						await refreshMwGamma();
 						setStatus(statusText());
-						updateWindowVLine();
 					}
 
 					// Rounds and abbreviates large raw dollar-gamma values
@@ -515,10 +503,20 @@
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
+							// 0 (not null) once resolved with no trades at all in
+							// the current Window/Expiry — null only ever means
+							// "haven't fetched yet", so tradeCountSuffix() can
+							// tell "0 trades" apart from "not loaded" (same
+							// convention /4l/<asset>'s own refreshFourLegGamma()
+							// uses).
+							tradeCount = latest ? latest.trade_count : 0;
+							setStatus(statusText());
+
 							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
+							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
 							if (!latest) return;
 
 							// 0.0 means absent (same convention every
@@ -566,6 +564,34 @@
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
 								});
 							}
+							// Average of the legs' own gamma PRICE levels (not
+							// their gamma value) — over whichever legs are
+							// actually present (0.0 means absent, see above),
+							// not a fixed /4, since dividing a partial sum by 4
+							// would silently skew the average toward 0 for
+							// every missing leg. Skipped only when none of the
+							// 4 are present at all. The label additionally
+							// shows the average of those same legs' own gamma
+							// VALUES (paired with price so both are averaged
+							// over the identical present-leg set), same
+							// formatAbbreviated() the other 4 lines already
+							// use for their own value.
+							const gammaLegs = [
+								{ price: latest.bcg_price, value: latest.bcg_value },
+								{ price: latest.bpg_price, value: latest.bpg_value },
+								{ price: latest.scg_price, value: latest.scg_value },
+								{ price: latest.spg_price, value: latest.spg_value },
+							].filter(leg => leg.price);
+							if (gammaLegs.length) {
+								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
+								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
+								avgGammaPriceLine = series.createPriceLine({
+									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
+									title: 'AVG ' + formatAbbreviated(avgGammaValue),
+								});
+							}
 						} finally {
 							hideSpinner();
 						}
@@ -587,7 +613,6 @@
 						DARK_MODE = document.getElementById('theme-select').value === 'dark';
 						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
 						applyTheme();
-						updateWindowVLine();
 					}
 
 					let rulerActive = false;

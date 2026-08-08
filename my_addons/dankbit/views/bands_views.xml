@@ -32,6 +32,10 @@
                         <field name="low_zone_max" />
                         <field name="middle_zone_min" />
                         <field name="middle_zone_max" />
+                        <field name="zones_confirmed_at" />
+                        <field name="zones_confirmation_reason" />
+                        <field name="zone_candidate_at" />
+                        <field name="zone_candidate_hits" />
                     </group>
                     <group string="Gamma">
                         <field name="bcg_price" />
@@ -103,6 +107,9 @@
                 <field name="low_zone_max" optional="hide" />
                 <field name="middle_zone_min" optional="hide" />
                 <field name="middle_zone_max" optional="hide" />
+                <field name="zones_confirmed_at" optional="hide" />
+                <field name="zones_confirmation_reason" optional="hide" />
+                <field name="zone_candidate_hits" optional="hide" />
                 <field name="bcg_price" optional="hide" />
                 <field name="bcg_abs" optional="hide" />
                 <field name="bpg_price" optional="hide" />

@@ -8,7 +8,16 @@
             <field name="name">Dankbit - Get Last Trades</field>
             <field name="model_id" ref="model_dankbit_trade"/>
             <field name="interval_number">1</field>
-            <field name="interval_type">minutes</field>
+            <field name="interval_type">days</field>
+            <!-- Nightly, off-peak UTC — the WS ingestion service
+                 (dankbit_ws_service/dankbit_ws_batch.py) is the real-time
+                 primary; this is just the safety-net backfill in case the
+                 server/WS was down for a stretch, not a tight polling
+                 loop, so it doesn't need to run any more often than this.
+                 See trade.py's get_last_trades()/RECENTLY_EXPIRED_GRACE_MINUTES
+                 for how it still avoids permanently losing trades on
+                 instruments that expired between two nightly runs. -->
+            <field name="nextcall">2020-01-01 02:00:00</field>
             <field name="state">code</field>
             <field name="code">model.get_last_trades()</field>
             <field name="priority">5</field>
@@ -26,7 +35,7 @@
         </record>
 
         <record id="dankbit_compute_bands_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Bands Snapshot</field>
             <field name="model_id" ref="model_dankbit_bands"/>
             <field name="interval_number">1</field>
@@ -37,7 +46,7 @@
         </record>
 
         <record id="dankbit_compute_live_band_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Live Band</field>
             <field name="model_id" ref="model_dankbit_live_band"/>
             <field name="interval_number">1</field>
@@ -48,7 +57,7 @@
         </record>
 
         <record id="dankbit_compute_forecast_snapshot_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Forecast Snapshot</field>
             <field name="model_id" ref="model_dankbit_forecast_snapshot"/>
             <field name="interval_number">1</field>
@@ -59,7 +68,7 @@
         </record>
 
         <record id="dankbit_log_forecast_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Log Forecast Candles</field>
             <field name="model_id" ref="model_dankbit_forecast_log"/>
             <field name="interval_number">1</field>
@@ -70,7 +79,7 @@
         </record>
 
         <record id="dankbit_check_forecast_accuracy_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Check Forecast Accuracy</field>
             <field name="model_id" ref="model_dankbit_forecast_log"/>
             <field name="interval_number">1</field>
@@ -81,7 +90,7 @@
         </record>
 
         <record id="dankbit_compute_next_candle_forecast_1h_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Next Candle Forecast (1H)</field>
             <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
             <field name="interval_number">15</field>
@@ -99,7 +108,7 @@
         </record>
 
         <record id="dankbit_compute_next_candle_forecast_4h_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Next Candle Forecast (4H)</field>
             <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
             <field name="interval_number">1</field>
@@ -113,7 +122,7 @@
         </record>
 
         <record id="dankbit_compute_next_candle_forecast_1d_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <field name="name">Dankbit - Compute Next Candle Forecast (1D)</field>
             <field name="model_id" ref="model_dankbit_forecast_next_candle"/>
             <field name="interval_number">4</field>
@@ -127,7 +136,7 @@
         </record>
 
         <record id="dankbit_check_next_candle_accuracy_cron" model="ir.cron">
-            <field name="active">False</field>
+            <field name="active">True</field>
             <!-- 5 minutes after the top of the hour, so this never races the
                  compute crons above for the same instant. -->
             <field name="nextcall">2020-01-01 00:05:00</field>

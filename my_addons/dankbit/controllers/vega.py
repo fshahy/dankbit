@@ -45,6 +45,13 @@ def portfolio_vega(S, trades, r=0.0, min_hours=1.0):
     total = np.zeros_like(S, dtype=float) if np.ndim(S) else 0.0
 
     for trd in trades:
+        # iv=0 is bad/missing Deribit data, not a real zero-vol trade —
+        # see gamma.py's portfolio_gamma for the same skip and why (the
+        # sigma_eps floor below would otherwise distort this trade's
+        # contribution far beyond what its real size warrants).
+        if trd.iv == 0:
+            continue
+
         hours_to_expiry = trd.get_hours_to_expiry()
         T = hours_to_expiry / (24.0 * 365.0)
 

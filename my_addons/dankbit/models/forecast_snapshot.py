@@ -62,6 +62,8 @@ class ForecastSnapshot(models.Model):
     # historical points it needs to compute a top/low/gamma slope over
     # actual elapsed time.
     asset = fields.Char(required=True, index=True)
+    expiry_index = fields.Integer(required=True, default=0, index=True)
+    expiry_instrument = fields.Char(index=True)
     bucket_start = fields.Datetime(required=True, index=True)
     index_price = fields.Float(digits=(16, 4))
 
@@ -140,8 +142,8 @@ class ForecastSnapshot(models.Model):
     short_trade_count = fields.Integer(default=0)
 
     _sql_constraints = [
-        ("asset_bucket_uniq", "unique (asset, bucket_start)",
-         "Only one Forecast snapshot is kept per asset per time bucket."),
+        ("asset_expiry_bucket_uniq", "unique (asset, expiry_index, bucket_start)",
+         "Only one Forecast snapshot is kept per asset/expiry per time bucket."),
     ]
 
     def _bucket_start_for(self, as_of):
@@ -149,7 +151,7 @@ class ForecastSnapshot(models.Model):
         bucket_epoch_hours = (epoch_hours // BUCKET_HOURS) * BUCKET_HOURS
         return datetime.fromtimestamp(bucket_epoch_hours * 3600, tz=timezone.utc).replace(tzinfo=None)
 
-    def compute_and_persist(self, asset):
+    def compute_and_persist(self, asset, expiry_index=0, future_days_only=False):
         """Compute this moment's per-leg Greeks/band data for `asset` (nearest
         active expiry, trades since 00:00 UTC — see options.day_window_start)
         and upsert it into the current
@@ -178,7 +180,9 @@ class ForecastSnapshot(models.Model):
         the 32 per-leg fields below are instead computed by
         _trade_weighted_per_leg_fields(), which does re-fetch this
         expiry's own trades — see that method's own docstring for why."""
-        bands_data = self.env["dankbit.bands"]._compute_asset(asset, expiry_index=0)
+        bands_data = self.env["dankbit.bands"]._compute_asset(
+            asset, expiry_index=expiry_index, future_days_only=future_days_only,
+        )
         if not bands_data:
             _logger.warning("forecast.compute_and_persist: dankbit.bands has nothing computable for %s, skipping", asset)
             return None
@@ -193,10 +197,15 @@ class ForecastSnapshot(models.Model):
 
         per_leg_fields = {f: bands_data[f] for f in self.env["dankbit.bands"]._PER_LEG_GREEK_FIELDS}
         if self.env["ir.config_parameter"].sudo().get_param("dankbit.forecast_trade_weighted_greeks", "False") == "True":
-            per_leg_fields = self._trade_weighted_per_leg_fields(asset, bands_data["index_price"], per_leg_fields)
+            per_leg_fields = self._trade_weighted_per_leg_fields(
+                asset, bands_data["index_price"], per_leg_fields,
+                instrument=bands_data.get("instrument"),
+            )
 
         vals = {
             "asset": asset,
+            "expiry_index": expiry_index,
+            "expiry_instrument": bands_data.get("instrument"),
             "bucket_start": self._bucket_start_for(as_of),
             "index_price": bands_data["index_price"],
             "top": top,
@@ -210,6 +219,7 @@ class ForecastSnapshot(models.Model):
 
         record = self.sudo().search([
             ("asset", "=", asset),
+            ("expiry_index", "=", expiry_index),
             ("bucket_start", "=", vals["bucket_start"]),
         ], limit=1)
         if record:
@@ -217,7 +227,7 @@ class ForecastSnapshot(models.Model):
             return record
         return self.sudo().create(vals)
 
-    def _trade_weighted_per_leg_fields(self, asset, index_price, fallback):
+    def _trade_weighted_per_leg_fields(self, asset, index_price, fallback, hours=None, instrument=None):
         """The per-leg extraction method Thales's original indicator author
         asked for directly (see forecast_lib.trade_weighted_per_leg_greeks),
         gated behind res.config.settings' forecast_trade_weighted_greeks
@@ -234,12 +244,12 @@ class ForecastSnapshot(models.Model):
         trade_weighted_per_leg_greeks's own None-for-empty-bucket
         behavior) rather than discarding the whole row or persisting a
         None into a Float field."""
-        instrument = self.env["dankbit.bands"].nearest_expiry(asset)
+        instrument = instrument or self.env["dankbit.bands"].nearest_expiry(asset)
         if not instrument:
             return fallback
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-        window_start = options_lib.day_window_start(as_of)
+        window_start = as_of - timedelta(hours=hours) if hours is not None else options_lib.day_window_start(as_of)
         trades = self.env["dankbit.trade"].with_context(active_test=False).search([
             ("name", "=ilike", f"{instrument}-%"),
             ("deribit_ts", ">=", window_start),
@@ -252,7 +262,36 @@ class ForecastSnapshot(models.Model):
         trade_weighted = forecast_lib.trade_weighted_per_leg_greeks(trades, index_price, open_interest)
         return {f: (trade_weighted[f] if trade_weighted.get(f) is not None else fallback[f]) for f in fallback}
 
-    def session_activity_history(self, asset, hour_utc, lookback_days=14, limit=500, cfg=None):
+    def live_snapshot_dict(self, asset, hours, expiry_index=0, future_days_only=False):
+        """Build a non-persisted Forecast snapshot from only the trailing
+        `hours` of option trades.  This is the shared source for the chart's
+        2h/4h preview mode; it never writes forecast.snapshot or bands rows."""
+        bands_data = self.env["dankbit.bands"]._compute_asset(
+            asset, expiry_index=expiry_index, hours=hours,
+            future_days_only=future_days_only,
+        )
+        if not bands_data or not bands_data.get("high_zone_max") or not bands_data.get("low_zone_min"):
+            return None
+        per_leg_fields = {f: bands_data[f] for f in self.env["dankbit.bands"]._PER_LEG_GREEK_FIELDS}
+        if self.env["ir.config_parameter"].sudo().get_param("dankbit.forecast_trade_weighted_greeks", "False") == "True":
+            per_leg_fields = self._trade_weighted_per_leg_fields(
+                asset, bands_data["index_price"], per_leg_fields, hours=hours,
+                instrument=bands_data.get("instrument"),
+            )
+        data = {
+            "expiry_instrument": bands_data.get("instrument"),
+            "top": bands_data["high_zone_max"],
+            "low": bands_data["low_zone_min"],
+            "bml": bands_data["buyer_max_loss"],
+            "smp": bands_data["seller_max_profit"],
+            "long_trade_count": bands_data["long_trade_count"],
+            "short_trade_count": bands_data["short_trade_count"],
+            "bucket_epoch": bands_data["computed_at"].replace(tzinfo=timezone.utc).timestamp(),
+        }
+        data.update(per_leg_fields)
+        return data
+
+    def session_activity_history(self, asset, hour_utc, lookback_days=14, limit=500, cfg=None, expiry_index=0):
         """Same-hour-of-day historical Greek-activity scores for `asset`,
         feeding forecast_lib.session_activity_regime()'s baseline —
         mirrors Thales's own SessionActivityRegimeEngine.classify(f,
@@ -277,10 +316,17 @@ class ForecastSnapshot(models.Model):
         on its own."""
         if cfg is None:
             cfg, _ = self.get_forecast_cfg(asset)
-        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).replace(tzinfo=None)
+        now_utc = datetime.now(timezone.utc)
+        since = (now_utc - timedelta(days=lookback_days)).replace(tzinfo=None)
+        # Do not let the current bucket participate in its own historical
+        # baseline.  Including it dilutes true high-activity sessions and was
+        # especially misleading around session opens.
+        current_bucket_start = now_utc.replace(minute=0, second=0, microsecond=0).replace(tzinfo=None)
         rows = self.sudo().search([
             ("asset", "=", asset),
+            ("expiry_index", "=", expiry_index),
             ("bucket_start", ">=", since),
+            ("bucket_start", "<", current_bucket_start),
         ], order="bucket_start desc", limit=limit)
 
         scores = []
@@ -295,7 +341,7 @@ class ForecastSnapshot(models.Model):
             scores.append(forecast_lib.session_activity_score(data, synthetic_liq, cfg=cfg))
         return scores
 
-    def recent_history(self, asset, limit=3):
+    def recent_history(self, asset, limit=3, expiry_index=0):
         """The `limit` most recent snapshot rows for `asset`, newest first —
         feeds forecast.gamma_band_consensus's 3-point slope calculation
         and forecast.greek_flow's Delta/Vega Flow + Smart Liquidity Drift
@@ -309,7 +355,8 @@ class ForecastSnapshot(models.Model):
         anything (see gamma_band_consensus()'s and greek_flow()'s
         real-elapsed-hours normalization)."""
         return self.sudo().search(
-            [("asset", "=", asset)], order="bucket_start desc", limit=limit
+            [("asset", "=", asset), ("expiry_index", "=", expiry_index)],
+            order="bucket_start desc", limit=limit
         )
 
     def to_dict(self):
@@ -476,7 +523,7 @@ class ForecastSnapshot(models.Model):
         }
         return cfg, horizon
 
-    def get_forecast_points(self, asset):
+    def get_forecast_points(self, asset, hours=None, timeframe=None):
         """Single source of truth for "compute the Thales Forecast candles
         for `asset` right now" — everything /api/forecast/<asset>
         (main.py's forecast_json) needs, factored out here (using
@@ -501,31 +548,64 @@ class ForecastSnapshot(models.Model):
         index_price/sigma_annual) means nothing was computable yet for
         this asset (no index price, no active expiry, or no trades in the
         current 00:00-UTC window — see compute_and_persist)."""
+        timeframe_horizons = {
+            "1h": {"hours_ahead": 72, "step_hours": 1, "start_offset_hours": 1},
+            "4h": {"hours_ahead": 72, "step_hours": 4, "start_offset_hours": 4},
+            "1d": {"hours_ahead": 72, "step_hours": 24, "start_offset_hours": 24},
+        }
+        dashboard_timeframe = timeframe in timeframe_horizons
+        timeframe = timeframe if dashboard_timeframe else "4h"
         generated_at = datetime.now(timezone.utc)
         index_price = self.env["dankbit.trade"].get_index_price(asset)
 
         cr = self.env.cr
+        iv_window_start = (generated_at - timedelta(hours=hours or 24)).replace(tzinfo=None)
         cr.execute("""
             SELECT SUM(iv * amount) / NULLIF(SUM(amount), 0)
             FROM dankbit_trade
             WHERE name ILIKE %s
-              AND deribit_ts >= NOW() - INTERVAL '24 hours'
-        """, (f"{asset}-%",))
+              AND deribit_ts >= %s
+        """, (f"{asset}-%", iv_window_start))
         avg_iv_row = cr.fetchone()
         sigma_annual = float(avg_iv_row[0]) / 100.0 if avg_iv_row and avg_iv_row[0] else None
 
-        current_record = self.compute_and_persist(asset)
+        current_record = None if hours is not None else self.compute_and_persist(asset)
+        current_live = self.live_snapshot_dict(asset, hours) if hours is not None else None
 
         points = []
-        if index_price and sigma_annual and current_record:
-            history_records = self.recent_history(asset, limit=4).filtered(
-                lambda r: r.bucket_start != current_record.bucket_start
-            )[:3]
-            current = current_record.to_dict()
-            history = [r.to_dict() for r in history_records]
-            candles = self.env["dankbit.trade"].get_candles(asset, interval="4h", limit=40)
-            gamma_band_term_structure = self.env["dankbit.bands"].gamma_band_term_structure(asset)
+        if index_price and sigma_annual and (current_record or current_live):
+            if hours is None:
+                history_records = self.recent_history(asset, limit=4).filtered(
+                    lambda r: r.bucket_start != current_record.bucket_start
+                )[:3]
+                current = current_record.to_dict()
+                history = [r.to_dict() for r in history_records]
+            else:
+                # A trailing-window preview must not mix all-day persisted
+                # snapshots into the selected 2h/4h option-flow window.
+                current = current_live
+                history = []
+            candles = self.env["dankbit.trade"].get_candles(asset, interval=timeframe, limit=80)
+            if hours is None:
+                gamma_band_term_structure = self.env["dankbit.bands"].gamma_band_term_structure(asset)
+            else:
+                gamma_band_term_structure = []
+                for expiry_index in range(self.env["dankbit.bands"].TRACKED_EXPIRY_COUNT):
+                    live_band = self.env["dankbit.bands"]._compute_asset(
+                        asset, expiry_index=expiry_index, hours=hours,
+                    )
+                    if live_band:
+                        exp = live_band["expiration"].replace(tzinfo=timezone.utc)
+                        gamma_band_term_structure.append({
+                            "gamma_band": live_band["gamma_band"],
+                            "expiration_epoch": exp.timestamp(),
+                        })
             cfg, horizon = self.get_forecast_cfg(asset)
+            # Dashboard paths always cover the same three-day horizon, with
+            # candle spacing matching the selected chart timeframe. Cron/log
+            # callers omit timeframe and retain the configured 4H horizon.
+            if dashboard_timeframe:
+                horizon = timeframe_horizons[timeframe]
             session_activity_history = self.session_activity_history(asset, generated_at.hour, cfg=cfg)
             points = forecast_lib.simulate_forecast(
                 index_price, sigma_annual, current, history, candles, cfg=cfg,
@@ -538,6 +618,7 @@ class ForecastSnapshot(models.Model):
             "index_price": index_price,
             "sigma_annual": sigma_annual,
             "snapshot_id": current_record.id if current_record else None,
+            "window_hours": hours,
             "points": points,
         }
 
@@ -550,5 +631,7 @@ class ForecastSnapshot(models.Model):
         this cron doesn't replace that path, it just guarantees the
         roughly-hourly cadence recent_history()'s consumers (Gamma-Band
         Consensus, Greek Flow) need even when nobody has the chart open."""
+        tracked = self.env["dankbit.bands"].TRACKED_EXPIRY_COUNT
         for asset in ("BTC", "ETH"):
-            self.compute_and_persist(asset)
+            for expiry_index in range(tracked):
+                self.compute_and_persist(asset, expiry_index=expiry_index)
