@@ -2103,11 +2103,12 @@ class ChartController(http.Controller):
         SCG/SPG) over `asset`'s own trailing trades, restricted to a
         single expiry chosen via the page's own "Expiry" dropdown — an
         optional `?expiry=` query param, one of "nearest" (default — the
-        currently soonest-expiring active instrument), "nearest_plus_1", or
-        "nearest_plus_2" (the 1st/2nd active expiry after the nearest one —
-        same ordinal notion /api/gamma-triple/<asset>'s own nearest+1/
-        nearest+2 lines use), mapped to an ordinal index (0/1/2) and
-        resolved via dankbit.bands._distinct_expirations()/
+        currently soonest-expiring active instrument), "nearest_plus_1",
+        "nearest_plus_2", "nearest_plus_3", "nearest_plus_4", or
+        "nearest_plus_5" (the 1st through 5th active expiry after the
+        nearest one — same ordinal notion /api/gamma-triple/<asset>'s own
+        nearest+1/nearest+2 lines use), mapped to an ordinal index (0-5)
+        and resolved via dankbit.bands._distinct_expirations()/
         _format_instrument() directly rather than
         dankbit.bands._compute_asset(), since this route only needs the
         instrument string, not a full curve build — any other/missing
@@ -2116,7 +2117,9 @@ class ChartController(http.Controller):
         instrument) and "all" (every active instrument for `asset`, no
         expiry restriction — this route's original, pre-dropdown
         behavior); all 3 were removed per product decision in favor of
-        "nearest_plus_1"/"nearest_plus_2". The trailing-hours trade window
+        "nearest_plus_1"/"nearest_plus_2", later widened to
+        "nearest_plus_3"/"nearest_plus_4"/"nearest_plus_5" per a further
+        product decision. The trailing-hours trade window
         is independently user-selectable via the page's own "Window"
         dropdown — an optional `?hours=` query param, restricted to
         FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24 — or the literal string
@@ -2166,7 +2169,10 @@ class ChartController(http.Controller):
             to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             step = float(icp.get_param("dankbit.eth_steps", default=50))
 
-        expiry_ordinals = {"nearest": 0, "nearest_plus_1": 1, "nearest_plus_2": 2}
+        expiry_ordinals = {
+            "nearest": 0, "nearest_plus_1": 1, "nearest_plus_2": 2,
+            "nearest_plus_3": 3, "nearest_plus_4": 4, "nearest_plus_5": 5,
+        }
         expiry_mode = (request.httprequest.args.get("expiry") or "").lower()
         if expiry_mode not in expiry_ordinals:
             expiry_mode = "nearest"
@@ -2255,9 +2261,11 @@ class ChartController(http.Controller):
         supports it too, and was originally also this page's own default
         until it was changed to 4h per product decision, matching the
         Delta/Gamma/Strike Gamma charts' own default),
-        own "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default
-        — this route originally also offered Weekly/Monthly/All, removed
-        per product decision in favor of Nearest+1/Nearest+2, same
+        own "Expiry" dropdown (Nearest/Nearest+1/Nearest+2/Nearest+3/
+        Nearest+4/Nearest+5, Nearest default — this route originally
+        also offered Weekly/Monthly/All, removed per product decision in
+        favor of Nearest+1/Nearest+2, later widened to Nearest+3/
+        Nearest+4/Nearest+5 per a further product decision, same
         nearest+1/nearest+2 ordinal notion /gt/<asset>'s own 2nd/3rd price
         lines use), and own "Window"
         dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
@@ -2446,7 +2454,8 @@ class ChartController(http.Controller):
         offers Weekly/Monthly/All (the configured
         weekly_expiry/monthly_expiry instrument for `asset`, Weekly
         default; "All" considers every one of the asset's own non-expired
-        instruments, no expiry cutoff) instead of Nearest/Nearest+1/Nearest+2, and the
+        instruments, no expiry cutoff) instead of /4l/<asset>'s own
+        Nearest/Nearest+1/Nearest+2/Nearest+3/Nearest+4/Nearest+5, and the
         underlying trade domain for the 4 gamma legs is CUMULATIVE
         through the selected expiry rather than isolated to one
         instrument — see mwa_gamma_json. Own "Window" dropdown

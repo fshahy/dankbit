@@ -21,9 +21,11 @@
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms).
-	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default —
-	     this page originally also offered Weekly/Monthly/All, removed per
-	     product decision in favor of Nearest+1/Nearest+2) picks that
+	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2/Nearest+3/Nearest+4/
+	     Nearest+5, Nearest default — this page originally also offered
+	     Weekly/Monthly/All, removed per product decision in favor of
+	     Nearest+1/Nearest+2, later widened to Nearest+3/Nearest+4/
+	     Nearest+5 per a further product decision) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. "Window"
 	     dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
 	     "All" no-window-bound option, split out from /gt/<asset>'s own
@@ -157,6 +159,9 @@
 						<option value="nearest" selected="selected">Nearest</option>
 						<option value="nearest_plus_1">Nearest+1</option>
 						<option value="nearest_plus_2">Nearest+2</option>
+						<option value="nearest_plus_3">Nearest+3</option>
+						<option value="nearest_plus_4">Nearest+4</option>
+						<option value="nearest_plus_5">Nearest+5</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
@@ -195,13 +200,14 @@
 					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which single expiry's trades feed
-					// the 4 gamma legs, "nearest" default. "nearest_plus_1"/
-					// "nearest_plus_2" are the 1st/2nd active expiry after
-					// the nearest one, same ordinal notion /gt/<asset>'s
+					// the 4 gamma legs, "nearest" default. "nearest_plus_1"
+					// through "nearest_plus_5" are the 1st-5th active expiry
+					// after the nearest one, same ordinal notion /gt/<asset>'s
 					// own 2nd/3rd price lines use (this page originally
 					// also offered weekly/monthly/"every active expiry at
 					// once", removed per product decision in favor of
-					// nearest_plus_1/nearest_plus_2).
+					// nearest_plus_1/nearest_plus_2, later widened to
+					// nearest_plus_3/nearest_plus_4/nearest_plus_5).
 					let EXPIRY_MODE = 'nearest';
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
