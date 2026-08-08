@@ -2901,6 +2901,57 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route('/api/signal-bot/<string:asset>', type='http', auth='user', methods=['GET'], csrf=False)
+    def signal_bot_json(self, asset, **kwargs):
+        """Latest auditable Signal Bot decision for the Delta Chart's
+        "Signal Bot" panel. auth="user" like every other route in this
+        addon (see Odoo Gotchas in CLAUDE.md) — the browser's own session
+        cookie covers this same-origin fetch() once the chart page itself
+        is loaded.
+
+        An official decision remains the displayed daily plan even after later
+        hourly no-trade audit rows are written.  Before an official exists,
+        the newest hourly decision explains why the bot is still waiting.
+        """
+        asset = (asset or '').upper()
+        if asset not in ('BTC', 'ETH'):
+            return request.make_response(
+                json.dumps({"error": "Unsupported asset"}),
+                headers=[("Content-Type", "application/json")], status=400,
+            )
+        Signal = request.env["dankbit.signal"].sudo()
+        utc_day = datetime.now(timezone.utc).date()
+        official = Signal.search([
+            ("asset", "=", asset), ("utc_day", "=", utc_day),
+            ("kind", "=", "official"),
+        ], order="evaluated_at desc, id desc", limit=1)
+        row = official or Signal.search([
+            ("asset", "=", asset), ("utc_day", "=", utc_day),
+        ], order="evaluated_at desc, id desc", limit=1)
+        payload = {"asset": asset, "utc_day": utc_day.isoformat(), "signal": None}
+        if row:
+            payload["signal"] = {
+                "id": row.id,
+                "kind": row.kind,
+                "state": row.state,
+                "direction": row.direction,
+                "evaluated_at": row.evaluated_at.isoformat() if row.evaluated_at else None,
+                "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+                "entry": row.entry,
+                "stop_loss": row.stop_loss,
+                "target": row.target,
+                "risk_reward": row.risk_reward,
+                "quality_score": row.quality_score,
+                "final_score": row.final_score,
+                "result_r": row.result_r,
+                "reason": row.reason or "",
+                "is_weekend": row.is_weekend,
+            }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     # ------------------------------------------------------------------
     # TradingView Lightweight Charts pages
     # ------------------------------------------------------------------

@@ -240,6 +240,19 @@
 						z-index: 10; pointer-events: none;
 					}
 					#forecast-status-label:empty { display: none; }
+					#signal-bot-panel {
+						position: fixed; top: 72px; right: 80px; min-width: 310px; max-width: 470px;
+						font-family: monospace; font-size: 10.5pt; line-height: 1.45;
+						color: #333; background: rgba(255,255,255,0.94);
+						padding: 8px 12px; border-radius: 6px; border: 1px solid #bbb;
+						z-index: 11; display: none; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+					}
+					#signal-bot-panel .signal-head { display:flex; justify-content:space-between; gap:12px; font-weight:bold; }
+					#signal-bot-panel .signal-long { color:#16833b; }
+					#signal-bot-panel .signal-short { color:#c62828; }
+					#signal-bot-panel .signal-neutral { color:#777; }
+					#signal-bot-panel .signal-grid { display:grid; grid-template-columns:auto auto; gap:1px 14px; margin-top:4px; }
+					#signal-bot-panel .signal-reason { margin-top:5px; color:#666; white-space:normal; }
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -324,6 +337,8 @@
 					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark #forecast-status-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark #signal-bot-panel { color:#ddd; background:rgba(0,0,0,0.88); border-color:#555; box-shadow:0 2px 8px rgba(0,0,0,0.6); }
+					body.dark #signal-bot-panel .signal-reason { color:#aaa; }
 					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
@@ -344,6 +359,7 @@
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="forecast-status-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
+				<div id="signal-bot-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -382,6 +398,10 @@
 						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="signal-bot-toggle" onchange="onToggleSignalBot()"/>
+							Signal Bot
 						</label>
 						<span class="tf-label">Option Flow:</span>
 						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
@@ -696,6 +716,7 @@
 					const NEAREST_EXPIRY_URL = '/api/nearest-expiry/' + ASSET;
 					const LAST_TRADE_URL   = '/api/last-trade/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
+					const SIGNAL_BOT_URL  = '/api/signal-bot/' + ASSET;
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
 					// checkbox at all, so SHOW_FORECAST simply never gets
@@ -705,6 +726,9 @@
 					// Draws a fully deterministic path (see FORECAST_URL) ported
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
+					let SHOW_SIGNAL_BOT = false;
+					let signalBotPriceLines = [];
+					let signalBotRequestSeq = 0;
 					let   INTERVAL         = '4h';
 					const klineUrl   = (iv, limit) => '/api/klines/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
@@ -2237,6 +2261,110 @@
 						}
 					}
 
+					function clearSignalBot() {
+						signalBotRequestSeq += 1;
+						signalBotPriceLines.forEach(line => series.removePriceLine(line));
+						signalBotPriceLines = [];
+						const panel = document.getElementById('signal-bot-panel');
+						if (panel) { panel.style.display = 'none'; panel.replaceChildren(); }
+					}
+
+					function signalMetric(grid, label, value) {
+						const key = document.createElement('span');
+						const val = document.createElement('span');
+						key.textContent = label;
+						val.textContent = value;
+						grid.append(key, val);
+					}
+
+					function signalPrice(value) {
+						const n = Number(value);
+						return Number.isFinite(n) && n > 0 ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—';
+					}
+
+					function drawSignalBotPanel(signal) {
+						const panel = document.getElementById('signal-bot-panel');
+						if (!panel) return;
+						panel.replaceChildren();
+						const isOfficial = signal.kind === 'official';
+						const isShadow = signal.kind === 'shadow';
+						const direction = signal.direction || 'neutral';
+						const title = document.createElement('span');
+						const state = document.createElement('span');
+						const head = document.createElement('div');
+						head.className = 'signal-head';
+						title.className = direction === 'long' ? 'signal-long' : direction === 'short' ? 'signal-short' : 'signal-neutral';
+						title.textContent = isOfficial
+							? 'OFFICIAL ' + direction.toUpperCase()
+							: isShadow ? 'SHADOW ' + direction.toUpperCase() : 'NO TRADE';
+						state.textContent = String(signal.state || '').toUpperCase();
+						head.append(title, state);
+						panel.append(head);
+
+						const grid = document.createElement('div');
+						grid.className = 'signal-grid';
+						signalMetric(grid, 'Entry', signalPrice(signal.entry));
+						signalMetric(grid, 'Stop', signalPrice(signal.stop_loss));
+						signalMetric(grid, 'Target', signalPrice(signal.target));
+						signalMetric(grid, 'R:R', Number(signal.risk_reward || 0) > 0 ? '1:' + Number(signal.risk_reward).toFixed(2) : '—');
+						signalMetric(grid, 'Quality', Number(signal.quality_score || 0).toFixed(1) + '%');
+						signalMetric(grid, 'Score', Number(signal.final_score || 0).toFixed(1));
+						const evaluated = signal.evaluated_at ? signal.evaluated_at.replace('T', ' ').slice(0, 16) + ' UTC' : '—';
+						signalMetric(grid, 'Evaluated', evaluated);
+						signalMetric(grid, 'Validity', signal.expires_at ? signal.expires_at.replace('T', ' ').slice(0, 16) + ' UTC' : '—');
+						panel.append(grid);
+
+						const reason = document.createElement('div');
+						reason.className = 'signal-reason';
+						reason.textContent = signal.reason || 'No explanation recorded.';
+						panel.append(reason);
+						panel.style.display = 'block';
+					}
+
+					async function refreshSignalBot() {
+						if (!SHOW_SIGNAL_BOT || MINIMAL_CHART) return;
+						const requestSeq = ++signalBotRequestSeq;
+						try {
+							const response = await fetch(SIGNAL_BOT_URL, { cache: 'no-store' });
+							if (!response.ok) throw new Error('Signal Bot HTTP ' + response.status);
+							const data = await response.json();
+							if (!SHOW_SIGNAL_BOT || requestSeq !== signalBotRequestSeq) return;
+							signalBotPriceLines.forEach(line => series.removePriceLine(line));
+							signalBotPriceLines = [];
+							if (!data.signal) {
+								drawSignalBotPanel({ kind:'no_trade', state:'waiting', direction:'neutral', reason:'No Signal Bot evaluation has been recorded for this UTC day.' });
+								return;
+							}
+							const signal = data.signal;
+							drawSignalBotPanel(signal);
+							// Only an official plan gets actionable chart levels. Shadow and
+							// No Trade remain visible in the panel for forward-test context.
+							if (signal.kind !== 'official') return;
+							const definitions = [
+								{ value:signal.entry, color:'#2196f3', title:'BOT ENTRY' },
+								{ value:signal.stop_loss, color:'#ef5350', title:'BOT SL' },
+								{ value:signal.target, color:'#26a69a', title:'BOT TP' },
+							];
+							definitions.forEach(item => {
+								const price = Number(item.value);
+								if (!Number.isFinite(price) || price <= 0) return;
+								signalBotPriceLines.push(series.createPriceLine({
+									price, color:item.color, lineWidth:2,
+									lineStyle:LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible:true, axisLabelColor:item.color, title:item.title,
+								}));
+							});
+						} catch (error) {
+							if (!SHOW_SIGNAL_BOT || requestSeq !== signalBotRequestSeq) return;
+							drawSignalBotPanel({ kind:'no_trade', state:'error', direction:'neutral', reason:error.message });
+						}
+					}
+
+					function onToggleSignalBot() {
+						SHOW_SIGNAL_BOT = document.getElementById('signal-bot-toggle').checked;
+						if (SHOW_SIGNAL_BOT) refreshSignalBot(); else clearSignalBot();
+					}
+
 					// Shared option-flow window for Zones, Gamma, Smart Liquidity and
 					// the unified Forecast layer. Trailing selections are non-persisted.
 					function onZonesBoxWindowChange() {
@@ -2447,7 +2575,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); await refreshSignalBot(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
@@ -2477,6 +2605,7 @@
 					setInterval(refreshGammaTops, REFRESH);
 					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
+					setInterval(refreshSignalBot, REFRESH);
 				//]]></script>
 			</body>
 		</html>
