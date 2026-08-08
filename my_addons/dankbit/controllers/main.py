@@ -21,7 +21,7 @@ from . import next_candle_forecast
 Y_CHART_DEFAULT_WINDOW_HOURS = 12
 Y_CHART_WINDOW_HOURS_CHOICES = (12, 24, 48)
 
-# /4l/<asset>'s own "Window" dropdown numeric choice set — 8h/12h/24h —
+# /4l/<asset>'s own "Window" dropdown numeric choice set — 4h/8h/12h/24h —
 # split out from Y_CHART_WINDOW_HOURS_CHOICES (which /gt/<asset> still
 # uses unchanged) once this page's own choice set grew past that shared
 # 12/24/48 tuple, so /gt/<asset>'s own "Window" dropdown is unaffected.
@@ -31,11 +31,11 @@ Y_CHART_WINDOW_HOURS_CHOICES = (12, 24, 48)
 # and "All" were both re-added afterwards per later product decisions;
 # 1h/2h/3h/4h/5h/6h/7h/8h were then removed in a further round, leaving
 # only 12h/24h in this tuple; 8h was then re-added per a later product
-# decision. "All" (`?hours=all`) is handled as a separate string sentinel
-# in four_leg_gamma_json, not a member of this tuple — it skips the
-# trailing-hours trade filter entirely rather than mapping to a number
-# of hours.
-FOUR_LEG_WINDOW_HOURS_CHOICES = (8, 12, 24)
+# decision, and 4h after that. "All" (`?hours=all`) is handled as a
+# separate string sentinel in four_leg_gamma_json, not a member of this
+# tuple — it skips the trailing-hours trade filter entirely rather than
+# mapping to a number of hours.
+FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24)
 
 # /4l/<asset>'s own "Window" dropdown default — also the fallback used
 # by four_leg_gamma_json when `?hours=` is missing/malformed, same as
@@ -45,7 +45,7 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (8, 12, 24)
 # (see four_leg_gamma_json) rather than to another numeric choice.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = "all"
 
-# /mw/<asset>'s own "Window" dropdown numeric choice set — 12h/24h, kept
+# /mwa/<asset>'s own "Window" dropdown numeric choice set — 12h/24h, kept
 # as its own constant rather than extending Y_CHART_WINDOW_HOURS_CHOICES,
 # so /gt's and /4l's own "Window" dropdowns are unaffected. Both this
 # tuple and /4l/<asset>'s own FOUR_LEG_WINDOW_HOURS_CHOICES were reduced
@@ -58,21 +58,21 @@ FOUR_LEG_DEFAULT_WINDOW_HOURS = "all"
 # product decision, across three rounds (12h was dropped in the first
 # round, then re-added — alongside 24h being dropped — in a second, then
 # 6h added in a third; the "All" no-window-bound mode — `?hours=all` —
-# was removed along with its dropdown option; see mw_gamma_json). 24h and
+# was removed along with its dropdown option; see mwa_gamma_json). 24h and
 # "All" were both re-added afterwards per later product decisions, then
 # 1h/2h/4h/6h/8h were removed in a further round, leaving only 12h/24h in
 # this tuple. "All" is handled as a separate string sentinel in
-# mw_gamma_json, not a member of this tuple, and skips the trailing-hours
+# mwa_gamma_json, not a member of this tuple, and skips the trailing-hours
 # trade filter entirely rather than mapping to a number of hours.
-MW_WINDOW_HOURS_CHOICES = (12, 24)
+MWA_WINDOW_HOURS_CHOICES = (12, 24)
 
-# /mw/<asset>'s own "Window" dropdown default — kept as its own constant
+# /mwa/<asset>'s own "Window" dropdown default — kept as its own constant
 # since this page's own default is an independent product decision.
 # Was a number (4, i.e. 4h) until 4h was removed from
-# MW_WINDOW_HOURS_CHOICES above, at which point the default moved to the
-# "all" string sentinel (see mw_gamma_json) rather than to another
+# MWA_WINDOW_HOURS_CHOICES above, at which point the default moved to the
+# "all" string sentinel (see mwa_gamma_json) rather than to another
 # numeric choice.
-MW_DEFAULT_WINDOW_HOURS = "all"
+MWA_DEFAULT_WINDOW_HOURS = "all"
 
 
 def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, timeframe="4h"):
@@ -2084,9 +2084,10 @@ class ChartController(http.Controller):
         """Deribit perpetual-futures equivalent of klines_proxy above —
         sourced from dankbit.trade.get_candles_deribit_perpetual() instead
         of get_candles() (Binance spot). Used by /gt/<asset>'s,
-        /4l/<asset>'s, and /mw/<asset>'s own candle series, per product
-        decision to keep those three pages on Deribit's own perpetuals
-        rather than switching every TradingView page's candle source."""
+        /4l/<asset>'s, /mwa/<asset>'s, and /aaaa/<asset>'s own candle
+        series, per product decision to keep those pages on Deribit's
+        own perpetuals rather than switching every TradingView page's
+        candle source."""
         candles = request.env["dankbit.trade"].get_candles_deribit_perpetual(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
@@ -2118,7 +2119,7 @@ class ChartController(http.Controller):
         "nearest_plus_1"/"nearest_plus_2". The trailing-hours trade window
         is independently user-selectable via the page's own "Window"
         dropdown — an optional `?hours=` query param, restricted to
-        FOUR_LEG_WINDOW_HOURS_CHOICES (8/12/24 — or the literal string
+        FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24 — or the literal string
         "all", skipping the trailing-hours trade filter entirely; any
         other/missing value falls back to
         FOUR_LEG_DEFAULT_WINDOW_HOURS="all" — this page's own choice
@@ -2252,7 +2253,7 @@ class ChartController(http.Controller):
         per product decision in favor of Nearest+1/Nearest+2, same
         nearest+1/nearest+2 ordinal notion /gt/<asset>'s own 2nd/3rd price
         lines use), and own "Window"
-        dropdown (8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
+        dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
         CHOICES plus the "All" no-window-bound option, split out from
         /gt/<asset>'s own Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once
         this page's own set grew, "All" default, independent of the
@@ -2263,8 +2264,8 @@ class ChartController(http.Controller):
         product decisions; 1h/2h/3h/4h/5h/6h/7h/8h were then removed in
         a further round, leaving only 12h/24h/All, and the default moved
         from 8h to "All" at that point; 8h was then re-added per a still
-        later product decision (default stayed "All"); see
-        four_leg_gamma_json for how each option resolves). A vertical
+        later product decision (default stayed "All"), and 4h after
+        that; see four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
@@ -2281,17 +2282,21 @@ class ChartController(http.Controller):
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
 
-    @http.route("/api/mw-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
-    def mw_gamma_json(self, asset):
+    @http.route("/api/mwa-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def mwa_gamma_json(self, asset):
         """Computed fresh on every request — no model/table behind this
         route (same live-compute-nothing-persisted pattern
         /api/four-leg-gamma/<asset> uses): 4-leg gamma extrema (BCG/BPG/
-        SCG/SPG) via options.per_leg_greeks(), for /mw/<asset>'s own
+        SCG/SPG) via options.per_leg_greeks(), for /mwa/<asset>'s own
         "Expiry" dropdown — an optional `?expiry=` query param, one of
-        "weekly" (default) or "monthly", resolved against the configured
-        weekly_expiry/monthly_expiry instrument for `asset` (eth_-prefixed
-        for ETH, same convention _build_tv_chart_context() uses) — any
-        other/missing value falls back to "weekly".
+        "weekly" (default), "monthly", or "all", resolved against the
+        configured weekly_expiry/monthly_expiry instrument for `asset`
+        (eth_-prefixed for ETH, same convention _build_tv_chart_context()
+        uses) — any other/missing value falls back to "weekly". "all"
+        skips that lookup entirely and considers every one of `asset`'s
+        own non-expired instruments (`expiration >= now`, no upper
+        bound) — same no-expiry-cutoff domain gamma_by_strike_json's own
+        "All" scope uses.
 
         Unlike /api/four-leg-gamma/<asset> (isolated to one exact
         instrument's own trades via an anchored `name` match), the trade
@@ -2302,15 +2307,15 @@ class ChartController(http.Controller):
         Weekly/Monthly scopes, not a per-instrument name match) — further
         restricted, same query-param convention as /api/four-leg-gamma/
         <asset>'s own "Window" dropdown, to a trailing-hours trade window
-        (?hours=, one of MW_WINDOW_HOURS_CHOICES — 12/24 — or the literal
+        (?hours=, one of MWA_WINDOW_HOURS_CHOICES — 12/24 — or the literal
         string "all", skipping the `deribit_ts` filter entirely; falling
-        back to MW_DEFAULT_WINDOW_HOURS="all" for any other/missing
+        back to MWA_DEFAULT_WINDOW_HOURS="all" for any other/missing
         value). The no-window-bound "All" option existed at one point and
         was removed per product decision along with 12h/16h/20h/48h/72h,
         then re-added per a later product decision; 1h/2h/4h/6h/8h were
         removed in a further round, leaving 12h/24h/All.
         Feeds
-        /mw/<asset>'s 4 horizontal gamma-price lines. No points at all
+        /mwa/<asset>'s 4 horizontal gamma-price lines. No points at all
         (same nothing-computable-yet convention every other route in this
         addon follows) when the selected expiry isn't configured for
         `asset`, is malformed, or has no matching trades in the resolved
@@ -2333,13 +2338,15 @@ class ChartController(http.Controller):
             step = float(icp.get_param("dankbit.eth_steps", default=50))
 
         expiry_mode = (request.httprequest.args.get("expiry") or "").lower()
-        if expiry_mode not in ("weekly", "monthly"):
+        if expiry_mode not in ("weekly", "monthly", "all"):
             expiry_mode = "weekly"
-        if asset == "ETH":
-            expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
-        else:
-            expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
-        instrument = icp.get_param(expiry_param, default="").upper()
+        instrument = ""
+        if expiry_mode != "all":
+            if asset == "ETH":
+                expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+            else:
+                expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
+            instrument = icp.get_param(expiry_param, default="").upper()
 
         # "all" (?hours=all) skips the trailing-hours trade filter entirely
         # — checked before the int() parse below so it isn't mistaken for
@@ -2353,8 +2360,8 @@ class ChartController(http.Controller):
                 hours = int(hours_param)
             except (TypeError, ValueError):
                 hours = None
-            if hours not in MW_WINDOW_HOURS_CHOICES:
-                hours = MW_DEFAULT_WINDOW_HOURS
+            if hours not in MWA_WINDOW_HOURS_CHOICES:
+                hours = MWA_DEFAULT_WINDOW_HOURS
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -2370,12 +2377,13 @@ class ChartController(http.Controller):
                 expiry_dt = None
 
         points = []
-        if expiry_dt:
+        if expiry_mode == "all" or expiry_dt:
             domain = [
                 ("name", "=ilike", f"{asset}-%"),
                 ("expiration", ">=", as_of),
-                ("expiration", "<=", expiry_dt),
             ]
+            if expiry_dt:
+                domain.append(("expiration", "<=", expiry_dt))
             if hours != "all":
                 window_start = as_of - timedelta(hours=hours)
                 domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
@@ -2405,19 +2413,28 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/mw/<string:asset>", type="http", auth="user", website=True)
-    def mw_gamma_chart(self, asset):
+    @http.route("/mwa/<string:asset>", type="http", auth="user", website=True)
+    def mwa_gamma_chart(self, asset):
         """Standalone TradingView page — same shape as /4l/<asset> (own
         template, Deribit perpetual-futures candles via
         get_candles_deribit_perpetual()/api/klines-futures/<asset>, no
-        model/table behind this page, refreshed live on every poll), but
-        its own "Expiry" dropdown offers Weekly/Monthly (the configured
-        weekly_expiry/monthly_expiry instrument for `asset`, Monthly
-        default) instead of Nearest/Nearest+1/Nearest+2, and the
+        model/table behind this page) — but unlike every other TradingView
+        page in this addon, only the candle series auto-refreshes on a
+        timer here (TradingView's own normal live-candle behavior, every
+        5s); the 4 gamma-price lines (via /api/mwa-gamma/<asset>) are
+        computed once on load and again on any manual Timeframe/Expiry/
+        Window change, deliberately NOT polled on dankbit.refresh_interval,
+        since mwa_gamma_json recomputes options.per_leg_greeks() fresh
+        over a cumulative multi-instrument trade set on every call — too
+        heavy to re-run unattended on a timer. Its own "Expiry" dropdown
+        offers Weekly/Monthly/All (the configured
+        weekly_expiry/monthly_expiry instrument for `asset`, Weekly
+        default; "All" considers every one of the asset's own non-expired
+        instruments, no expiry cutoff) instead of Nearest/Nearest+1/Nearest+2, and the
         underlying trade domain for the 4 gamma legs is CUMULATIVE
         through the selected expiry rather than isolated to one
-        instrument — see mw_gamma_json. Own "Window" dropdown
-        (12h/24h/All — MW_WINDOW_HOURS_CHOICES plus the "All"
+        instrument — see mwa_gamma_json. Own "Window" dropdown
+        (12h/24h/All — MWA_WINDOW_HOURS_CHOICES plus the "All"
         no-window-bound option, kept as its own constant/product decision
         independent of /4l/<asset>'s own "Window" dropdown
         (FOUR_LEG_WINDOW_HOURS_CHOICES, which additionally offers 8h,
@@ -2425,15 +2442,191 @@ class ChartController(http.Controller):
         to this page — the two pages' dropdowns were both reduced to
         12h/24h/All independently and aren't aliased to each other, so
         one page's dropdown changing doesn't imply the other's does too)
-        — "All" default, MW_DEFAULT_WINDOW_HOURS; 1h/2h/4h/6h/8h were
+        — "All" default, MWA_DEFAULT_WINDOW_HOURS; 1h/2h/4h/6h/8h were
         removed from this page's own dropdown per product decision, at
         which point the default moved from 4h to "All")
         and "Timeframe" dropdown (15m/1h/4h/1d, same options as
         /4l/<asset>'s own, but 1d default here — an independent product
         decision from that page's own 4h default). Renders its own standalone template
-        (dankbit_mw_gamma_chart). Polls on the general
-        dankbit.refresh_interval, same as every other page's own refresh
-        rate."""
+        (dankbit_mwa_gamma_chart).
+
+        The "Expiry" dropdown's own initial selection is also
+        bookmarkable via an optional `?e=` query param — `w` for
+        "weekly", `m` for "monthly", `a` for "all" — read once at page
+        render and baked into the template as `initial_expiry`, which
+        the client-side JS uses to set both EXPIRY_MODE and the
+        <select>'s own value before the first fetch (see
+        mwa_gamma_chart_templates.xml). Any other/missing value falls
+        back to "weekly", same as the dropdown's own un-queried default."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        expiry_param = (request.httprequest.args.get("e") or "").lower()
+        initial_expiry = {"w": "weekly", "m": "monthly", "a": "all"}.get(expiry_param, "weekly")
+        ctx = {"asset": asset, "refresh_interval": refresh_interval, "initial_expiry": initial_expiry}
+        return request.render("dankbit.dankbit_mwa_gamma_chart", ctx)
+
+    @http.route("/api/aaaa-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def aaaa_gamma_json(self, asset):
+        """Computed fresh on every request — no model/table behind this
+        route, same live-compute-nothing-persisted pattern
+        /api/mwa-gamma/<asset> and /api/four-leg-gamma/<asset> use.
+        Unlike either of those (one expiry scope per request, chosen via
+        a dropdown), this returns all 4 of this addon's standing expiry
+        scopes in a single response — "nearest" (isolated to the single
+        soonest-expiring active instrument, same resolution
+        four_leg_gamma_json's own "nearest" ?expiry= uses:
+        dankbit.bands._distinct_expirations()/_format_instrument() then
+        an anchored `name` `=ilike` domain, `with_context(active_test=
+        False)` for the same defensive reason that route already
+        applies there), "weekly"/"monthly" (cumulative through the
+        configured weekly_expiry/monthly_expiry instrument — every
+        active instrument up to and including it, same domain
+        mwa_gamma_json's own "weekly"/"monthly" ?expiry= build), and
+        "all" (every one of `asset`'s own non-expired instruments, no
+        expiry cutoff — same domain mwa_gamma_json's own "all" ?expiry=
+        uses). No trailing-hours window on any scope — unlike
+        /api/mwa-gamma/<asset> and /api/four-leg-gamma/<asset>, this
+        route has no ?hours= param at all; every scope always considers
+        every matching trade regardless of when it happened, same as
+        those two routes' own "All" Window choice.
+
+        For each scope, calls options.per_leg_greeks() once — the same
+        single source of truth dankbit.bands/dankbit.forecast.snapshot/
+        chart_png_zones/mwa_gamma_json/four_leg_gamma_json all use — and
+        reduces the 4 leg gamma PRICE levels (BCG/BPG/SCG/SPG) to a
+        single average, over whichever legs are actually present (a
+        leg's own gamma_price is None with zero trades — collapsed to
+        the 0.0 "absent" sentinel here, same convention every other
+        per-leg route in this file uses), not a fixed /4 — identical
+        math to the "AVG" price line /4l/<asset> and /mwa/<asset> draw
+        client-side off their own single selected scope's 4 legs, just
+        computed server-side here since 4 scopes are combined into one
+        response. The paired average gamma VALUE ($, not price) is
+        averaged over that exact same present-leg subset, not
+        separately gated, so a scope's price and value line up over
+        identical legs.
+
+        Response: {"asset", "generated_at" (epoch ms), "scopes": {
+        "nearest"/"weekly"/"monthly"/"all": {"instrument" (None for
+        "all", or if that scope's own configured/resolved expiry is
+        missing), "avg_price", "avg_value", "trade_count"}}}. A scope
+        with no matching trades at all (unconfigured weekly/monthly
+        expiry, malformed expiry string, or genuinely zero trades)
+        reports avg_price/avg_value 0.0 and trade_count 0 — same
+        nothing-computable-yet convention every other route in this
+        addon follows — rather than omitting the scope, so the client
+        can always render all 4 keys and simply skip drawing a line
+        for the 0.0 ones (0.0 = absent, same convention every other
+        gamma_band/smart_liq_*_price field in this addon uses)."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            step = float(icp.get_param("dankbit.steps", default=100))
+        else:
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            step = float(icp.get_param("dankbit.eth_steps", default=50))
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+
+        def scope_from_trades(trades, instrument):
+            if not trades:
+                return {"instrument": instrument, "avg_price": 0.0, "avg_value": 0.0, "trade_count": 0}
+            legs = options.per_leg_greeks(STs, trades)
+            pairs = [
+                (legs[k]["gamma_price"], legs[k]["gamma_value"])
+                for k in ("long_call", "long_put", "short_call", "short_put")
+                if legs[k]["gamma_price"]
+            ]
+            avg_price = sum(p for p, _ in pairs) / len(pairs) if pairs else 0.0
+            avg_value = sum(v for _, v in pairs) / len(pairs) if pairs else 0.0
+            return {"instrument": instrument, "avg_price": avg_price, "avg_value": avg_value, "trade_count": len(trades)}
+
+        # Naive UTC, same as every other `expiration` domain comparison
+        # in this file.
+        def cumulative_through(config_key):
+            instrument = icp.get_param(config_key, default="").upper()
+            parts = instrument.split("-", 1) if instrument else []
+            if len(parts) != 2:
+                return request.env["dankbit.trade"], None
+            try:
+                expiry_dt = datetime.strptime(parts[1], "%d%b%y").replace(hour=8)
+            except ValueError:
+                return request.env["dankbit.trade"], None
+            domain = [
+                ("name", "=ilike", f"{asset}-%"),
+                ("expiration", ">=", as_of),
+                ("expiration", "<=", expiry_dt),
+            ]
+            return request.env["dankbit.trade"].search(domain), instrument
+
+        bands_model = request.env["dankbit.bands"]
+        nearest_expirations = bands_model._distinct_expirations(asset, as_of, 1)
+        nearest_instrument = bands_model._format_instrument(asset, nearest_expirations[0]) if nearest_expirations else None
+        nearest_trades = (
+            request.env["dankbit.trade"].with_context(active_test=False).search([("name", "=ilike", f"{nearest_instrument}-%")])
+            if nearest_instrument else request.env["dankbit.trade"]
+        )
+
+        weekly_key = "dankbit.eth_weekly_expiry" if asset == "ETH" else "dankbit.weekly_expiry"
+        monthly_key = "dankbit.eth_monthly_expiry" if asset == "ETH" else "dankbit.monthly_expiry"
+        weekly_trades, weekly_instrument = cumulative_through(weekly_key)
+        monthly_trades, monthly_instrument = cumulative_through(monthly_key)
+
+        all_trades = request.env["dankbit.trade"].search([
+            ("name", "=ilike", f"{asset}-%"),
+            ("expiration", ">=", as_of),
+        ])
+
+        payload = {
+            "asset": asset,
+            "generated_at": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
+            "scopes": {
+                "nearest": scope_from_trades(nearest_trades, nearest_instrument),
+                "weekly": scope_from_trades(weekly_trades, weekly_instrument),
+                "monthly": scope_from_trades(monthly_trades, monthly_instrument),
+                "all": scope_from_trades(all_trades, None),
+            },
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/aaaa/<string:asset>", type="http", auth="user", website=True)
+    def aaaa_gamma_chart(self, asset):
+        """Standalone TradingView page — structurally the simplest of the
+        Deribit-perpetual-candle standalone pages (/gt, /4l, /mwa): no
+        Expiry/Window dropdown at all, since it draws all 4 of this
+        addon's standing expiry scopes at once (see aaaa_gamma_json) —
+        "Nearest" (black/axisBlack), "Weekly" (blue), "Monthly" (orange),
+        "All" (teal) — rather than letting the user pick one. Same
+        no-auto-refresh-for-computed-lines design as /mwa/<asset>: only
+        the candle series auto-refreshes on a timer (TradingView's own
+        normal live-candle behavior, every 5s); the 4 gamma lines are
+        computed once on load only (there's no Expiry/Window control to
+        trigger a manual re-fetch either, unlike /mwa/<asset> — Timeframe
+        changes only reload candles, not the gamma lines, since candle
+        resolution has no bearing on the per_leg_greeks() trade domain),
+        deliberately NOT polled on dankbit.refresh_interval, since
+        aaaa_gamma_json recomputes options.per_leg_greeks() 3-4 times
+        per call (once per non-empty scope) — the heaviest single
+        request in this addon. "Timeframe" dropdown (15m/1h/4h/1d, 4h
+        default, same options/default as /4l/<asset>'s own). Renders its
+        own standalone template (dankbit_aaaa_gamma_chart)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
@@ -2441,7 +2634,7 @@ class ChartController(http.Controller):
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
-        return request.render("dankbit.dankbit_mw_gamma_chart", ctx)
+        return request.render("dankbit.dankbit_aaaa_gamma_chart", ctx)
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def forecast_json(self, asset, **kw):

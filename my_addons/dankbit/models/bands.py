@@ -19,7 +19,7 @@ def _avg_present(*values):
     forecast.per_leg_greeks()), not a fixed division by len(values). A
     leg with no trades in the window has no gamma/delta extremum at all;
     blindly dividing by 4 would silently drag the average toward 0 for
-    every such absent leg, same bug the /4l and /mw AVG price line
+    every such absent leg, same bug the /4l and /mwa AVG price line
     (dankbit_four_leg_gamma_chart_templates.xml) was already written to
     avoid on the frontend. 0.0 (not None) when nothing is present, same
     convention every other "absent" field on this model already uses."""
