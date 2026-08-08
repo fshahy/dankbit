@@ -431,6 +431,44 @@ def per_leg_greeks(STs, trades, r=0.0):
     return result
 
 
+def per_leg_gamma(STs, trades, r=0.0):
+    """Gamma-only slice of per_leg_greeks(): identical split/short-circuit
+    convention and the exact same gamma_lib.portfolio_gamma() call/argmax-
+    argmin rule, so a caller here can never disagree with per_leg_greeks()
+    on the gamma numbers — but skips the theta curve, the vega curve, and
+    both delta computations (delta_saturation_price() plus the interpolated
+    delta_value), each its own full O(trades x len(STs)) pass per leg, that
+    per_leg_greeks() always computes regardless of whether a caller needs
+    them. Built for aaaa_gamma_json (main.py), which combines up to 4
+    unbounded-time-window scopes into one request and only ever reads
+    gamma_price/gamma_value — calling per_leg_greeks() there was doing
+    ~5x the necessary Black-Scholes curve work per leg. Returns
+    {leg_name: {"trades", "gamma_price", "gamma_value"}}, same None-price/
+    0.0-value "absent" convention as per_leg_greeks() for a leg with zero
+    trades."""
+    legs = {
+        "long_call": trades.filtered(lambda t: t.direction == "buy" and t.option_type == "call"),
+        "long_put": trades.filtered(lambda t: t.direction == "buy" and t.option_type == "put"),
+        "short_call": trades.filtered(lambda t: t.direction == "sell" and t.option_type == "call"),
+        "short_put": trades.filtered(lambda t: t.direction == "sell" and t.option_type == "put"),
+    }
+
+    result = {}
+    for leg_name, leg_trades in legs.items():
+        if not leg_trades:
+            result[leg_name] = {"trades": leg_trades, "gamma_price": None, "gamma_value": 0.0}
+            continue
+
+        gamma_curve = gamma_lib.portfolio_gamma(STs, leg_trades, r=r)
+        gamma_idx = int(_GAMMA_VEGA_ARGFN[leg_name](gamma_curve))
+        result[leg_name] = {
+            "trades": leg_trades,
+            "gamma_price": float(STs[gamma_idx]),
+            "gamma_value": float(gamma_curve[gamma_idx]),
+        }
+    return result
+
+
 def zone_summary(STs, longs_curve, shorts_curve):
     """Same extrema/box-boundary definitions used by dankbit.bands
     and the TradingView zones boxes: Shorts curve peak ("seller_max_profit"),

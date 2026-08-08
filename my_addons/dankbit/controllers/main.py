@@ -2138,9 +2138,12 @@ class ChartController(http.Controller):
         resolved instrument via the same anchored `=ilike` domain
         chart_png_zones uses (`f"{instrument}-%"`, left-prefix match so
         one expiry's query can never pull in another's trades). Computed
-        via options.per_leg_greeks() — the single source of truth for this
-        computation, also used by dankbit.bands/dankbit.forecast.snapshot/
-        chart_png_zones. Feeds /4l/<asset>'s own 4 horizontal gamma-price
+        via options.per_leg_gamma() — a gamma-only slice of
+        options.per_leg_greeks() (the single source of truth for the full
+        gamma/delta/theta/vega set, also used by dankbit.bands/
+        dankbit.forecast.snapshot/chart_png_zones) that skips the theta/
+        vega/delta curves this route never reads (see per_leg_gamma()'s
+        own docstring in options.py). Feeds /4l/<asset>'s own 4 horizontal gamma-price
         lines. No points at all (same nothing-computable-yet convention
         every other route in this addon follows) when nothing is active at
         that ordinal position. `points` holds exactly one (current)
@@ -2203,7 +2206,11 @@ class ChartController(http.Controller):
         points = []
         if trades:
             STs = np.arange(from_price, to_price, step, dtype=np.float64)
-            legs = options.per_leg_greeks(STs, trades)
+            # per_leg_gamma() rather than per_leg_greeks() — only
+            # gamma_price/gamma_value are read below, so the theta/vega/
+            # delta curves per_leg_greeks() would also compute are pure
+            # waste here (see per_leg_gamma()'s docstring in options.py).
+            legs = options.per_leg_gamma(STs, trades)
             # A leg with zero trades reports gamma_price as None (no curve
             # to peak/bottom at) — collapsed to 0.0 here, same "0.0 =
             # absent" sentinel the client's own `if (latest.bcg_price)`
@@ -2390,7 +2397,13 @@ class ChartController(http.Controller):
             trades = request.env["dankbit.trade"].search(domain)
             if trades:
                 STs = np.arange(from_price, to_price, step, dtype=np.float64)
-                legs = options.per_leg_greeks(STs, trades)
+                # per_leg_gamma() rather than per_leg_greeks() — this route
+                # only ever reads gamma_price/gamma_value below, and over a
+                # cumulative-through-expiry, up-to-unbounded ("All" Window)
+                # trade set, the theta/vega/delta curves per_leg_greeks()
+                # also computes are pure waste (see per_leg_gamma()'s own
+                # docstring in options.py).
+                legs = options.per_leg_gamma(STs, trades)
                 # See four_leg_gamma_json's own comment above — a leg with
                 # zero trades reports gamma_price as None, collapsed to 0.0
                 # here to match the client's existing 0.0-means-absent
@@ -2424,9 +2437,12 @@ class ChartController(http.Controller):
         5s); the 4 gamma-price lines (via /api/mwa-gamma/<asset>) are
         computed once on load and again on any manual Timeframe/Expiry/
         Window change, deliberately NOT polled on dankbit.refresh_interval,
-        since mwa_gamma_json recomputes options.per_leg_greeks() fresh
+        since mwa_gamma_json recomputes options.per_leg_gamma() fresh
         over a cumulative multi-instrument trade set on every call — too
-        heavy to re-run unattended on a timer. Its own "Expiry" dropdown
+        heavy to re-run unattended on a timer even after being switched
+        off the full per_leg_greeks() to skip its unused theta/vega/
+        delta curves (see per_leg_gamma()'s docstring in options.py).
+        Its own "Expiry" dropdown
         offers Weekly/Monthly/All (the configured
         weekly_expiry/monthly_expiry instrument for `asset`, Weekly
         default; "All" considers every one of the asset's own non-expired
@@ -2494,9 +2510,14 @@ class ChartController(http.Controller):
         every matching trade regardless of when it happened, same as
         those two routes' own "All" Window choice.
 
-        For each scope, calls options.per_leg_greeks() once — the same
-        single source of truth dankbit.bands/dankbit.forecast.snapshot/
-        chart_png_zones/mwa_gamma_json/four_leg_gamma_json all use — and
+        For each scope, calls options.per_leg_gamma() once — a gamma-only
+        slice of per_leg_greeks() (the same single source of truth
+        dankbit.bands/dankbit.forecast.snapshot/chart_png_zones/
+        mwa_gamma_json/four_leg_gamma_json all use for the full Greek set)
+        that skips the theta/vega/delta curves this route never reads —
+        with up to 4 unbounded-time-window scopes computed per request,
+        those made this the heaviest request in the addon by a wide
+        margin; see per_leg_gamma()'s own docstring in options.py. Then
         reduces the 4 leg gamma PRICE levels (BCG/BPG/SCG/SPG) to a
         single average, over whichever legs are actually present (a
         leg's own gamma_price is None with zero trades — collapsed to
@@ -2545,7 +2566,7 @@ class ChartController(http.Controller):
         def scope_from_trades(trades, instrument):
             if not trades:
                 return {"instrument": instrument, "avg_price": 0.0, "avg_value": 0.0, "trade_count": 0}
-            legs = options.per_leg_greeks(STs, trades)
+            legs = options.per_leg_gamma(STs, trades)
             pairs = [
                 (legs[k]["gamma_price"], legs[k]["gamma_value"])
                 for k in ("long_call", "long_put", "short_call", "short_put")
@@ -2620,12 +2641,16 @@ class ChartController(http.Controller):
         computed once on load only (there's no Expiry/Window control to
         trigger a manual re-fetch either, unlike /mwa/<asset> — Timeframe
         changes only reload candles, not the gamma lines, since candle
-        resolution has no bearing on the per_leg_greeks() trade domain),
+        resolution has no bearing on the per_leg_gamma() trade domain),
         deliberately NOT polled on dankbit.refresh_interval, since
-        aaaa_gamma_json recomputes options.per_leg_greeks() 3-4 times
-        per call (once per non-empty scope) — the heaviest single
-        request in this addon. "Timeframe" dropdown (15m/1h/4h/1d, 4h
-        default, same options/default as /4l/<asset>'s own). Renders its
+        aaaa_gamma_json still recomputes options.per_leg_gamma() 3-4
+        times per call (once per non-empty scope, each over an
+        unbounded-time-window trade set) — the heaviest single request
+        in this addon, even after being switched off the full
+        per_leg_greeks() to skip its unused theta/vega/delta curves (see
+        per_leg_gamma()'s docstring in options.py). "Timeframe" dropdown
+        (15m/1h/4h/1d, 4h default, same options/default as /4l/<asset>'s
+        own). Renders its
         own standalone template (dankbit_aaaa_gamma_chart)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
