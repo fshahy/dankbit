@@ -149,6 +149,23 @@
             <field name="priority">5</field>
         </record>
 
+        <record id="dankbit_signal_bot_evaluate_cron" model="ir.cron">
+            <field name="active">True</field>
+            <field name="nextcall">2020-01-01 00:10:00</field>
+            <field name="name">Dankbit - Evaluate Thales Signal Bot</field>
+            <field name="model_id" ref="model_dankbit_signal"/>
+            <field name="interval_number">1</field><field name="interval_type">hours</field>
+            <field name="state">code</field><field name="code">model.evaluate()</field><field name="priority">6</field>
+        </record>
+        <record id="dankbit_signal_bot_outcome_cron" model="ir.cron">
+            <field name="active">True</field>
+            <field name="nextcall">2020-01-01 00:20:00</field>
+            <field name="name">Dankbit - Check Signal Bot Outcomes</field>
+            <field name="model_id" ref="model_dankbit_signal"/>
+            <field name="interval_number">1</field><field name="interval_type">hours</field>
+            <field name="state">code</field><field name="code">model.check_outcomes()</field><field name="priority">7</field>
+        </record>
+
         <record id="dankbit_delete_old_http_logs_cron" model="ir.cron">
             <field name="active">False</field>
             <field name="name">Dankbit - Delete Old HTTP Logs</field>

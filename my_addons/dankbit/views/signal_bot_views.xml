@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="dankbit_signal_view_list" model="ir.ui.view">
+        <field name="name">dankbit.signal.list</field>
+        <field name="model">dankbit.signal</field>
+        <field name="arch" type="xml">
+            <list decoration-success="state == 'tp'" decoration-danger="state == 'sl'" decoration-muted="kind == 'no_trade'">
+                <field name="evaluated_at"/><field name="asset"/><field name="kind"/>
+                <field name="state"/><field name="direction"/><field name="final_score"/>
+                <field name="quality_score"/><field name="entry"/><field name="stop_loss"/>
+                <field name="target"/><field name="risk_reward"/><field name="result_r"/>
+            </list>
+        </field>
+    </record>
+    <record id="dankbit_signal_view_form" model="ir.ui.view">
+        <field name="name">dankbit.signal.form</field>
+        <field name="model">dankbit.signal</field>
+        <field name="arch" type="xml">
+            <form string="Thales Signal">
+                <sheet>
+                    <group><group><field name="asset"/><field name="evaluated_at"/><field name="utc_day"/><field name="kind"/><field name="state"/><field name="direction"/></group>
+                    <group><field name="forecast_score_4h"/><field name="confirmation_score_1h"/><field name="daily_filter_score"/><field name="quality_score"/><field name="final_score"/><field name="is_weekend"/></group></group>
+                    <group string="Trade plan"><field name="entry"/><field name="stop_loss"/><field name="target"/><field name="risk_reward"/><field name="expires_at"/><field name="result_r"/></group>
+                    <group string="Audit"><field name="anchor_coverage_4h"/><field name="anchor_coverage_1h"/><field name="activity_regime"/><field name="reason"/><field name="snapshot_json" widget="text"/></group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="dankbit_signal_view_search" model="ir.ui.view">
+        <field name="name">dankbit.signal.search</field><field name="model">dankbit.signal</field>
+        <field name="arch" type="xml"><search><field name="asset"/><field name="kind"/><field name="state"/><field name="utc_day"/><filter name="official" string="Official" domain="[('kind','=','official')]"/><filter name="open" string="Open" domain="[('state','in',('active','watch'))]"/></search></field>
+    </record>
+    <record id="dankbit_signal_view_pivot" model="ir.ui.view">
+        <field name="name">dankbit.signal.pivot</field><field name="model">dankbit.signal</field>
+        <field name="arch" type="xml"><pivot string="Automatic Forward Test"><field name="utc_day" type="row" interval="month"/><field name="direction" type="row"/><field name="kind" type="col"/><field name="result_r" type="measure"/><field name="risk_reward" type="measure"/><field name="quality_score" type="measure"/></pivot></field>
+    </record>
+    <record id="dankbit_signal_view_graph" model="ir.ui.view">
+        <field name="name">dankbit.signal.graph</field><field name="model">dankbit.signal</field>
+        <field name="arch" type="xml"><graph string="Forward Test Results" type="bar"><field name="utc_day" interval="day"/><field name="result_r" type="measure"/></graph></field>
+    </record>
+    <record id="dankbit_signal_action" model="ir.actions.act_window"><field name="name">Signal Bot</field><field name="res_model">dankbit.signal</field><field name="view_mode">list,form,pivot,graph</field></record>
+    <menuitem id="dankbit_signal_menu" name="Signal Bot" action="dankbit_signal_action" parent="dankbit_root_menu" sequence="45"/>
+</odoo>
