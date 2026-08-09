@@ -46,8 +46,9 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24)
 # also cuts the routine per-poll cost of the page's other 4 lines, since
 # "all" meant every poll scanned that instrument's entire trade history —
 # then to 24 (24h) per a later product decision, then to 4 (4h) per a
+# still later product decision, then back to 24 (24h) once more per a
 # still later product decision.
-FOUR_LEG_DEFAULT_WINDOW_HOURS = 4
+FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
 # /mwa/<asset>'s own "Window" dropdown numeric choice set — 12h/24h, kept
 # as its own constant rather than extending Y_CHART_WINDOW_HOURS_CHOICES,
@@ -65,18 +66,21 @@ FOUR_LEG_DEFAULT_WINDOW_HOURS = 4
 # was removed along with its dropdown option; see mwa_gamma_json). 24h and
 # "All" were both re-added afterwards per later product decisions, then
 # 1h/2h/4h/6h/8h were removed in a further round, leaving only 12h/24h in
-# this tuple. "All" is handled as a separate string sentinel in
-# mwa_gamma_json, not a member of this tuple, and skips the trailing-hours
-# trade filter entirely rather than mapping to a number of hours.
-MWA_WINDOW_HOURS_CHOICES = (12, 24)
+# this tuple; 2h was then re-added per a later product decision, then
+# removed again (replaced by 48h) per a still later product decision.
+# "All" is handled as a separate string sentinel in mwa_gamma_json, not a
+# member of this tuple, and skips the trailing-hours trade filter
+# entirely rather than mapping to a number of hours.
+MWA_WINDOW_HOURS_CHOICES = (12, 24, 48)
 
 # /mwa/<asset>'s own "Window" dropdown default — kept as its own constant
 # since this page's own default is an independent product decision.
 # Was a number (4, i.e. 4h) until 4h was removed from
 # MWA_WINDOW_HOURS_CHOICES above, at which point the default moved to the
-# "all" string sentinel (see mwa_gamma_json) rather than to another
-# numeric choice.
-MWA_DEFAULT_WINDOW_HOURS = "all"
+# "all" string sentinel (see mwa_gamma_json); moved to 2 (2h) per a later
+# product decision, once 2h was re-added to the choice set above; moved
+# to 24 (24h) per a still later product decision.
+MWA_DEFAULT_WINDOW_HOURS = 24
 
 
 def _forecast_leg_completeness(snapshot):
@@ -2161,7 +2165,8 @@ class ChartController(http.Controller):
         FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24 — or the literal string
         "all", skipping the trailing-hours trade filter entirely; any
         other/missing value falls back to
-        FOUR_LEG_DEFAULT_WINDOW_HOURS="all" — this page's own choice
+        FOUR_LEG_DEFAULT_WINDOW_HOURS=24 (24h, after moving several times
+        across product decisions — see below) — this page's own choice
         set/default, split out from /api/gamma-triple/<asset>'s own
         Y_CHART_WINDOW_HOURS_CHOICES/Y_CHART_DEFAULT_WINDOW_HOURS once
         this page's own set grew past that shared 12/24/48 tuple, since
@@ -2405,7 +2410,7 @@ class ChartController(http.Controller):
         dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
         CHOICES plus the "All" no-window-bound option, split out from
         /gt/<asset>'s own Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once
-        this page's own set grew, 4h default, independent of the
+        this page's own set grew, 24h default, independent of the
         "Expiry" dropdown; 16h/20h/48h/72h/All were offered at one point
         and removed per product decision; 3h/5h/7h were added later,
         filling in the gaps left in the original 1h/2h/4h/6h/8h/12h set,
@@ -2418,8 +2423,8 @@ class ChartController(http.Controller):
         decision (see FOUR_LEG_DEFAULT_WINDOW_HOURS — also cuts the
         routine per-poll cost of the page's 4 gamma-leg lines, since
         "All" meant every poll scanned the selected instrument's entire
-        trade history), then to 24h, then to 4h per still later
-        product decisions; see four_leg_gamma_json for how each option resolves). A vertical
+        trade history), then to 24h, then to 4h, then back to 24h per
+        still later product decisions; see four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
@@ -2443,14 +2448,15 @@ class ChartController(http.Controller):
         /api/four-leg-gamma/<asset> uses): 4-leg gamma extrema (BCG/BPG/
         SCG/SPG) via options.per_leg_greeks(), for /mwa/<asset>'s own
         "Expiry" dropdown — an optional `?expiry=` query param, one of
-        "weekly" (default), "monthly", or "all", resolved against the
+        "weekly", "monthly", or "all" (default), resolved against the
         configured weekly_expiry/monthly_expiry instrument for `asset`
         (eth_-prefixed for ETH, same convention _build_tv_chart_context()
-        uses) — any other/missing value falls back to "weekly". "all"
-        skips that lookup entirely and considers every one of `asset`'s
-        own non-expired instruments (`expiration >= now`, no upper
-        bound) — same no-expiry-cutoff domain gamma_by_strike_json's own
-        "All" scope uses.
+        uses) — any other/missing value falls back to "all" (was
+        "weekly" until a later product decision moved the default).
+        "all" skips that lookup entirely and considers every one of
+        `asset`'s own non-expired instruments (`expiration >= now`, no
+        upper bound) — same no-expiry-cutoff domain gamma_by_strike_json's
+        own "All" scope uses.
 
         Unlike /api/four-leg-gamma/<asset> (isolated to one exact
         instrument's own trades via an anchored `name` match), the trade
@@ -2461,13 +2467,18 @@ class ChartController(http.Controller):
         Weekly/Monthly scopes, not a per-instrument name match) — further
         restricted, same query-param convention as /api/four-leg-gamma/
         <asset>'s own "Window" dropdown, to a trailing-hours trade window
-        (?hours=, one of MWA_WINDOW_HOURS_CHOICES — 12/24 — or the literal
-        string "all", skipping the `deribit_ts` filter entirely; falling
-        back to MWA_DEFAULT_WINDOW_HOURS="all" for any other/missing
-        value). The no-window-bound "All" option existed at one point and
-        was removed per product decision along with 12h/16h/20h/48h/72h,
-        then re-added per a later product decision; 1h/2h/4h/6h/8h were
-        removed in a further round, leaving 12h/24h/All.
+        (?hours=, one of MWA_WINDOW_HOURS_CHOICES — 12/24/48 — or the
+        literal string "all", skipping the `deribit_ts` filter entirely;
+        falling back to MWA_DEFAULT_WINDOW_HOURS=24 (24h) for any other/
+        missing value). The no-window-bound "All" option existed at one
+        point and was removed per product decision along with
+        12h/16h/20h/48h/72h, then re-added per a later product decision;
+        1h/2h/4h/6h/8h were removed in a further round, leaving
+        12h/24h/All (default "all" at that point); 2h was then re-added
+        per a still later product decision and made the new default,
+        then the default moved to 24h per a still later product
+        decision; 2h was then removed and 48h added in its place per a
+        still later product decision (default stayed 24h).
         Feeds
         /mwa/<asset>'s 4 horizontal gamma-price lines. No points at all
         (same nothing-computable-yet convention every other route in this
@@ -2493,7 +2504,7 @@ class ChartController(http.Controller):
 
         expiry_mode = (request.httprequest.args.get("expiry") or "").lower()
         if expiry_mode not in ("weekly", "monthly", "all"):
-            expiry_mode = "weekly"
+            expiry_mode = "all"
         instrument = ""
         if expiry_mode != "all":
             if asset == "ETH":
@@ -2591,14 +2602,15 @@ class ChartController(http.Controller):
         delta curves (see per_leg_gamma()'s docstring in options.py).
         Its own "Expiry" dropdown
         offers Weekly/Monthly/All (the configured
-        weekly_expiry/monthly_expiry instrument for `asset`, Weekly
+        weekly_expiry/monthly_expiry instrument for `asset`, **All
+        default** — was Weekly until a later product decision moved the
         default; "All" considers every one of the asset's own non-expired
         instruments, no expiry cutoff) instead of /4l/<asset>'s own
         Nearest/Nearest+1/Nearest+2, and the
         underlying trade domain for the 4 gamma legs is CUMULATIVE
         through the selected expiry rather than isolated to one
         instrument — see mwa_gamma_json. Own "Window" dropdown
-        (12h/24h/All — MWA_WINDOW_HOURS_CHOICES plus the "All"
+        (12h/24h/48h/All — MWA_WINDOW_HOURS_CHOICES plus the "All"
         no-window-bound option, kept as its own constant/product decision
         independent of /4l/<asset>'s own "Window" dropdown
         (FOUR_LEG_WINDOW_HOURS_CHOICES, which additionally offers 8h,
@@ -2606,9 +2618,13 @@ class ChartController(http.Controller):
         to this page — the two pages' dropdowns were both reduced to
         12h/24h/All independently and aren't aliased to each other, so
         one page's dropdown changing doesn't imply the other's does too)
-        — "All" default, MWA_DEFAULT_WINDOW_HOURS; 1h/2h/4h/6h/8h were
+        — **24h default**, MWA_DEFAULT_WINDOW_HOURS; 1h/2h/4h/6h/8h were
         removed from this page's own dropdown per product decision, at
-        which point the default moved from 4h to "All")
+        which point the default moved from 4h to "All"; 2h was then
+        re-added per a still later product decision and made the new
+        default, then the default moved to 24h per a still later
+        product decision; 2h was then removed and 48h added in its
+        place per a still later product decision, default staying 24h)
         and "Timeframe" dropdown (15m/1h/4h/1d, same options as
         /4l/<asset>'s own, but 1d default here — an independent product
         decision from that page's own 4h default). Renders its own standalone template
@@ -2621,7 +2637,8 @@ class ChartController(http.Controller):
         the client-side JS uses to set both EXPIRY_MODE and the
         <select>'s own value before the first fetch (see
         mwa_gamma_chart_templates.xml). Any other/missing value falls
-        back to "weekly", same as the dropdown's own un-queried default."""
+        back to "all", same as the dropdown's own un-queried default
+        (was "weekly" until the default moved)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
@@ -2629,7 +2646,7 @@ class ChartController(http.Controller):
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         expiry_param = (request.httprequest.args.get("e") or "").lower()
-        initial_expiry = {"w": "weekly", "m": "monthly", "a": "all"}.get(expiry_param, "weekly")
+        initial_expiry = {"w": "weekly", "m": "monthly", "a": "all"}.get(expiry_param, "all")
         ctx = {"asset": asset, "refresh_interval": refresh_interval, "initial_expiry": initial_expiry}
         return request.render("dankbit.dankbit_mwa_gamma_chart", ctx)
 

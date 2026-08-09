@@ -31,7 +31,7 @@
 	     dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
 	     "All" no-window-bound option, split out from /gt/<asset>'s own
 	     Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once this page's own set
-	     grew, 4h default — 16h/20h/48h/72h and "All" were offered at
+	     grew, 24h default — 16h/20h/48h/72h and "All" were offered at
 	     one point and removed per product decision; 3h/5h/7h were added
 	     later, filling in the gaps left in the original 1h/2h/4h/6h/8h/
 	     12h set; 24h and "All" were both re-added afterwards per later
@@ -40,8 +40,8 @@
 	     from 8h to "All" at that point; 8h was then re-added per a still
 	     later product decision (default stayed "All"), and 4h after
 	     that; the default then moved back to 8h per a later product
-	     decision, then to 24h, then to 4h per still later product
-	     decisions) independently picks
+	     decision, then to 24h, then to 4h, then back to 24h per still
+	     later product decisions) independently picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint. -->
 
@@ -165,10 +165,10 @@
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="4" selected="selected">4h</option>
+						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
-						<option value="24">24h</option>
+						<option value="24" selected="selected">24h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -231,8 +231,9 @@
 					// the other 4 lines, since "All" meant every poll
 					// scanned the selected instrument's entire trade
 					// history — see FOUR_LEG_DEFAULT_WINDOW_HOURS), then to
-					// 24h, then to 4h per still later product decisions.
-					let WINDOW_HOURS = 4;
+					// 24h, then to 4h, then back to 24h per still later
+					// product decisions.
+					let WINDOW_HOURS = 24;
 					// `includeAllAvg` appends `&all_avg=1`, which tells
 					// four_leg_gamma_json to also recompute the "ALL AVG"
 					// line's average-gamma-across-every-active-expiry

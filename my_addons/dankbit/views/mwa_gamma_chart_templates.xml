@@ -21,7 +21,8 @@
 	     (whose "Expiry" dropdown picks Nearest/Nearest+1/Nearest+2 and
 	     restricts trades to that one exact instrument), this page's own
 	     "Expiry" dropdown picks Weekly/Monthly/All (the configured
-	     weekly_expiry/monthly_expiry instrument, Weekly default; "All"
+	     weekly_expiry/monthly_expiry instrument, **All default** — was
+	     Weekly until a later product decision moved the default; "All"
 	     considers every one of the asset's own non-expired instruments,
 	     no expiry cutoff) and the 4 gamma legs are computed CUMULATIVE
 	     through that expiry — every active instrument up to and
@@ -31,10 +32,10 @@
 	     mwa_gamma_chart's own docstring in main.py), independent of
 	     mwa_gamma_json's own ?expiry= (which the client always sends
 	     as the full word). "Window"
-	     dropdown (12h/24h/All —
+	     dropdown (12h/24h/48h/All —
 	     MWA_WINDOW_HOURS_CHOICES plus the "All" no-window-bound option,
 	     own independent choice set from /4l/<asset>'s own "Window"
-	     dropdown — "All" default) picks
+	     dropdown — **24h default**) picks
 	     the trailing-hours trade window fed into that same cumulative
 	     domain, independent of "Expiry", via ?hours= on
 	     /api/mwa-gamma/<asset> (?hours=all skips the trailing-hours filter
@@ -42,7 +43,12 @@
 	     per product decision along with 12h/16h/20h/48h/72h, then 24h and
 	     "All" were both re-added per a later product decision; 1h/2h/4h/
 	     6h/8h were removed in a further round, leaving 12h/24h/All, and
-	     the default moved from 4h to "All" at that point. -->
+	     the default moved from 4h to "All" at that point; 2h was then
+	     re-added per a still later product decision and made the new
+	     default, then the default moved to 24h per a still later
+	     product decision; 2h was then removed and 48h added in its
+	     place per a still later product decision, default staying
+	     24h. -->
 
 	<template id="dankbit_mwa_gamma_chart" name="Dankbit MWA Gamma Chart">
 		<html>
@@ -159,15 +165,16 @@
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-						<option value="weekly" selected="selected">Weekly</option>
+						<option value="weekly">Weekly</option>
 						<option value="monthly">Monthly</option>
-						<option value="all">All</option>
+						<option value="all" selected="selected">All</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="12">12h</option>
-						<option value="24">24h</option>
-						<option value="all" selected="selected">All</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="48">48h</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -196,7 +203,8 @@
 					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which expiry's trades feed the 4
-					// gamma legs, "weekly" default. Unlike /4l/<asset>'s own
+					// gamma legs, "all" default (was "weekly" until a later
+					// product decision moved it). Unlike /4l/<asset>'s own
 					// Nearest/Nearest+1/Nearest+2 (isolated to one exact
 					// instrument), the server resolves this to the
 					// configured weekly_expiry/monthly_expiry instrument and
@@ -206,20 +214,26 @@
 					// via ?e=w/m/a on the page URL itself (resolved
 					// server-side into cfg.initialExpiry — see
 					// mwa_gamma_chart's own docstring); falls back to
-					// 'weekly' for a missing/invalid ?e=, same as the
+					// 'all' for a missing/invalid ?e=, same as the
 					// <select>'s own un-queried default.
-					let EXPIRY_MODE = cfg.initialExpiry || 'weekly';
+					let EXPIRY_MODE = cfg.initialExpiry || 'all';
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same cumulative domain, independent of
-					// EXPIRY_MODE. Choice set (12h/24h/All), own independent
+					// EXPIRY_MODE. Choice set (12h/24h/48h/All), own independent
 					// choice set from /4l/<asset>'s own "Window" dropdown —
 					// 1h/2h/4h/6h/8h were removed per product decision,
 					// which is also when the default moved from 4h to
-					// "All" here. WINDOW_HOURS is the string 'all' when
+					// "All" here; 2h was then re-added per a still later
+					// product decision and made the new default, then
+					// the default moved to 24h per a still later
+					// product decision; 2h was then removed and 48h added
+					// in its place per a still later product decision,
+					// default staying 24h.
+					// WINDOW_HOURS is the string 'all' when
 					// "All" is selected (?hours=all, skipping the
 					// trailing-hours trade filter entirely — see
 					// mwa_gamma_json), a number otherwise.
-					let WINDOW_HOURS = 'all';
+					let WINDOW_HOURS = 24;
 					const mwaGammaUrl = () => '/api/mwa-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart/gt/4l
 					// pages use — a growing gap between this and "now" is
@@ -687,7 +701,7 @@
 						try {
 							// Sync the <select> to EXPIRY_MODE (which may have
 							// come from ?e= rather than the element's own
-							// statically-marked "weekly" default) before the
+							// statically-marked "all" default) before the
 							// first fetch.
 							document.getElementById('expiry-select').value = EXPIRY_MODE;
 							await loadCandles();
