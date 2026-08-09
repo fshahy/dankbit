@@ -404,4 +404,17 @@ class ForecastNextCandle(models.Model):
         result["window_hours"] = hours
         result["expiry_index"] = expiry_index
         result["expiry_instrument"] = current_dict.get("expiry_instrument")
+        missing_legs = []
+        for leg in ("bc", "bp", "sc", "sp"):
+            supported = any(
+                current_dict.get(leg + greek + "_price")
+                and float(current_dict.get(leg + greek + "_price")) > 0
+                and current_dict.get(leg + greek + "_abs")
+                and float(current_dict.get(leg + greek + "_abs")) > 0
+                for greek in ("g", "d", "t", "v")
+            )
+            if not supported:
+                missing_legs.append(leg.upper())
+        result["data_complete"] = not missing_legs
+        result["missing_legs"] = missing_legs
         return result

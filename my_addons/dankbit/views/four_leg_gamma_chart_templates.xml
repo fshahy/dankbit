@@ -21,16 +21,17 @@
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms).
-	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2/Nearest+3/Nearest+4/
-	     Nearest+5, Nearest default — this page originally also offered
-	     Weekly/Monthly/All, removed per product decision in favor of
-	     Nearest+1/Nearest+2, later widened to Nearest+3/Nearest+4/
-	     Nearest+5 per a further product decision) picks that
+	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default —
+	     this page originally also offered Weekly/Monthly/All, removed
+	     per product decision in favor of Nearest+1/Nearest+2, later
+	     widened to Nearest+3/Nearest+4/Nearest+5 per a further product
+	     decision, then narrowed back down to Nearest+1/Nearest+2 per a
+	     still later product decision) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. "Window"
 	     dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
 	     "All" no-window-bound option, split out from /gt/<asset>'s own
 	     Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once this page's own set
-	     grew, "All" default — 16h/20h/48h/72h and "All" were offered at
+	     grew, 4h default — 16h/20h/48h/72h and "All" were offered at
 	     one point and removed per product decision; 3h/5h/7h were added
 	     later, filling in the gaps left in the original 1h/2h/4h/6h/8h/
 	     12h set; 24h and "All" were both re-added afterwards per later
@@ -38,7 +39,9 @@
 	     a further round, leaving only 12h/24h/All, and the default moved
 	     from 8h to "All" at that point; 8h was then re-added per a still
 	     later product decision (default stayed "All"), and 4h after
-	     that) independently picks
+	     that; the default then moved back to 8h per a later product
+	     decision, then to 24h, then to 4h per still later product
+	     decisions) independently picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint. -->
 
@@ -159,17 +162,14 @@
 						<option value="nearest" selected="selected">Nearest</option>
 						<option value="nearest_plus_1">Nearest+1</option>
 						<option value="nearest_plus_2">Nearest+2</option>
-						<option value="nearest_plus_3">Nearest+3</option>
-						<option value="nearest_plus_4">Nearest+4</option>
-						<option value="nearest_plus_5">Nearest+5</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="4">4h</option>
+						<option value="4" selected="selected">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
 						<option value="24">24h</option>
-						<option value="all" selected="selected">All</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -200,14 +200,16 @@
 					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which single expiry's trades feed
-					// the 4 gamma legs, "nearest" default. "nearest_plus_1"
-					// through "nearest_plus_5" are the 1st-5th active expiry
-					// after the nearest one, same ordinal notion /gt/<asset>'s
-					// own 2nd/3rd price lines use (this page originally
-					// also offered weekly/monthly/"every active expiry at
-					// once", removed per product decision in favor of
+					// the 4 gamma legs, "nearest" default. "nearest_plus_1"/
+					// "nearest_plus_2" are the 1st/2nd active expiry after
+					// the nearest one, same ordinal notion /gt/<asset>'s own
+					// 2nd/3rd price lines use (this page originally also
+					// offered weekly/monthly/"every active expiry at once",
+					// removed per product decision in favor of
 					// nearest_plus_1/nearest_plus_2, later widened to
-					// nearest_plus_3/nearest_plus_4/nearest_plus_5).
+					// nearest_plus_3/nearest_plus_4/nearest_plus_5, then
+					// narrowed back down to nearest_plus_1/nearest_plus_2
+					// per a still later product decision).
 					let EXPIRY_MODE = 'nearest';
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
@@ -223,9 +225,28 @@
 					// in a further round, leaving only 12h/24h/All, and the
 					// default moved from 8h to "All" at that point; 8h was
 					// then re-added per a still later product decision
-					// (default stayed "All"), and 4h after that.
-					let WINDOW_HOURS = 'all';
-					const fourLegGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
+					// (default stayed "All"), and 4h after that; the
+					// default then moved back to 8h per a later product
+					// decision (also cutting the routine per-poll cost of
+					// the other 4 lines, since "All" meant every poll
+					// scanned the selected instrument's entire trade
+					// history — see FOUR_LEG_DEFAULT_WINDOW_HOURS), then to
+					// 24h, then to 4h per still later product decisions.
+					let WINDOW_HOURS = 4;
+					// `includeAllAvg` appends `&all_avg=1`, which tells
+					// four_leg_gamma_json to also recompute the "ALL AVG"
+					// line's average-gamma-across-every-active-expiry
+					// reading — the same class of heavy, every-instrument-
+					// at-once computation /mwa/<asset>'s own gamma lines
+					// are (deliberately never polled on a timer there, see
+					// mwa_gamma_chart's own docstring). Left off by default
+					// so the routine refreshFourLegGamma() timer tick below
+					// stays as cheap as it was before the ALL AVG line
+					// existed; only passed true on page load and on a
+					// manual Expiry/Window change (see setExpiry()/
+					// setWindow()/init() below).
+					const fourLegGammaUrl = includeAllAvg =>
+						'/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS + (includeAllAvg ? '&all_avg=1' : '');
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -286,6 +307,7 @@
 					const SCG_COLOR = '#fb8c00'; // Seller Call Gamma — orange
 					const SPG_COLOR = '#fb8c00'; // Seller Put Gamma — orange
 					const AVG_GAMMA_COLOR = '#bdbdbd'; // Average of LC/LP/SC/SP prices — light gray
+					const ALL_AVG_GAMMA_COLOR = '#bdbdbd'; // Average across every active expiry — light gray, same hue AVG_GAMMA_COLOR uses (distinguished from it only by title text, same convention SCG/SPG's shared orange already uses on this page)
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -339,7 +361,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, allAvgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -490,12 +512,12 @@
 
 					async function setExpiry(mode) {
 						EXPIRY_MODE = mode;
-						await refreshFourLegGamma();
+						await refreshFourLegGamma(true);
 					}
 
 					async function setWindow(hours) {
 						WINDOW_HOURS = hours === 'all' ? 'all' : parseInt(hours, 10);
-						await refreshFourLegGamma();
+						await refreshFourLegGamma(true);
 						setStatus(statusText());
 					}
 
@@ -525,10 +547,10 @@
 					// error still clears it rather than leaving it spinning
 					// forever — same pattern the /gt page's own
 					// refreshGammaTriple() uses.
-					async function refreshFourLegGamma() {
+					async function refreshFourLegGamma(includeAllAvg = false) {
 						showSpinner();
 						try {
-							const data = await (await fetch(fourLegGammaUrl())).json();
+							const data = await (await fetch(fourLegGammaUrl(includeAllAvg))).json();
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
@@ -544,6 +566,15 @@
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+							// allAvgGammaPriceLine is deliberately left untouched
+							// unless this call actually requested a fresh
+							// all-expiries reading (includeAllAvg) — see
+							// fourLegGammaUrl()'s own comment above. The routine
+							// timer tick (includeAllAvg=false) never re-requests
+							// that heavy computation, so it must not clear the
+							// line either; it simply keeps showing its last
+							// computed value until the next load/dropdown change.
+							if (includeAllAvg && allAvgGammaPriceLine) { series.removePriceLine(allAvgGammaPriceLine); allAvgGammaPriceLine = null; }
 							if (!latest) return;
 
 							// 0.0 means absent (same convention every gamma_band/
@@ -617,6 +648,26 @@
 									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}
+							// Average gamma across EVERY active expiry (not just the
+							// one selected in "Expiry"), over the same trailing-hours
+							// Window this page already has selected — server-computed
+							// (four_leg_gamma_json's own all_avg_price/all_avg_value,
+							// same present-leg-only averaging as the AVG line above,
+							// just over the all-expiries trade set). Only drawn when
+							// this fetch actually requested it (includeAllAvg) —
+							// the server leaves all_avg_price at its 0.0 "absent"
+							// sentinel on every routine-tick request that omitted
+							// `all_avg=1`, so gating on includeAllAvg here (rather
+							// than just the 0.0 check) avoids misreading "didn't
+							// ask" as "genuinely no trades".
+							if (includeAllAvg && latest.all_avg_price) {
+								allAvgGammaPriceLine = series.createPriceLine({
+									price: latest.all_avg_price, color: ALL_AVG_GAMMA_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: ALL_AVG_GAMMA_COLOR,
+									title: 'ALL AVG ' + formatAbbreviated(latest.all_avg_value),
+								});
+							}
 						} finally {
 							hideSpinner();
 						}
@@ -683,7 +734,7 @@
 					async function init() {
 						try {
 							await loadCandles();
-							await refreshFourLegGamma();
+							await refreshFourLegGamma(true);
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -691,7 +742,11 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					setInterval(refreshFourLegGamma, REFRESH);
+					// includeAllAvg deliberately omitted here (defaults false)
+					// — the routine timer only refreshes the 4 per-instrument
+					// gamma lines, not the heavier all-expiries "ALL AVG" line
+					// (see fourLegGammaUrl()'s own comment above).
+					setInterval(() => refreshFourLegGamma(false), REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>

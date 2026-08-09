@@ -42,8 +42,12 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24)
 # every other *_DEFAULT_WINDOW_HOURS fallback in this file. Was a number
 # (8, i.e. 8h) until 1h-8h were removed from FOUR_LEG_WINDOW_HOURS_CHOICES
 # above, at which point the default moved to the "all" string sentinel
-# (see four_leg_gamma_json) rather than to another numeric choice.
-FOUR_LEG_DEFAULT_WINDOW_HOURS = "all"
+# (see four_leg_gamma_json); moved back to 8 (8h) per product decision —
+# also cuts the routine per-poll cost of the page's other 4 lines, since
+# "all" meant every poll scanned that instrument's entire trade history —
+# then to 24 (24h) per a later product decision, then to 4 (4h) per a
+# still later product decision.
+FOUR_LEG_DEFAULT_WINDOW_HOURS = 4
 
 # /mwa/<asset>'s own "Window" dropdown numeric choice set — 12h/24h, kept
 # as its own constant rather than extending Y_CHART_WINDOW_HOURS_CHOICES,
@@ -75,14 +79,43 @@ MWA_WINDOW_HOURS_CHOICES = (12, 24)
 MWA_DEFAULT_WINDOW_HOURS = "all"
 
 
+def _forecast_leg_completeness(snapshot):
+    """Return whether all four participant legs have any usable Greek pair.
+
+    A whole absent Buyer-Put/Seller-Put/etc. branch previously left BML/SMP
+    free to jump to a grid edge and then became a seemingly valid expiry
+    anchor.  One non-zero price+strength pair in gamma/delta/theta/vega is
+    enough to keep a leg; an entirely absent leg makes the anchor unavailable.
+    Works with both snapshot records and preview dictionaries.
+    """
+    def value(name):
+        if isinstance(snapshot, dict):
+            return snapshot.get(name)
+        return getattr(snapshot, name, None)
+
+    missing = []
+    for leg in ("bc", "bp", "sc", "sp"):
+        supported = False
+        for greek in ("g", "d", "t", "v"):
+            price = value(leg + greek + "_price")
+            strength = value(leg + greek + "_abs")
+            if price and float(price) > 0 and strength and float(strength) > 0:
+                supported = True
+                break
+        if not supported:
+            missing.append(leg.upper())
+    return not missing, missing
+
+
 def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, timeframe="4h"):
     """Build a continuous three-expiry path around up to three anchors.
 
-    Anchor 0 is the immediate Next-Candle result. Anchor 1/2 use the Greek
-    Flow/Gamma/Zones/Smart-Liquidity candle shape computed independently from
-    the second/third expiry and sit one/two days farther into the path. Raw
-    Thales bodies between anchors are smoothly corrected so the path reaches
-    the next anchor without a discontinuity; their wick geometry is retained.
+    Anchor bodies and every raw intermediate body are confidence-weighted.
+    Missing-leg anchors are excluded by the caller.  The old implementation
+    corrected intermediate candles toward raw absolute opens and then let raw
+    bodies compound freely after E3; this could manufacture a large tail even
+    at C25.  The path now stays continuous, caps cumulative displacement by
+    aggregate confidence, and strongly decays the unanchored post-E3 tail.
     """
     limit = max(1, min(int(count or max_count), int(max_count)))
     source = list(raw_points or [])[:limit]
@@ -118,47 +151,50 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
             "close": new_close, "mode": mode or raw.get("mode"),
         }
 
+    def confidence_factor(anchor):
+        return max(min(float(anchor.get("confidence") or 0.0) / 100.0, 1.0), 0.0)
+
+    anchor_indices = sorted(anchor_by_index)
+    factors = [confidence_factor(a) for a in anchor_by_index.values()]
+    aggregate_confidence = sum(factors) / len(factors) if factors else 0.25
+    start_open = float(source[0]["open"])
+    # Three-day cumulative budget: 2% at C25, 3% at C50, 5% at C100.
+    cumulative_cap = max(start_open * (0.01 + 0.04 * aggregate_confidence), 1e-9)
+    last_anchor_index = max(anchor_indices) if anchor_indices else -1
     output = []
-    first_anchor = anchor_by_index.get(0)
-    if first_anchor:
-        output.append(geometry(
-            # Greek Flow owns the first candle's body and wick geometry, but
-            # never its absolute opening price.  The opening price belongs to
-            # the continuous market/forecast chain.  Anchoring here to the raw
-            # forecast path also prevents an older persisted E1 revision from
-            # creating a price gap before the first forecast candle.
-            source[0], float(source[0]["open"]),
-            body=first_anchor["close"] - first_anchor["open"],
-            wick_source=first_anchor, mode="expiry_anchor_1",
-        ))
-    else:
-        output.append(dict(source[0]))
 
-    cursor = 1
-    for anchor_index in sorted(i for i in anchor_by_index if i > 0):
-        anchor = anchor_by_index[anchor_index]
-        intermediate = source[cursor:anchor_index]
-        target_open = float(source[anchor_index]["open"])
-        if intermediate:
-            raw_total = sum(float(p["close"]) - float(p["open"]) for p in intermediate)
-            correction = (target_open - float(output[-1]["close"]) - raw_total) / len(intermediate)
-            for raw in intermediate:
-                adjusted_body = float(raw["close"]) - float(raw["open"]) + correction
-                output.append(geometry(raw, output[-1]["close"], body=adjusted_body))
-        # With adjacent anchors (Daily), continuity takes precedence. With
-        # intermediate candles, the distributed correction lands exactly on
-        # the structural raw target-open for this expiry anchor.
-        anchor_open = float(output[-1]["close"])
-        output.append(geometry(
-            source[anchor_index], anchor_open,
-            body=float(anchor["close"]) - float(anchor["open"]),
-            wick_source=anchor, mode="expiry_anchor_%s" % (anchor_index // candles_per_day + 1),
-        ))
-        cursor = anchor_index + 1
+    for index, raw in enumerate(source):
+        new_open = start_open if not output else float(output[-1]["close"])
+        anchor = anchor_by_index.get(index)
+        if anchor:
+            factor = confidence_factor(anchor)
+            body = (float(anchor["close"]) - float(anchor["open"])) * factor
+            candle = geometry(
+                raw, new_open, body=body, wick_source=anchor,
+                mode="expiry_anchor_%s" % (index // candles_per_day + 1),
+            )
+        else:
+            future_indices = [i for i in anchor_indices if i > index]
+            reference_index = future_indices[0] if future_indices else last_anchor_index
+            factor = confidence_factor(anchor_by_index[reference_index]) if reference_index >= 0 else aggregate_confidence
+            raw_body = float(raw["close"]) - float(raw["open"])
+            if index > last_anchor_index >= 0:
+                tail_step = index - last_anchor_index
+                factor *= 0.15 * (0.72 ** max(tail_step - 1, 0))
+            candle = geometry(raw, new_open, body=raw_body * factor)
 
-    for raw in source[cursor:]:
-        new_open = float(output[-1]["close"])
-        output.append(geometry(raw, new_open))
+        unclamped_close = float(candle["close"])
+        clamped_close = max(min(unclamped_close, start_open + cumulative_cap), start_open - cumulative_cap)
+        if clamped_close != unclamped_close:
+            # Preserve rejected excess as uncertainty (wick), never body.
+            if unclamped_close > clamped_close:
+                candle["high"] = max(float(candle["high"]), unclamped_close)
+            else:
+                candle["low"] = min(float(candle["low"]), unclamped_close)
+            candle["close"] = clamped_close
+            candle["high"] = max(float(candle["high"]), float(candle["open"]), clamped_close)
+            candle["low"] = min(float(candle["low"]), float(candle["open"]), clamped_close)
+        output.append(candle)
     return output
 
 
@@ -2104,10 +2140,9 @@ class ChartController(http.Controller):
         single expiry chosen via the page's own "Expiry" dropdown — an
         optional `?expiry=` query param, one of "nearest" (default — the
         currently soonest-expiring active instrument), "nearest_plus_1",
-        "nearest_plus_2", "nearest_plus_3", "nearest_plus_4", or
-        "nearest_plus_5" (the 1st through 5th active expiry after the
+        or "nearest_plus_2" (the 1st/2nd active expiry after the
         nearest one — same ordinal notion /api/gamma-triple/<asset>'s own
-        nearest+1/nearest+2 lines use), mapped to an ordinal index (0-5)
+        nearest+1/nearest+2 lines use), mapped to an ordinal index (0-2)
         and resolved via dankbit.bands._distinct_expirations()/
         _format_instrument() directly rather than
         dankbit.bands._compute_asset(), since this route only needs the
@@ -2119,7 +2154,8 @@ class ChartController(http.Controller):
         behavior); all 3 were removed per product decision in favor of
         "nearest_plus_1"/"nearest_plus_2", later widened to
         "nearest_plus_3"/"nearest_plus_4"/"nearest_plus_5" per a further
-        product decision. The trailing-hours trade window
+        product decision, then narrowed back down to "nearest_plus_1"/
+        "nearest_plus_2" per a still later product decision. The trailing-hours trade window
         is independently user-selectable via the page's own "Window"
         dropdown — an optional `?hours=` query param, restricted to
         FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24 — or the literal string
@@ -2147,11 +2183,47 @@ class ChartController(http.Controller):
         dankbit.forecast.snapshot/chart_png_zones) that skips the theta/
         vega/delta curves this route never reads (see per_leg_gamma()'s
         own docstring in options.py). Feeds /4l/<asset>'s own 4 horizontal gamma-price
-        lines. No points at all (same nothing-computable-yet convention
+        lines, plus a 5th `all_avg_price`/`all_avg_value`/`all_trade_count`
+        reading — the same present-leg-averaged gamma price/value
+        aaaa_gamma_json's own `scope_from_trades()` computes for its own
+        "all" scope, recomputed here independently (own `options.
+        per_leg_gamma()` call) over every one of `asset`'s non-expired
+        instruments (`expiration >= now`, no upper bound — same domain
+        aaaa_gamma_json's/mwa_gamma_json's own "all" scope uses), but
+        — unlike aaaa_gamma_json's unbounded "all" scope — restricted to
+        this same request's own resolved trailing-hours Window (`hours`),
+        so it tracks whichever Window the user has selected on this page
+        rather than always being unbounded. Independent of the "Expiry"
+        dropdown's own single-instrument selection above; feeds /4l/
+        <asset>'s "ALL AVG" line.
+
+        This all-expiries scope is itself gated behind a separate
+        `?all_avg=1` flag, defaulting to skipped entirely (no query, no
+        options.per_leg_gamma() call, `all_avg_price`/`all_avg_value`
+        stay `0.0`) — it's the same "every currently-active instrument
+        at once" computation aaaa_gamma_json's/mwa_gamma_json's own "all"
+        scope is, and gamma.portfolio_gamma() loops per trade in plain
+        Python rather than vectorizing across trades, so its cost scales
+        directly with trade count; with the default Window="all" that
+        can mean every trade ever recorded against every currently-active
+        instrument. aaaa_gamma_json/mwa_gamma_json avoid this cost by
+        simply never being polled on dankbit.refresh_interval (see
+        mwa_gamma_chart's own docstring), but /4l/<asset> DOES poll this
+        route on that timer for its other 4 (single-instrument, much
+        cheaper) lines — so without this flag, every routine poll would
+        redo the full all-instruments scan, which is what made the page
+        slow after this scope was first added unconditionally. The
+        template only passes `?all_avg=1` on page load and on a manual
+        Expiry/Window change (`refreshFourLegGamma(includeAllAvg)` in
+        dankbit_four_leg_gamma_chart_templates.xml); the routine timer
+        tick omits it, so the ALL AVG line simply holds its last computed
+        value between those triggers rather than being recomputed every
+        tick. No points at all (same nothing-computable-yet convention
         every other route in this addon follows) when nothing is active at
-        that ordinal position. `points` holds exactly one (current)
-        reading, kept as a list for shape-compatibility with the page's
-        own existing points[points.length-1] read."""
+        that ordinal position and (with `all_avg=1`) no trade exists in
+        the all-expiries window either. `points` holds exactly one
+        (current) reading, kept as a list for shape-compatibility with
+        the page's own existing points[points.length-1] read."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -2169,10 +2241,7 @@ class ChartController(http.Controller):
             to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
             step = float(icp.get_param("dankbit.eth_steps", default=50))
 
-        expiry_ordinals = {
-            "nearest": 0, "nearest_plus_1": 1, "nearest_plus_2": 2,
-            "nearest_plus_3": 3, "nearest_plus_4": 4, "nearest_plus_5": 5,
-        }
+        expiry_ordinals = {"nearest": 0, "nearest_plus_1": 1, "nearest_plus_2": 2}
         expiry_mode = (request.httprequest.args.get("expiry") or "").lower()
         if expiry_mode not in expiry_ordinals:
             expiry_mode = "nearest"
@@ -2193,6 +2262,7 @@ class ChartController(http.Controller):
                 hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        window_start = as_of - timedelta(hours=hours) if hours != "all" else None
 
         bands_model = request.env["dankbit.bands"]
         instrument = None
@@ -2204,32 +2274,89 @@ class ChartController(http.Controller):
         trades = request.env["dankbit.trade"]
         if name_prefix:
             domain = [("name", "=ilike", f"{name_prefix}-%")]
-            if hours != "all":
-                window_start = as_of - timedelta(hours=hours)
+            if window_start is not None:
                 domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
             trades = trades.with_context(active_test=False).search(domain)
 
+        # All-expiries average — every one of `asset`'s non-expired
+        # instruments (same domain aaaa_gamma_json's/mwa_gamma_json's own
+        # "all" scope uses), restricted to this same request's resolved
+        # Window (`hours`/`window_start`) rather than aaaa_gamma_json's
+        # unbounded "all" scope, so it tracks whichever Window is
+        # currently selected on this page. Independent of the "Expiry"
+        # dropdown above — computed regardless of whether that ordinal
+        # position resolved to an instrument at all.
+        #
+        # This is the same class of "every active instrument at once"
+        # computation aaaa_gamma_json's/mwa_gamma_json's own "all" scope
+        # is — both of those routes are deliberately NOT polled on
+        # dankbit.refresh_interval because of it (see mwa_gamma_chart's
+        # own docstring: "too heavy to poll unattended";
+        # gamma.portfolio_gamma() is a plain per-trade Python loop, not
+        # vectorized across trades, so cost scales directly with trade
+        # count — which with the default Window="all" can mean every
+        # trade ever recorded against every currently-active instrument).
+        # /4l/<asset> DOES poll four_leg_gamma_json on that same timer for
+        # its other 4 lines, so this scope is gated behind `?all_avg=1` —
+        # only sent by the template on page load and on a manual Expiry/
+        # Window change (see refreshFourLegGamma(includeAllAvg) in
+        # dankbit_four_leg_gamma_chart_templates.xml), never on the
+        # routine timer tick, so the routine poll stays as cheap as it
+        # was before this scope existed.
+        include_all_avg = request.httprequest.args.get("all_avg") == "1"
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+        all_trades = request.env["dankbit.trade"]
+        all_avg_price = all_avg_value = 0.0
+        if include_all_avg:
+            all_domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of)]
+            if window_start is not None:
+                all_domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+            all_trades = request.env["dankbit.trade"].search(all_domain)
+            if all_trades:
+                all_legs = options.per_leg_gamma(STs, all_trades)
+                # Same present-leg-only averaging aaaa_gamma_json's own
+                # scope_from_trades() uses — a leg with zero trades
+                # reports gamma_price as None, excluded rather than
+                # dragging the average toward 0.
+                pairs = [
+                    (all_legs[k]["gamma_price"], all_legs[k]["gamma_value"])
+                    for k in ("long_call", "long_put", "short_call", "short_put")
+                    if all_legs[k]["gamma_price"]
+                ]
+                if pairs:
+                    all_avg_price = sum(p for p, _ in pairs) / len(pairs)
+                    all_avg_value = sum(v for _, v in pairs) / len(pairs)
+
         points = []
-        if trades:
-            STs = np.arange(from_price, to_price, step, dtype=np.float64)
-            # per_leg_gamma() rather than per_leg_greeks() — only
-            # gamma_price/gamma_value are read below, so the theta/vega/
-            # delta curves per_leg_greeks() would also compute are pure
-            # waste here (see per_leg_gamma()'s docstring in options.py).
-            legs = options.per_leg_gamma(STs, trades)
-            # A leg with zero trades reports gamma_price as None (no curve
-            # to peak/bottom at) — collapsed to 0.0 here, same "0.0 =
-            # absent" sentinel the client's own `if (latest.bcg_price)`
-            # falsy checks (and its AVG-line filter(Boolean)) already
-            # expect (dankbit_four_leg_gamma_chart_templates.xml).
-            points.append({
+        if trades or all_trades:
+            point = {
                 "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
                 "trade_count": len(trades),
-                "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
-                "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
-                "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
-                "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
-            })
+                "all_avg_price": all_avg_price, "all_avg_value": all_avg_value,
+                "all_trade_count": len(all_trades),
+                "bcg_price": 0.0, "bcg_value": 0.0, "bpg_price": 0.0, "bpg_value": 0.0,
+                "scg_price": 0.0, "scg_value": 0.0, "spg_price": 0.0, "spg_value": 0.0,
+            }
+            if trades:
+                # per_leg_gamma() rather than per_leg_greeks() — only
+                # gamma_price/gamma_value are read below, so the theta/
+                # vega/delta curves per_leg_greeks() would also compute
+                # are pure waste here (see per_leg_gamma()'s docstring in
+                # options.py).
+                legs = options.per_leg_gamma(STs, trades)
+                # A leg with zero trades reports gamma_price as None (no
+                # curve to peak/bottom at) — collapsed to 0.0 here, same
+                # "0.0 = absent" sentinel the client's own
+                # `if (latest.bcg_price)` falsy checks (and its AVG-line
+                # filter(Boolean)) already expect
+                # (dankbit_four_leg_gamma_chart_templates.xml).
+                point.update({
+                    "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
+                    "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
+                    "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
+                    "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
+                })
+            points.append(point)
 
         payload = {"asset": asset, "instrument": instrument, "points": points}
         return request.make_response(
@@ -2242,7 +2369,13 @@ class ChartController(http.Controller):
         """Standalone TradingView page — 4 horizontal price lines (BCG/
         BPG/SCG/SPG — where each of the 4 trade legs' own portfolio
         dollar-gamma curve, over trailing trades restricted to one
-        expiry, peaks or bottoms), recomputed live on every poll via
+        expiry, peaks or bottoms), plus a client-side "AVG" line (the
+        average of whichever of those 4 price levels are present) and a
+        6th "ALL AVG" line (blue — the same present-leg average, but
+        computed server-side over every one of the asset's active
+        expiries rather than just the selected one, still restricted to
+        the same "Window" — see four_leg_gamma_json's own
+        all_avg_price/all_avg_value), recomputed live on every poll via
         /api/four-leg-gamma (no model/table behind this page), alongside
         real Deribit perpetual-futures candles (dankbit.trade.
         get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
@@ -2261,17 +2394,18 @@ class ChartController(http.Controller):
         supports it too, and was originally also this page's own default
         until it was changed to 4h per product decision, matching the
         Delta/Gamma/Strike Gamma charts' own default),
-        own "Expiry" dropdown (Nearest/Nearest+1/Nearest+2/Nearest+3/
-        Nearest+4/Nearest+5, Nearest default — this route originally
-        also offered Weekly/Monthly/All, removed per product decision in
-        favor of Nearest+1/Nearest+2, later widened to Nearest+3/
-        Nearest+4/Nearest+5 per a further product decision, same
+        own "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest
+        default — this route originally also offered Weekly/Monthly/All,
+        removed per product decision in favor of Nearest+1/Nearest+2,
+        later widened to Nearest+3/Nearest+4/Nearest+5 per a further
+        product decision, then narrowed back down to Nearest+1/
+        Nearest+2 per a still later product decision, same
         nearest+1/nearest+2 ordinal notion /gt/<asset>'s own 2nd/3rd price
         lines use), and own "Window"
         dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
         CHOICES plus the "All" no-window-bound option, split out from
         /gt/<asset>'s own Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once
-        this page's own set grew, "All" default, independent of the
+        this page's own set grew, 4h default, independent of the
         "Expiry" dropdown; 16h/20h/48h/72h/All were offered at one point
         and removed per product decision; 3h/5h/7h were added later,
         filling in the gaps left in the original 1h/2h/4h/6h/8h/12h set,
@@ -2280,7 +2414,12 @@ class ChartController(http.Controller):
         a further round, leaving only 12h/24h/All, and the default moved
         from 8h to "All" at that point; 8h was then re-added per a still
         later product decision (default stayed "All"), and 4h after
-        that; see four_leg_gamma_json for how each option resolves). A vertical
+        that; the default then moved back to 8h per a later product
+        decision (see FOUR_LEG_DEFAULT_WINDOW_HOURS — also cuts the
+        routine per-poll cost of the page's 4 gamma-leg lines, since
+        "All" meant every poll scanned the selected instrument's entire
+        trade history), then to 24h, then to 4h per still later
+        product decisions; see four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
@@ -2455,7 +2594,7 @@ class ChartController(http.Controller):
         weekly_expiry/monthly_expiry instrument for `asset`, Weekly
         default; "All" considers every one of the asset's own non-expired
         instruments, no expiry cutoff) instead of /4l/<asset>'s own
-        Nearest/Nearest+1/Nearest+2/Nearest+3/Nearest+4/Nearest+5, and the
+        Nearest/Nearest+1/Nearest+2, and the
         underlying trade domain for the 4 gamma legs is CUMULATIVE
         through the selected expiry rather than isolated to one
         instrument — see mwa_gamma_json. Own "Window" dropdown
@@ -2754,10 +2893,19 @@ class ChartController(http.Controller):
                 # Never leak today's stale ordinal row into tomorrow's E1.
                 next_row = None
                 meta["unavailable_reason"] = "stale-expiry-row"
+            if preview and not preview.get("data_complete", True):
+                meta["unavailable_reason"] = "missing-critical-leg:" + ",".join(preview.get("missing_legs") or [])
+                preview = None
+            if next_row and not preview:
+                complete, missing_legs = _forecast_leg_completeness(next_row.snapshot_id) if next_row.snapshot_id else (False, ["SNAPSHOT"])
+                if not complete:
+                    next_row = None
+                    meta["unavailable_reason"] = "missing-critical-leg:" + ",".join(missing_legs)
             if preview:
                 anchors[expiry_index] = {
                     "open": preview["forecast_open"], "high": preview["forecast_high"],
                     "low": preview["forecast_low"], "close": preview["forecast_close"],
+                    "confidence": preview["confidence"],
                 }
                 meta.update({
                     "available": True, "revision": preview["revision"],
@@ -2771,6 +2919,7 @@ class ChartController(http.Controller):
                 anchors[expiry_index] = {
                     "open": next_row.forecast_open, "high": next_row.forecast_high,
                     "low": next_row.forecast_low, "close": next_row.forecast_close,
+                    "confidence": next_row.confidence,
                 }
                 meta.update({
                     "available": True, "revision": next_row.revision,
@@ -2909,9 +3058,9 @@ class ChartController(http.Controller):
         cookie covers this same-origin fetch() once the chart page itself
         is loaded.
 
-        An official decision remains the displayed daily plan even after later
-        hourly no-trade audit rows are written.  Before an official exists,
-        the newest hourly decision explains why the bot is still waiting.
+        An active official decision remains displayed even after later hourly
+        audit rows are written. Otherwise the newest hourly decision explains
+        why the bot is still waiting.
         """
         asset = (asset or '').upper()
         if asset not in ('BTC', 'ETH'):
@@ -2921,14 +3070,21 @@ class ChartController(http.Controller):
             )
         Signal = request.env["dankbit.signal"].sudo()
         utc_day = datetime.now(timezone.utc).date()
-        official = Signal.search([
+        active_official = Signal.search([
+            ("asset", "=", asset), ("kind", "=", "official"),
+            ("state", "=", "active"),
+        ], order="evaluated_at desc, id desc", limit=1)
+        row = active_official or Signal.search([
             ("asset", "=", asset), ("utc_day", "=", utc_day),
+        ], order="evaluated_at desc, id desc", limit=1)
+        week_start = utc_day - timedelta(days=utc_day.weekday())
+        weekly_count = Signal.search_count([
+            ("asset", "=", asset), ("utc_day", ">=", week_start),
             ("kind", "=", "official"),
-        ], order="evaluated_at desc, id desc", limit=1)
-        row = official or Signal.search([
-            ("asset", "=", asset), ("utc_day", "=", utc_day),
-        ], order="evaluated_at desc, id desc", limit=1)
-        payload = {"asset": asset, "utc_day": utc_day.isoformat(), "signal": None}
+        ])
+        payload = {"asset": asset, "utc_day": utc_day.isoformat(),
+                   "weekly_signal_count": weekly_count, "weekly_signal_limit": 3,
+                   "signal": None}
         if row:
             payload["signal"] = {
                 "id": row.id,
@@ -2941,12 +3097,178 @@ class ChartController(http.Controller):
                 "stop_loss": row.stop_loss,
                 "target": row.target,
                 "risk_reward": row.risk_reward,
+                "swing_level": row.swing_level,
+                "atr_4h": row.atr_4h,
+                "stop_basis": row.stop_basis or "",
+                "trend_daily": row.trend_daily or "neutral",
+                "trend_4h": row.trend_4h or "neutral",
+                "trend_1h": row.trend_1h or "neutral",
+                "trend_score_daily": row.trend_score_daily,
+                "trend_score_4h": row.trend_score_4h,
+                "gamma_direction_score": row.gamma_direction_score,
+                "greek_direction_score": row.greek_direction_score,
+                "weekly_signal_count": weekly_count,
+                "weekly_signal_limit": 3,
+                "setup_stage": row.setup_stage or "none",
+                "trigger_level": row.trigger_level,
+                "trigger_basis": row.trigger_basis or "",
+                "liquidity_swept": row.liquidity_swept,
+                "rtm_score": row.rtm_score,
+                "rtm_zone_low": row.rtm_zone_low,
+                "rtm_zone_high": row.rtm_zone_high,
+                "rtm_zone_type": row.rtm_zone_type or "",
+                "rtm_structure": row.rtm_structure or "",
+                "rtm_opposing_structure": row.rtm_opposing_structure or "",
+                "rtm_opposing_level": row.rtm_opposing_level,
+                "rtm_path_clear": row.rtm_path_clear,
+                "rtm_touch_count": row.rtm_touch_count,
+                "rtm_fresh": row.rtm_fresh,
+                "rtm_base_candles": row.rtm_base_candles,
+                "rtm_departure_score": row.rtm_departure_score,
+                "rtm_compression": row.rtm_compression,
+                "rtm_gap": row.rtm_gap,
+                "rtm_nested": row.rtm_nested,
+                "entry_model": row.entry_model or "",
                 "quality_score": row.quality_score,
                 "final_score": row.final_score,
                 "result_r": row.result_r,
                 "reason": row.reason or "",
                 "is_weekend": row.is_weekend,
             }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route('/signal-bot/report', type='http', auth='user', methods=['GET'], csrf=False)
+    def signal_bot_report_page(self, **kwargs):
+        """Human-readable automatic forward-test dashboard."""
+        return request.render("dankbit.signal_bot_report")
+
+    @http.route('/api/signal-bot/report', type='http', auth='user', methods=['GET'], csrf=False)
+    def signal_bot_report_json(self, **kwargs):
+        """Aggregate immutable Signal Bot outcomes into auditable R metrics."""
+        Signal = request.env["dankbit.signal"].sudo()
+        try:
+            days = int(kwargs.get("days", 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = days if days in (0, 7, 30, 90, 365) else 30
+        asset = str(kwargs.get("asset", "all") or "all").upper()
+        kind = str(kwargs.get("kind", "official") or "official").lower()
+        entry_model = str(kwargs.get("entry_model", "all") or "all").lower()
+        if asset not in ("ALL", "BTC", "ETH"):
+            asset = "ALL"
+        if kind not in ("all", "official", "shadow"):
+            kind = "official"
+        allowed_models = ("all", "ftb_confirmed", "ftb_reclaim_shadow", "later_touch_shadow")
+        if entry_model not in allowed_models:
+            entry_model = "all"
+
+        common_domain = [("kind", "in", ("official", "shadow"))]
+        if days:
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            common_domain.append(("evaluated_at", ">=", cutoff))
+        if asset != "ALL":
+            common_domain.append(("asset", "=", asset))
+        if kind != "all":
+            common_domain.append(("kind", "=", kind))
+        if entry_model != "all":
+            common_domain.append(("entry_model", "=", entry_model))
+
+        closed = Signal.search(
+            common_domain + [("state", "in", ("tp", "sl", "expired", "ambiguous"))],
+            order="evaluated_at asc, id asc",
+        )
+        open_count = Signal.search_count(
+            common_domain + [("state", "in", ("active", "watch"))],
+        )
+
+        def row_r(row):
+            return float(row.result_r or 0.0)
+
+        def stats(rows):
+            rows = list(rows)
+            resolved = [r for r in rows if r.state in ("tp", "sl")]
+            performance = [r for r in rows if r.state != "ambiguous"]
+            wins = sum(1 for r in resolved if r.state == "tp")
+            losses = sum(1 for r in resolved if r.state == "sl")
+            expired = sum(1 for r in rows if r.state == "expired")
+            ambiguous = sum(1 for r in rows if r.state == "ambiguous")
+            values = [row_r(r) for r in performance]
+            gross_profit = sum(v for v in values if v > 0)
+            gross_loss = abs(sum(v for v in values if v < 0))
+            equity = peak = max_drawdown = 0.0
+            loss_streak = max_loss_streak = 0
+            curve = []
+            for row in performance:
+                equity += row_r(row)
+                peak = max(peak, equity)
+                max_drawdown = max(max_drawdown, peak - equity)
+                if row_r(row) < 0:
+                    loss_streak += 1
+                    max_loss_streak = max(max_loss_streak, loss_streak)
+                else:
+                    loss_streak = 0
+                curve.append({
+                    "time": row.evaluated_at.isoformat() if row.evaluated_at else None,
+                    "equity": round(equity, 4),
+                })
+            planned_rr = [float(r.risk_reward or 0.0) for r in rows if r.risk_reward > 0]
+            return {
+                "closed": len(rows), "resolved": len(resolved),
+                "wins": wins, "losses": losses, "expired": expired,
+                "ambiguous": ambiguous,
+                "win_rate": round(100.0 * wins / len(resolved), 2) if resolved else None,
+                "positive_rate": round(100.0 * sum(v > 0 for v in values) / len(values), 2) if values else None,
+                "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
+                "profit_factor_infinite": bool(gross_profit and not gross_loss),
+                "gross_profit_r": round(gross_profit, 4), "gross_loss_r": round(gross_loss, 4),
+                "expectancy_r": round(sum(values) / len(values), 4) if values else None,
+                "total_r": round(sum(values), 4),
+                "max_drawdown_r": round(max_drawdown, 4),
+                "max_loss_streak": max_loss_streak,
+                "average_rr": round(sum(planned_rr) / len(planned_rr), 3) if planned_rr else None,
+                "curve": curve,
+            }
+
+        def breakdown(field_name):
+            grouped = {}
+            for row in closed:
+                key = str(getattr(row, field_name, False) or "unspecified")
+                grouped.setdefault(key, []).append(row)
+            result = []
+            for key, rows in grouped.items():
+                item = stats(rows)
+                item.pop("curve", None)
+                item["name"] = key
+                result.append(item)
+            return sorted(result, key=lambda item: item["closed"], reverse=True)
+
+        summary = stats(closed)
+        sample = summary["resolved"]
+        sample_label = ("Insufficient" if sample < 30 else "Preliminary" if sample < 60
+                        else "Meaningful" if sample < 150 else "Mature")
+        recent = []
+        for row in reversed(closed[-50:]):
+            recent.append({
+                "id": row.id, "time": row.evaluated_at.isoformat() if row.evaluated_at else None,
+                "asset": row.asset, "kind": row.kind, "direction": row.direction,
+                "state": row.state, "entry_model": row.entry_model or "",
+                "rtm_structure": row.rtm_structure or "", "rtm_score": row.rtm_score,
+                "risk_reward": row.risk_reward, "result_r": row.result_r,
+            })
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "filters": {"days": days, "asset": asset, "kind": kind, "entry_model": entry_model},
+            "open_count": open_count, "sample_label": sample_label,
+            "summary": summary,
+            "breakdowns": {
+                "asset": breakdown("asset"), "entry_model": breakdown("entry_model"),
+                "rtm_structure": breakdown("rtm_structure"), "direction": breakdown("direction"),
+            },
+            "recent": recent,
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],

@@ -2296,7 +2296,9 @@
 						title.className = direction === 'long' ? 'signal-long' : direction === 'short' ? 'signal-short' : 'signal-neutral';
 						title.textContent = isOfficial
 							? 'OFFICIAL ' + direction.toUpperCase()
-							: isShadow ? 'SHADOW ' + direction.toUpperCase() : 'NO TRADE';
+							: isShadow ? 'SHADOW ' + direction.toUpperCase()
+							: signal.setup_stage === 'armed' ? 'ARMED ' + direction.toUpperCase()
+							: signal.setup_stage === 'setup' ? 'SETUP ' + direction.toUpperCase() : 'NO TRADE';
 						state.textContent = String(signal.state || '').toUpperCase();
 						head.append(title, state);
 						panel.append(head);
@@ -2307,6 +2309,24 @@
 						signalMetric(grid, 'Stop', signalPrice(signal.stop_loss));
 						signalMetric(grid, 'Target', signalPrice(signal.target));
 						signalMetric(grid, 'R:R', Number(signal.risk_reward || 0) > 0 ? '1:' + Number(signal.risk_reward).toFixed(2) : '—');
+						signalMetric(grid, 'Stage', String(signal.setup_stage || 'none').toUpperCase());
+						signalMetric(grid, 'Trigger', signalPrice(signal.trigger_level));
+						signalMetric(grid, 'Trigger Source', signal.trigger_basis || '—');
+						signalMetric(grid, 'Liquidity Sweep', signal.liquidity_swept ? 'YES' : 'WAITING');
+						signalMetric(grid, 'Entry Model', String(signal.entry_model || 'WAITING').replaceAll('_', ' ').toUpperCase());
+						signalMetric(grid, 'RTM Score', Number(signal.rtm_score || 0).toFixed(1) + ' / 100');
+						signalMetric(grid, 'RTM Zone', signal.rtm_zone_type ? String(signal.rtm_zone_type).toUpperCase() + ' ' + signalPrice(signal.rtm_zone_low) + '–' + signalPrice(signal.rtm_zone_high) : '—');
+						signalMetric(grid, 'RTM Structure', String(signal.rtm_structure || '—').toUpperCase());
+						signalMetric(grid, 'Opposing RTM', signal.rtm_opposing_structure ? String(signal.rtm_opposing_structure).toUpperCase() + ' @ ' + signalPrice(signal.rtm_opposing_level) : 'NONE');
+						signalMetric(grid, 'Path to 2R', signal.rtm_path_clear ? 'CLEAR' : 'BLOCKED');
+						signalMetric(grid, 'RTM Touch', Number(signal.rtm_touch_count || 0) === 1 ? 'FTB' : Number(signal.rtm_touch_count || 0) > 1 ? Number(signal.rtm_touch_count) + 'TB' : 'WAITING');
+						signalMetric(grid, 'RTM Quality', [signal.rtm_fresh ? 'FRESH' : '', signal.rtm_nested ? 'NESTED' : '', signal.rtm_compression ? 'CP' : '', signal.rtm_gap ? 'GAP' : ''].filter(Boolean).join(' · ') || '—');
+						signalMetric(grid, 'Trend D / 4H / 1H', [signal.trend_daily, signal.trend_4h, signal.trend_1h].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
+						signalMetric(grid, 'Gamma Direction', Number(signal.gamma_direction_score || 0).toFixed(1));
+						signalMetric(grid, 'Greeks Direction', Number(signal.greek_direction_score || 0).toFixed(1));
+						signalMetric(grid, 'Weekly Signals', Number(signal.weekly_signal_count || 0) + ' / ' + Number(signal.weekly_signal_limit || 3));
+						signalMetric(grid, signal.direction === 'short' ? 'Swing High' : signal.direction === 'long' ? 'Swing Low' : 'Swing', signalPrice(signal.swing_level));
+						signalMetric(grid, 'ATR 4H', signalPrice(signal.atr_4h));
 						signalMetric(grid, 'Quality', Number(signal.quality_score || 0).toFixed(1) + '%');
 						signalMetric(grid, 'Score', Number(signal.final_score || 0).toFixed(1));
 						const evaluated = signal.evaluated_at ? signal.evaluated_at.replace('T', ' ').slice(0, 16) + ' UTC' : '—';
@@ -2316,7 +2336,7 @@
 
 						const reason = document.createElement('div');
 						reason.className = 'signal-reason';
-						reason.textContent = signal.reason || 'No explanation recorded.';
+						reason.textContent = (signal.stop_basis ? signal.stop_basis + ' · ' : '') + (signal.reason || 'No explanation recorded.');
 						panel.append(reason);
 						panel.style.display = 'block';
 					}
@@ -2606,6 +2626,85 @@
 					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
 					setInterval(refreshSignalBot, REFRESH);
+				//]]></script>
+			</body>
+		</html>
+	</template>
+
+	<template id="signal_bot_report" name="Signal Bot Forward Test Dashboard">
+		<html>
+			<head>
+				<meta charset="utf-8"/>
+				<meta name="viewport" content="width=device-width, initial-scale=1"/>
+				<title>Thales Signal Bot — Forward Test</title>
+				<style>
+					:root { --bg:#f4f6f8; --card:#fff; --text:#18212f; --muted:#667085; --line:#e4e7ec; --blue:#2563eb; --green:#16833b; --red:#c62828; --amber:#b76e00; }
+					* { box-sizing:border-box; }
+					body { margin:0; font-family:Inter,Segoe UI,Tahoma,Arial,sans-serif; color:var(--text); background:var(--bg); }
+					.wrap { max-width:1500px; margin:auto; padding:22px; }
+					.top { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:18px; }
+					h1 { margin:0; font-size:25px; } .subtitle { color:var(--muted); margin-top:5px; font-size:13px; }
+					.back { color:var(--blue); text-decoration:none; font-weight:600; }
+					.filters { display:flex; flex-wrap:wrap; gap:10px; padding:14px; background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:16px; }
+					label { font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
+					select { min-width:150px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); }
+					button { align-self:end; padding:9px 18px; border:0; border-radius:8px; color:#fff; background:var(--blue); cursor:pointer; font-weight:600; }
+					.cards { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+					.card,.panel { background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+					.card { padding:14px 16px; } .metric-label { color:var(--muted); font-size:12px; } .metric { margin-top:7px; font-size:25px; font-weight:700; }
+					.good { color:var(--green); } .bad { color:var(--red); } .warn { color:var(--amber); }
+					.grid2 { display:grid; grid-template-columns:1.35fr 1fr; gap:14px; margin-bottom:16px; }
+					.panel { padding:16px; overflow:hidden; } .panel h2 { margin:0 0 12px; font-size:16px; }
+					canvas { width:100%; height:270px; display:block; }
+					.notice { padding:10px 12px; border-radius:8px; background:#f8fafc; color:var(--muted); font-size:12px; line-height:1.7; }
+					table { width:100%; border-collapse:collapse; font-size:12px; } th { text-align:left; color:var(--muted); font-weight:600; } th,td { padding:9px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+					.table-wrap { overflow:auto; } .badge { display:inline-block; padding:3px 7px; border-radius:999px; font-size:10px; font-weight:700; background:#eef2ff; }
+					.state-tp { color:var(--green); background:#eaf7ee; } .state-sl { color:var(--red); background:#fdecec; } .state-expired { color:var(--amber); background:#fff5df; }
+					.breakdowns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:16px; }
+					.loading { opacity:.55; pointer-events:none; } #error { display:none; color:var(--red); padding:10px 0; }
+					@media(max-width:1050px){ .cards{grid-template-columns:repeat(3,1fr)} .grid2{grid-template-columns:1fr} }
+					@media(max-width:700px){ .wrap{padding:12px}.cards{grid-template-columns:repeat(2,1fr)}.breakdowns{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column} }
+				</style>
+			</head>
+			<body>
+				<div class="wrap" id="dashboard">
+					<div class="top"><div><h1>داشبورد فوروارد تست Signal Bot</h1><div class="subtitle" id="generated">نتایج خودکار Official و Shadow برحسب R</div></div><a class="back" href="/web">بازگشت به نرم‌افزار</a></div>
+					<div class="filters">
+						<label>بازه زمانی<select id="days"><option value="7">۷ روز</option><option value="30" selected="selected">۳۰ روز</option><option value="90">۹۰ روز</option><option value="365">یک سال</option><option value="0">همه داده‌ها</option></select></label>
+						<label>دارایی<select id="asset"><option value="all">BTC + ETH</option><option value="BTC">BTC</option><option value="ETH">ETH</option></select></label>
+						<label>نوع سیگنال<select id="kind"><option value="official">Official</option><option value="shadow">Shadow</option><option value="all">Official + Shadow</option></select></label>
+						<label>مدل ورود<select id="entry_model"><option value="all">همه مدل‌ها</option><option value="ftb_confirmed">FTB Confirmed</option><option value="ftb_reclaim_shadow">FTB Reclaim Shadow</option><option value="later_touch_shadow">Later Touch Shadow</option></select></label>
+						<button type="button" onclick="loadReport()">به‌روزرسانی گزارش</button>
+					</div>
+					<div id="error"></div>
+					<div class="cards" id="cards"></div>
+					<div class="grid2">
+						<div class="panel"><h2>منحنی تجمعی بازده (R)</h2><canvas id="equity"></canvas></div>
+						<div class="panel"><h2>تفسیر گزارش</h2><div class="notice" id="interpretation"></div></div>
+					</div>
+					<div class="breakdowns">
+						<div class="panel"><h2>تفکیک بر اساس مدل ورود</h2><div class="table-wrap"><table id="by-model"></table></div></div>
+						<div class="panel"><h2>تفکیک بر اساس ساختار RTM</h2><div class="table-wrap"><table id="by-structure"></table></div></div>
+						<div class="panel"><h2>تفکیک BTC و ETH</h2><div class="table-wrap"><table id="by-asset"></table></div></div>
+						<div class="panel"><h2>تفکیک Long و Short</h2><div class="table-wrap"><table id="by-direction"></table></div></div>
+					</div>
+					<div class="panel"><h2>آخرین نتایج بسته‌شده</h2><div class="table-wrap"><table id="recent"></table></div></div>
+				</div>
+				<script type="text/javascript">//<![CDATA[
+					const fmt=(v,d=2)=>v===null||v===undefined?'—':Number(v).toFixed(d);
+					function metric(label,value,cls=''){const d=document.createElement('div');d.className='card';const l=document.createElement('div');l.className='metric-label';l.textContent=label;const v=document.createElement('div');v.className='metric '+cls;v.textContent=value;d.append(l,v);return d;}
+					function renderCards(s,open){const c=document.getElementById('cards');c.replaceChildren();[
+						['سیگنال بسته‌شده',s.closed+'  |  باز: '+open,''],['Win Rate',s.win_rate===null?'—':fmt(s.win_rate)+'%',s.win_rate>=45?'good':s.win_rate===null?'':'warn'],
+						['Profit Factor',s.profit_factor_infinite?'∞':s.profit_factor===null?'—':fmt(s.profit_factor,3),s.profit_factor_infinite||s.profit_factor>=1.4?'good':s.profit_factor===null?'':'warn'],
+						['Expectancy',fmt(s.expectancy_r,3)+' R',s.expectancy_r>0?'good':s.expectancy_r<0?'bad':''],['مجموع بازده',fmt(s.total_r,2)+' R',s.total_r>0?'good':s.total_r<0?'bad':''],
+						['Max Drawdown',fmt(s.max_drawdown_r,2)+' R',s.max_drawdown_r>4?'bad':''],['بیشترین باخت متوالی',s.max_loss_streak,''],
+						['میانگین R:R',s.average_rr===null?'—':'1:'+fmt(s.average_rr,2),''],['برد / باخت',s.wins+' / '+s.losses,''],['Expired / Ambiguous',s.expired+' / '+s.ambiguous,'']
+					].forEach(x=>c.append(metric(...x)));}
+					function renderBreakdown(id,rows){const t=document.getElementById(id);t.replaceChildren();const h=document.createElement('tr');['گروه','تعداد','Win %','PF','Expectancy','Total R'].forEach(x=>{const th=document.createElement('th');th.textContent=x;h.append(th)});t.append(h);rows.forEach(r=>{const tr=document.createElement('tr');[r.name,r.closed,fmt(r.win_rate),r.profit_factor_infinite?'∞':fmt(r.profit_factor,2),fmt(r.expectancy_r,3),fmt(r.total_r,2)].forEach(x=>{const td=document.createElement('td');td.textContent=x;tr.append(td)});t.append(tr)});}
+					function renderRecent(rows){const t=document.getElementById('recent');t.replaceChildren();const h=document.createElement('tr');['زمان UTC','دارایی','نوع','جهت','مدل ورود','ساختار','RTM','R:R','نتیجه','Result R'].forEach(x=>{const th=document.createElement('th');th.textContent=x;h.append(th)});t.append(h);rows.forEach(r=>{const tr=document.createElement('tr');const values=[r.time?r.time.replace('T',' ').slice(0,16):'—',r.asset,r.kind,r.direction,r.entry_model||'—',(r.rtm_structure||'—').toUpperCase(),fmt(r.rtm_score,1),fmt(r.risk_reward,2),r.state,fmt(r.result_r,2)];values.forEach((x,i)=>{const td=document.createElement('td');if(i===8){const b=document.createElement('span');b.className='badge state-'+r.state;b.textContent=String(x).toUpperCase();td.append(b)}else td.textContent=x;tr.append(td)});t.append(tr)});}
+					function drawCurve(points){const canvas=document.getElementById('equity'),rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;canvas.width=Math.max(400,rect.width*dpr);canvas.height=270*dpr;const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);const w=canvas.width/dpr,h=270,pad=28;ctx.clearRect(0,0,w,h);if(!points.length){ctx.fillStyle='#667085';ctx.fillText('هنوز نتیجه بسته‌شده‌ای وجود ندارد.',pad,50);return}const vals=[0,...points.map(p=>p.equity)],min=Math.min(...vals),max=Math.max(...vals),span=Math.max(max-min,1);const x=i=>pad+i*(w-2*pad)/Math.max(points.length-1,1),y=v=>h-pad-(v-min)*(h-2*pad)/span;ctx.strokeStyle='#e4e7ec';ctx.beginPath();ctx.moveTo(pad,y(0));ctx.lineTo(w-pad,y(0));ctx.stroke();ctx.strokeStyle='#2563eb';ctx.lineWidth=2;ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(x(i),y(p.equity)):ctx.moveTo(x(i),y(p.equity)));ctx.stroke();ctx.fillStyle='#667085';ctx.fillText(max.toFixed(1)+'R',3,pad);ctx.fillText(min.toFixed(1)+'R',3,h-pad);}
+					async function loadReport(){const root=document.getElementById('dashboard');root.classList.add('loading');document.getElementById('error').style.display='none';try{const q=new URLSearchParams({days:document.getElementById('days').value,asset:document.getElementById('asset').value,kind:document.getElementById('kind').value,entry_model:document.getElementById('entry_model').value});const res=await fetch('/api/signal-bot/report?'+q,{cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);const d=await res.json();renderCards(d.summary,d.open_count);drawCurve(d.summary.curve);renderBreakdown('by-model',d.breakdowns.entry_model);renderBreakdown('by-structure',d.breakdowns.rtm_structure);renderBreakdown('by-asset',d.breakdowns.asset);renderBreakdown('by-direction',d.breakdowns.direction);renderRecent(d.recent);document.getElementById('generated').textContent='آخرین محاسبه: '+d.generated_at.replace('T',' ').slice(0,19)+' UTC';document.getElementById('interpretation').textContent='اعتبار نمونه: '+d.sample_label+' — Win Rate فقط از TP و SL محاسبه می‌شود. Expired در Expectancy، Profit Factor، Total R و Drawdown وارد می‌شود. Ambiguous در عملکرد مالی وارد نمی‌شود. برای ارزیابی اولیه حداقل ۳۰ و برای نتیجه معنادار حداقل ۶۰ سیگنال حل‌شده لازم است.';}catch(e){const el=document.getElementById('error');el.textContent='خطا در دریافت گزارش: '+e.message;el.style.display='block';}finally{root.classList.remove('loading')}}
+					window.addEventListener('resize',()=>loadReport());loadReport();setInterval(loadReport,300000);
 				//]]></script>
 			</body>
 		</html>
