@@ -439,10 +439,14 @@ def per_leg_gamma(STs, trades, r=0.0):
     both delta computations (delta_saturation_price() plus the interpolated
     delta_value), each its own full O(trades x len(STs)) pass per leg, that
     per_leg_greeks() always computes regardless of whether a caller needs
-    them. Built for aaaa_gamma_json (main.py), which combines up to 4
-    unbounded-time-window scopes into one request and only ever reads
+    them. Built for dankbit.5a.compute_and_create() (models/dankbit_5a.py),
+    which combines up to 5 scopes (mostly unbounded-time-window, plus
+    one trailing-24h scope) into a single cron tick and only ever reads
     gamma_price/gamma_value — calling per_leg_greeks() there was doing
-    ~5x the necessary Black-Scholes curve work per leg. Returns
+    ~5x the necessary Black-Scholes curve work per leg. Formerly called
+    directly from five_a_gamma_json (main.py) on every request, before
+    that computation moved onto dankbit.5a's own 15-minute cron; the
+    route now just reads the latest persisted row. Returns
     {leg_name: {"trades", "gamma_price", "gamma_value"}}, same None-price/
     0.0-value "absent" convention as per_leg_greeks() for a leg with zero
     trades."""

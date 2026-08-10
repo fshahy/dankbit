@@ -1,39 +1,41 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /aaaa/<asset> — its own file,
+	<!-- Standalone, minimal TradingView page for /5a/<asset> — its own file,
 	     structurally the simplest of the Deribit-perpetual-candle standalone
 	     pages (/gt, /4l, /mwa): no Expiry/Window dropdown at all, since it
-	     draws all 4 of this addon's standing expiry scopes at once rather
+	     draws all 5 of this addon's standing expiry scopes at once rather
 	     than letting the user pick one. "Timeframe" dropdown (15m/1h/4h/1d,
 	     4h default — same options/default as /4l/<asset>'s own), candles
 	     from Deribit perpetual futures (dankbit.trade.
 	     get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
 	     proxy /gt/<asset>, /4l/<asset>, and /mwa/<asset> use) — the candle
 	     series alone keeps the normal 5s auto-refresh every TradingView page
-	     in this addon uses. 4 horizontal reference lines from
-	     /api/aaaa-gamma's own latest reading — Nearest (black/axisBlack),
-	     Weekly (blue), Monthly (orange), All (teal), one per this addon's 4
-	     standing expiry scopes (see aaaa_gamma_json) — each the average of
-	     that scope's own 4 leg gamma PRICE levels (BCG/BPG/SCG/SPG), same
-	     math as the "AVG" line /4l/<asset> and /mwa/<asset> draw for their
-	     own single selected scope, computed server-side here since all 4
-	     scopes are combined into one response. Computed once on page load
-	     only — unlike every other page in this addon (including /mwa/
-	     <asset>, which at least re-fetches on a manual Expiry/Window
-	     change), this page has no dropdown that could trigger a re-fetch at
-	     all, and does NOT poll /api/aaaa-gamma on dankbit.refresh_interval
-	     either, since that route calls options.per_leg_greeks() up to 4
-	     times per request (once per non-empty scope) — the heaviest single
-	     request in this addon. Only the candle series keeps its own normal
-	     5s TradingView refresh; a Timeframe change only reloads candles
-	     (candle resolution has no bearing on the per_leg_greeks() trade
-	     domain, so there's nothing gamma-related to re-fetch there either). -->
+	     in this addon uses. 5 horizontal reference lines from
+	     /api/5a-gamma's own latest reading — Nearest (black/axisBlack),
+	     Weekly (blue), Monthly (orange), All (teal), Last 24h (violet, the
+	     same "all non-expired instruments" domain as All, restricted
+	     server-side to trades with deribit_ts in the trailing 24h) — one
+	     per this addon's 5 standing expiry scopes (see five_a_gamma_json) —
+	     each the average of that scope's own 4 leg gamma PRICE levels
+	     (BCG/BPG/SCG/SPG), same math as the "AVG" line /4l/<asset> and
+	     /mwa/<asset> draw for their own single selected scope. Unlike
+	     every other Deribit-perpetual-candle page in this addon,
+	     /api/5a-gamma no longer computes this live per request — the
+	     dankbit.5a model's own 15-minute cron
+	     (dankbit.5a.compute_snapshot()) does that work in the
+	     background, and this route just reads the latest persisted row
+	     per asset (see dankbit.5a in models/). That's cheap enough to
+	     poll like every other TradingView page's own computed lines: the
+	     5 gamma lines refresh on dankbit.refresh_interval (REFRESH),
+	     same as the candle series' own normal 5s TradingView refresh —
+	     a Timeframe change only reloads candles regardless, since candle
+	     resolution has no bearing on which dankbit.5a row is latest. -->
 
-	<template id="dankbit_aaaa_gamma_chart" name="Dankbit AAAA Gamma Chart">
+	<template id="dankbit_five_a_gamma_chart" name="Dankbit 5A Gamma Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — AAAA Gamma</title>
+				<title><t t-esc="asset"/> — 5A Gamma</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -108,13 +110,14 @@
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
 
-					/* Shown while refreshAaaaGamma() is fetching/computing the
-					   4 gamma lines (up to 4 fresh options.per_leg_greeks()
-					   calls server-side, one per scope — no persisted history
-					   behind this page, so this is the slowest single request
-					   in this addon). Hidden as soon as that fetch resolves,
-					   success or error. Same #spinner pattern /gt, /4l, and
-					   /mwa use. */
+					/* Shown while refreshFiveAGamma() is fetching the 5 gamma
+					   lines — a cheap read of the latest dankbit.5a row now
+					   (that model's own 15-minute cron does the actual
+					   options.per_leg_gamma() computation in the
+					   background), kept mostly for consistency with the
+					   #spinner pattern /gt, /4l, and /mwa use for their own
+					   (still-heavy) live computations. Hidden as soon as
+					   that fetch resolves, success or error. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -155,6 +158,7 @@
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
+					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// "Timeframe" dropdown — same options as /4l/<asset>'s own
 					// dropdown (see TF_WINDOW below for the per-timeframe
 					// visible-window convention it shares with those pages),
@@ -168,8 +172,8 @@
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// No Expiry/Window dropdown on this page at all — every
 					// scope is drawn at once, always over every matching
-					// trade with no trailing-hours bound (see aaaa_gamma_json).
-					const aaaaGammaUrl = () => '/api/aaaa-gamma/' + ASSET;
+					// trade with no trailing-hours bound (see five_a_gamma_json).
+					const fiveAGammaUrl = () => '/api/5a-gamma/' + ASSET;
 					// Same "Last trade:" footer field the Delta Chart/gt/4l/
 					// mwa pages use — a growing gap between this and "now" is
 					// the at-a-glance signal that dankbit_ws has stalled
@@ -223,8 +227,9 @@
 					// different trade domains, so each gets its own hue
 					// rather than reusing a leg-role color scheme.
 					const WEEKLY_COLOR  = '#1976d2'; // blue
-					const MONTHLY_COLOR = '#fb8c00'; // orange — same hue /4l/<asset>'s own SC/SP lines use, unrelated meaning here
-					const ALL_COLOR     = '#00897b'; // teal — same hue the Seller Max Profit/Buyer Max Loss zones box uses for "combined/aggregate"
+					const MONTHLY_COLOR = '#2e7d32'; // green — same hue the Bands High/Resistance line uses
+					const ALL_COLOR     = '#fb8c00'; // orange — "All AVG" line
+					const DAY_COLOR     = '#8e24aa'; // violet — "day" scope: same "all non-expired instruments" domain as All, restricted server-side to the trailing 24h of trades
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -272,20 +277,19 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The 4 gamma "lines" are horizontal reference lines at the
+					// The 5 gamma "lines" are horizontal reference lines at the
 					// CURRENT (latest) value only — same createPriceLine()
 					// pattern /gt/<asset>, /4l/<asset>, and /mwa/<asset> use
 					// for their own gamma lines — not a connected historical
-					// time series. Redrawn on init only, each replacing its
-					// own previous line rather than accumulating one per
-					// hour — this page has no Expiry/Window/other dropdown
-					// that could trigger a manual re-fetch, and does NOT
-					// auto-refresh on a timer either: /api/aaaa-gamma calls
-					// options.per_leg_greeks() up to 4 times per request (one
-					// per scope), too heavy to poll on dankbit.refresh_interval
-					// unattended. Only the candle series keeps its own
-					// normal 5s TradingView refresh (see init() below).
-					let nearestPriceLine = null, weeklyPriceLine = null, monthlyPriceLine = null, allPriceLine = null;
+					// time series. Redrawn on init and again on every
+					// REFRESH tick, each replacing its own previous line
+					// rather than accumulating one per poll — /api/5a-gamma
+					// just reads the latest dankbit.5a row now (refreshed by
+					// that model's own 15-minute cron), so polling it is a
+					// cheap single-row lookup, not the per-request
+					// options.per_leg_gamma() computation this page used to
+					// trigger directly (see init() below).
+					let nearestPriceLine = null, weeklyPriceLine = null, monthlyPriceLine = null, allPriceLine = null, dayPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -295,7 +299,7 @@
 					}
 
 					function statusText() {
-						return ASSET + ' · AAAA Gamma (live)' + lastTradeSuffix();
+						return ASSET + ' · 5A Gamma (live)' + lastTradeSuffix();
 					}
 
 					async function refreshLastTrade() {
@@ -417,12 +421,11 @@
 					}
 
 					// Timeframe changes only reload candles — candle
-					// resolution has no bearing on the per_leg_greeks() trade
-					// domain the 4 gamma lines are computed from, so there's
-					// nothing gamma-related to re-fetch here (unlike
-					// /mwa/<asset>'s own setExpiry/setWindow, which do
-					// trigger a manual gamma re-fetch since Expiry/Window
-					// change the trade domain itself).
+					// resolution has no bearing on which dankbit.5a row is
+					// latest, so there's nothing gamma-related to re-fetch
+					// here (unlike /mwa/<asset>'s own setExpiry/setWindow,
+					// which do trigger a manual gamma re-fetch since
+					// Expiry/Window change the trade domain itself).
 					async function setTf(iv) {
 						INTERVAL = iv;
 						await loadCandles();
@@ -441,15 +444,16 @@
 						return sign + Math.round(abs);
 					}
 
-					// Draws one of the 4 scope lines, or clears it if that
+					// Draws one of the 5 scope lines, or clears it if that
 					// scope's own avg_price is the 0.0 "absent" sentinel
 					// (same convention every other gamma_band/smart_liq_*_price
-					// field in this addon uses — see aaaa_gamma_json). Title
+					// field in this addon uses — see five_a_gamma_json). Title
 					// carries the scope's own resolved instrument, if any
-					// (None for "all", or for weekly/monthly when that expiry
-					// isn't configured), followed by the averaged gamma VALUE
-					// — same formatAbbreviated() the other standalone pages'
-					// own per-leg/AVG lines already use for their own value.
+					// (None for "all"/"day", or for weekly/monthly when that
+					// expiry isn't configured), followed by the averaged
+					// gamma VALUE — same formatAbbreviated() the other
+					// standalone pages' own per-leg/AVG lines already use
+					// for their own value.
 					function drawScopeLine(existingLine, scope, label, color) {
 						if (existingLine) { series.removePriceLine(existingLine); }
 						if (!scope || !scope.avg_price) return null;
@@ -462,25 +466,27 @@
 						});
 					}
 
-					// Only the LATEST reading is used — /api/aaaa-gamma has no
-					// persisted history (nothing is ever written server-side
-					// for this page), so this just draws each scope's current
-					// average-gamma line. Shows #spinner for the duration of
-					// the fetch — this endpoint recomputes up to 4 separate
-					// gamma curves fresh server-side on every call, the
-					// slowest single request in this addon. Hidden in a
-					// finally so a fetch error still clears it rather than
-					// leaving it spinning forever — same pattern /gt's,
-					// /4l's, and /mwa's own refresh functions use.
-					async function refreshAaaaGamma() {
+					// Only the LATEST dankbit.5a row per asset is ever read —
+					// this page draws no connected history, just each
+					// scope's current average-gamma line, refreshed by the
+					// dankbit.5a model's own 15-minute cron rather than this
+					// fetch itself (see the top-of-file comment). Shows
+					// #spinner for the duration of the fetch — a cheap
+					// single-row lookup now, kept mostly for visual
+					// consistency with /gt's, /4l's, and /mwa's own
+					// (still-heavy) refresh functions, which this mirrors.
+					// Hidden in a finally so a fetch error still clears it
+					// rather than leaving it spinning forever.
+					async function refreshFiveAGamma() {
 						showSpinner();
 						try {
-							const data = await (await fetch(aaaaGammaUrl())).json();
+							const data = await (await fetch(fiveAGammaUrl())).json();
 							const scopes = data.scopes || {};
 							nearestPriceLine = drawScopeLine(nearestPriceLine, scopes.nearest, 'Nearest', axisBlack());
 							weeklyPriceLine  = drawScopeLine(weeklyPriceLine,  scopes.weekly,  'Weekly',  WEEKLY_COLOR);
 							monthlyPriceLine = drawScopeLine(monthlyPriceLine, scopes.monthly, 'Monthly', MONTHLY_COLOR);
 							allPriceLine     = drawScopeLine(allPriceLine,     scopes.all,     'All',     ALL_COLOR);
+							dayPriceLine     = drawScopeLine(dayPriceLine,     scopes.day,     'Last 24h', DAY_COLOR);
 						} finally {
 							hideSpinner();
 						}
@@ -547,23 +553,24 @@
 					async function init() {
 						try {
 							await loadCandles();
-							await refreshAaaaGamma();
+							await refreshFiveAGamma();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
-					// Only the candle series auto-refreshes on a timer
-					// (TradingView's own normal live-candle behavior).
-					// refreshAaaaGamma()/refreshLastTrade() run once here on
-					// load and are deliberately NOT polled — this page has no
-					// dropdown that could trigger a manual re-fetch either
-					// (see the top-of-file comment), and the gamma
-					// computation itself (up to 4 options.per_leg_greeks()
-					// calls per request) is too heavy to re-run unattended on
-					// dankbit.refresh_interval.
+					// /api/5a-gamma no longer computes anything live server-side
+					// (see the top-of-file comment) — it just reads the latest
+					// dankbit.5a row, refreshed by its own 15-minute cron, so
+					// polling it here is now a cheap single-row lookup rather
+					// than the multi-second curve rebuild it used to be.
+					// Refreshing on dankbit.refresh_interval (same as every
+					// other TradingView page's own computed lines) is what
+					// picks up each new cron tick without a manual page reload.
 					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshFiveAGamma, REFRESH);
+					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>
 		</html>

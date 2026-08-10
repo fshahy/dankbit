@@ -3,6 +3,7 @@
 from . import trade
 from . import bands
 from . import live_band
+from . import dankbit_5a
 from . import forecast_snapshot
 from . import forecast_log
 from . import forecast_next_candle
