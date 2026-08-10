@@ -64,6 +64,22 @@ class DankbitSignal(models.Model):
         ("none", "No Setup"), ("setup", "Setup Detected"),
         ("armed", "Armed"), ("confirmed", "Entry Confirmed"),
     ], required=True, default="none", index=True)
+    setup_path = fields.Selection([
+        ("rtm_ftb", "RTM FTB"),
+        ("breakout_retest", "Breakout-Retest"),
+    ], index=True)
+    plan_status = fields.Selection([
+        ("watch", "Watch"), ("planned", "Planned"),
+        ("armed", "Armed"), ("triggered", "Triggered"),
+        ("cancelled", "Cancelled"),
+    ], index=True)
+    entry_zone_low = fields.Float(digits=(16, 4))
+    entry_zone_high = fields.Float(digits=(16, 4))
+    invalidation_level = fields.Float(digits=(16, 4))
+    target_2 = fields.Float(digits=(16, 4))
+    breakout_level = fields.Float(digits=(16, 4))
+    breakout_at = fields.Datetime(index=True)
+    plan_provisional = fields.Boolean()
     trigger_level = fields.Float(digits=(16, 4))
     trigger_basis = fields.Char()
     liquidity_swept = fields.Boolean()
@@ -94,6 +110,9 @@ class DankbitSignal(models.Model):
         ("ftb_confirmed", "FTB Confirmed"),
         ("ftb_reclaim_shadow", "FTB Reclaim Shadow"),
         ("later_touch_shadow", "Later Touch Confirmed Shadow"),
+        ("breakout_watch", "Breakout Watch"),
+        ("breakout_retest_shadow", "Breakout Retest Shadow"),
+        ("breakout_retest_confirmed", "Breakout Retest Confirmed"),
     ])
 
     entry = fields.Float(digits=(16, 4))
@@ -455,6 +474,122 @@ class DankbitSignal(models.Model):
         return False, (usable[0][0] if usable else 0.0), (usable[0][1] if usable else ""), False, atr_1h
 
     @classmethod
+    def _breakout_retest_setup(cls, candles_4h, candles_1h, index_price):
+        """Detect a closed-4H structural break and time its 1H retest.
+
+        This is an independent entry path beside RTM FTB.  It never chases
+        the breakout candle: WATCH exposes a provisional plan, ARMED means a
+        1H retest/rejection exists, and CONFIRMED requires a later closed 1H
+        body to break the rejection candle's opposite extreme.
+        """
+        closed4 = list(candles_4h or [])[:-1]
+        closed1 = list(candles_1h or [])[:-1]
+        atr4 = cls._atr(closed4)
+        atr1 = cls._atr(closed1)
+        if len(closed4) < 20 or len(closed1) < 12 or not atr4 or not atr1 or not index_price:
+            return None
+
+        def v(row, key):
+            aliases = {"o": "open", "h": "high", "l": "low", "c": "close", "t": "time"}
+            return float(row.get(key, row.get(aliases[key], 0.0)) or 0.0)
+
+        def ts_ms(row):
+            stamp = v(row, "t")
+            return stamp * 1000.0 if stamp and stamp < 10 ** 12 else stamp
+
+        breakout = None
+        # A watch remains relevant for at most six completed 4H bars (24h).
+        for idx in range(len(closed4) - 1, max(6, len(closed4) - 7), -1):
+            candle = closed4[idx]
+            prior = closed4[max(0, idx - 6):idx]
+            if len(prior) < 4:
+                continue
+            open_, high, low, close = (v(candle, k) for k in ("o", "h", "l", "c"))
+            candle_range = max(high - low, 1e-9)
+            body = close - open_
+            body_atr = abs(body) / atr4
+            body_share = abs(body) / candle_range
+            prior_high = max(v(c, "h") for c in prior)
+            prior_low = min(v(c, "l") for c in prior)
+            close_location = (close - low) / candle_range
+            short_break = body < 0 and close < prior_low - 0.10 * atr4 and close_location <= 0.25
+            long_break = body > 0 and close > prior_high + 0.10 * atr4 and close_location >= 0.75
+            if body_atr < 0.80 or body_share < 0.55 or not (short_break or long_break):
+                continue
+            direction = "short" if short_break else "long"
+            level = prior_low if short_break else prior_high
+            breakout = {
+                "direction": direction, "level": level, "at_ms": ts_ms(candle),
+                "candle_high": high, "candle_low": low,
+                "body_atr": body_atr, "body_share": body_share,
+                "atr_4h": atr4, "atr_1h": atr1,
+            }
+            break
+        if not breakout:
+            return None
+
+        level = breakout["level"]
+        direction = breakout["direction"]
+        tolerance = max(0.25 * atr1, 0.001 * index_price)
+        # The 4H timestamp is its open time. Retest evidence may only start
+        # after that breakout candle has fully closed, never from one of its
+        # own constituent 1H bars.
+        breakout_close_ms = breakout["at_ms"] + 4.0 * 3600.0 * 1000.0 if breakout["at_ms"] else 0.0
+        after = [c for c in closed1 if not breakout_close_ms or ts_ms(c) >= breakout_close_ms]
+        retest = confirmation = None
+        for pos, candle in enumerate(after):
+            high, low, close, open_ = (v(candle, k) for k in ("h", "l", "c", "o"))
+            if direction == "short":
+                rejected = high >= level - tolerance and close < level and close < open_
+            else:
+                rejected = low <= level + tolerance and close > level and close > open_
+            if not rejected:
+                continue
+            retest = candle
+            for later in after[pos + 1:]:
+                later_close = v(later, "c")
+                if (direction == "short" and later_close < low) or (direction == "long" and later_close > high):
+                    confirmation = later
+                    break
+            break
+
+        stage = "confirmed" if confirmation else "armed" if retest else "watch"
+        entry_zone_low = level - tolerance
+        entry_zone_high = level + tolerance
+        if confirmation:
+            plan_entry = v(confirmation, "c")
+        elif retest:
+            plan_entry = v(retest, "c")
+        else:
+            plan_entry = level
+
+        recent_after = after[-8:] if after else []
+        if direction == "short":
+            local_high = (max(v(c, "h") for c in recent_after)
+                          if retest and recent_after else breakout["candle_high"])
+            invalidation = local_high + 0.15 * atr1
+            risk = invalidation - plan_entry
+            tp1 = plan_entry - 2.0 * risk if risk > 0 else 0.0
+            tp2 = plan_entry - 3.0 * risk if risk > 0 else 0.0
+        else:
+            local_low = (min(v(c, "l") for c in recent_after)
+                         if retest and recent_after else breakout["candle_low"])
+            invalidation = local_low - 0.15 * atr1
+            risk = plan_entry - invalidation
+            tp1 = plan_entry + 2.0 * risk if risk > 0 else 0.0
+            tp2 = plan_entry + 3.0 * risk if risk > 0 else 0.0
+        if risk <= 0:
+            return None
+        breakout.update({
+            "stage": stage, "entry": plan_entry,
+            "entry_zone_low": entry_zone_low, "entry_zone_high": entry_zone_high,
+            "stop": invalidation, "invalidation": invalidation,
+            "target": tp1, "target_2": tp2, "risk_reward": 2.0,
+            "retest_seen": bool(retest), "confirmed": bool(confirmation),
+        })
+        return breakout
+
+    @classmethod
     def _rtm_zone_candidates(cls, direction, candles, reference_levels):
         """Detect auditable 1H RTM bases after the Thales setup exists.
 
@@ -652,9 +787,28 @@ class DankbitSignal(models.Model):
                     scored, _ = self._anchor_score(rowsd, entry)
                     gamma_score, greek_score, greek_components = self._option_direction_scores(asset, now_naive)
                     quality = self._quality(rows4, rows1, snapshots, is_weekend)
-                    direction = ("long" if trend_daily == trend_4h == "up"
-                                 else "short" if trend_daily == trend_4h == "down"
-                                 else "neutral")
+                    standard_direction = ("long" if trend_daily == trend_4h == "up"
+                                          else "short" if trend_daily == trend_4h == "down"
+                                          else "neutral")
+                    breakout = self._breakout_retest_setup(candles_4h, candles_1h, entry)
+                    breakout_direction = breakout["direction"] if breakout else "neutral"
+                    breakout_sign = 1.0 if breakout_direction == "long" else -1.0 if breakout_direction == "short" else 0.0
+                    daily_not_opposed = bool(
+                        breakout and (
+                            trend_daily == "neutral"
+                            or (breakout_direction == "long" and trend_daily == "up")
+                            or (breakout_direction == "short" and trend_daily == "down")
+                        )
+                    )
+                    breakout_options_aligned = bool(
+                        breakout and breakout_sign * gamma_score >= 10.0
+                        and breakout_sign * greek_score >= 10.0
+                        and breakout_sign * score4 >= -35.0
+                    )
+                    breakout_candidate = bool(breakout and daily_not_opposed and breakout_options_aligned)
+                    direction = standard_direction if standard_direction != "neutral" else (
+                        breakout_direction if breakout_candidate else "neutral"
+                    )
                     direction_sign = 1.0 if direction == "long" else -1.0 if direction == "short" else 0.0
                     # Trend owns direction. Forecast and moving Greek centres
                     # confirm/predict it; none may reverse the hard MTF gate.
@@ -663,7 +817,10 @@ class DankbitSignal(models.Model):
                         + 0.20 * score4 + 0.15 * gamma_score + 0.10 * greek_score
                     )
                     final = raw_final * (quality / 100.0)
-                    stop = target = rr = swing_level = atr_4h = 0.0
+                    stop = target = rr = swing_level = 0.0
+                    # Always expose ATR health in the panel, even while the
+                    # hard trend gate is neutral and no stop is calculated.
+                    atr_4h = self._atr(list(candles_4h or [])[:-1])
                     trigger_level = atr_1h = 0.0
                     trigger_basis = ""
                     liquidity_swept = entry_confirmed = False
@@ -672,6 +829,11 @@ class DankbitSignal(models.Model):
                     rtm_path_clear = True
                     rtm_score = 0.0
                     entry_model = False
+                    setup_path = False
+                    plan_status = False
+                    entry_zone_low = entry_zone_high = invalidation_level = target_2 = breakout_level = 0.0
+                    breakout_at = False
+                    plan_provisional = False
                     if direction != "neutral":
                         stop, swing_level, atr_4h = self._structural_stop(direction, entry, candles_4h)
                         stop, target, rr = self._levels(direction, entry, stop, snapshots, rows4)
@@ -682,27 +844,27 @@ class DankbitSignal(models.Model):
                         reasons.append("Incomplete E1/E2/E3 coverage")
                     if quality < min_quality:
                         reasons.append("Quality %.1f below %.1f threshold" % (quality, min_quality))
-                    if direction == "neutral":
+                    if standard_direction == "neutral":
                         reasons.append("Daily and 4H real-price trends are not aligned")
                     elif final < 35.0:
                         reasons.append("Combined trend/Forecast/Greeks score is below 35")
-                    if direction != "neutral" and direction_sign * score4 < 15.0:
+                    if standard_direction != "neutral" and direction_sign * score4 < 15.0:
                         reasons.append("4H Forecast does not confirm the real-price trend")
-                    if direction != "neutral" and direction_sign * scored < -35.0:
+                    if standard_direction != "neutral" and direction_sign * scored < -35.0:
                         reasons.append("Daily Forecast strongly conflicts with the real-price trend")
-                    if direction != "neutral" and direction_sign * gamma_score < -30.0:
+                    if standard_direction != "neutral" and direction_sign * gamma_score < -30.0:
                         reasons.append("Gamma concentration is moving strongly against the setup")
-                    if direction != "neutral" and direction_sign * greek_score < -30.0:
+                    if standard_direction != "neutral" and direction_sign * greek_score < -30.0:
                         reasons.append("Combined Greek concentration is moving strongly against the setup")
                     # A counter-trend 1H market is a valid pullback. Only a
                     # strongly opposing *forward* 1H projection delays entry.
-                    if direction != "neutral" and direction_sign * score1 < -35.0:
+                    if standard_direction != "neutral" and direction_sign * score1 < -35.0:
                         reasons.append("Waiting for the 1H Forecast to turn out of the pullback")
-                    if direction != "neutral" and not swing_level:
+                    if standard_direction != "neutral" and not swing_level:
                         reasons.append("No confirmed 4H swing available for structural stop")
-                    if rr < 2.0:
+                    if standard_direction != "neutral" and rr < 2.0:
                         reasons.append("No structure-backed target with R:R >= 2.0 after 4H swing stop")
-                    thales_eligible = not reasons and entry > 0
+                    thales_eligible = standard_direction != "neutral" and not reasons and entry > 0
                     if thales_eligible:
                         reference_levels = self._entry_reference_levels(asset, direction, snapshots)
                         if not reference_levels:
@@ -738,7 +900,7 @@ class DankbitSignal(models.Model):
                                 elif not entry_confirmed:
                                     reasons.append("FTB reclaimed: waiting for closed 1H body Engulf/BOS")
 
-                    official_eligible = bool(
+                    rtm_official_eligible = bool(
                         thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and entry_confirmed
                     )
@@ -750,6 +912,87 @@ class DankbitSignal(models.Model):
                         thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] >= 2 and entry_confirmed
                     )
+
+                    breakout_official_eligible = False
+                    breakout_shadow = False
+                    breakout_watch = False
+                    if not rtm_official_eligible and not reclaim_shadow and not later_touch_shadow and breakout_candidate:
+                        direction = breakout["direction"]
+                        direction_sign = 1.0 if direction == "long" else -1.0
+                        directional_option_strength = max(
+                            min((direction_sign * gamma_score + direction_sign * greek_score) / 100.0, 1.0), 0.0,
+                        )
+                        final = quality / 100.0 * min(
+                            100.0, 55.0 * min(breakout["body_atr"] / 1.50, 1.0)
+                            + 25.0 * directional_option_strength
+                            + (20.0 if breakout["confirmed"] else 10.0 if breakout["retest_seen"] else 0.0),
+                        )
+                        entry = float(breakout["entry"])
+                        stop = float(breakout["stop"])
+                        target = float(breakout["target"])
+                        target_2 = float(breakout["target_2"])
+                        rr = float(breakout["risk_reward"])
+                        atr_4h = float(breakout["atr_4h"])
+                        swing_level = float(breakout["invalidation"])
+                        entry_zone_low = float(breakout["entry_zone_low"])
+                        entry_zone_high = float(breakout["entry_zone_high"])
+                        invalidation_level = float(breakout["invalidation"])
+                        breakout_level = float(breakout["level"])
+                        breakout_at = datetime.fromtimestamp(breakout["at_ms"] / 1000.0, tz=timezone.utc).replace(tzinfo=None) if breakout["at_ms"] else False
+                        setup_path = "breakout_retest"
+                        setup_stage = "confirmed" if breakout["stage"] == "confirmed" else "armed" if breakout["stage"] == "armed" else "setup"
+                        plan_status = "triggered" if breakout["confirmed"] else "armed" if breakout["retest_seen"] else "watch"
+                        plan_provisional = not breakout["confirmed"]
+                        trigger_level = breakout_level
+                        trigger_basis = "Broken 4H structure retest"
+                        liquidity_swept = bool(breakout["retest_seen"])
+                        entry_confirmed = bool(breakout["confirmed"])
+                        opposite_direction = "short" if direction == "long" else "long"
+                        opposing_references = self._entry_reference_levels(asset, opposite_direction, snapshots)
+                        opposing_zones = self._rtm_zone_candidates(
+                            opposite_direction, candles_1h, opposing_references,
+                        ) if opposing_references else []
+                        target, rr, rtm_opposing_zone, rtm_path_clear = self._apply_rtm_opposing_zone(
+                            direction, entry, stop, target, opposing_zones,
+                        )
+                        if rtm_path_clear and target_2:
+                            # TP2 is optional and cannot project through the
+                            # nearest credible opposing RTM zone.
+                            if rtm_opposing_zone:
+                                opposing_level = (rtm_opposing_zone["low"] if direction == "long"
+                                                   else rtm_opposing_zone["high"])
+                                target_2 = min(target_2, opposing_level) if direction == "long" else max(target_2, opposing_level)
+                        elif not rtm_path_clear:
+                            target = target_2 = rr = 0.0
+                            plan_status = "cancelled"
+                        entry_model = ("breakout_retest_confirmed" if entry_confirmed
+                                       else "breakout_retest_shadow" if quality >= 50.0
+                                       else "breakout_watch")
+                        reasons = [
+                            "Closed 4H %s breakout %.2f ATR; waiting for a non-chasing 1H retest entry"
+                            % (direction, breakout["body_atr"])
+                        ]
+                        if quality < 50.0:
+                            reasons.append("Option-data quality below 50: Watch only, numeric plan is provisional")
+                        elif quality < min_quality:
+                            reasons.append("Option-data quality 50-64: plan is Shadow only")
+                        if not breakout["retest_seen"]:
+                            reasons.append("Waiting for price to retest the broken 4H level")
+                        elif not breakout["confirmed"]:
+                            reasons.append("1H retest rejected: waiting for a later closed 1H BOS/Engulf confirmation")
+                        else:
+                            reasons.append("Closed 1H retest and micro-structure confirmation completed")
+                        if not rtm_path_clear:
+                            reasons.append("Opposing RTM zone blocks the Breakout-Retest path before minimum 2R")
+                        breakout_official_eligible = bool(
+                            entry_confirmed and quality >= min_quality and rr >= 2.0 and rtm_path_clear
+                        )
+                        breakout_shadow = bool(
+                            quality >= 50.0 and rtm_path_clear and not breakout_official_eligible
+                        )
+                        breakout_watch = bool(quality < 50.0 and rtm_path_clear)
+
+                    official_eligible = bool(rtm_official_eligible or breakout_official_eligible)
 
                     # Serialize the weekly decision even if an administrator
                     # manually triggers the cron while its scheduled run is
@@ -772,14 +1015,18 @@ class DankbitSignal(models.Model):
                         ("closed_at", ">", now_naive - timedelta(hours=8)),
                     ])
                     capacity_available = weekly_officials < 3 and not active_official and not cooldown
-                    shadow_candidate = official_eligible or reclaim_shadow or later_touch_shadow
+                    shadow_candidate = official_eligible or reclaim_shadow or later_touch_shadow or breakout_shadow
                     kind = ("official" if official_eligible and capacity_available
                             else "shadow" if shadow_candidate else "no_trade")
-                    entry_model = ("ftb_confirmed" if official_eligible
-                                   else "ftb_reclaim_shadow" if reclaim_shadow
-                                   else "later_touch_shadow" if later_touch_shadow else False)
-                    setup_stage = "confirmed" if entry_confirmed else "armed" if thales_eligible else "setup" if direction != "neutral" else "none"
-                    state = "active" if kind == "official" else "watch" if kind == "shadow" else "armed" if thales_eligible else "rejected"
+                    if setup_path != "breakout_retest":
+                        setup_path = "rtm_ftb" if thales_eligible or rtm_zone else False
+                        entry_model = ("ftb_confirmed" if rtm_official_eligible
+                                       else "ftb_reclaim_shadow" if reclaim_shadow
+                                       else "later_touch_shadow" if later_touch_shadow else False)
+                        setup_stage = "confirmed" if entry_confirmed else "armed" if thales_eligible else "setup" if direction != "neutral" else "none"
+                        plan_status = "triggered" if entry_confirmed else "armed" if thales_eligible else "watch" if direction != "neutral" else False
+                    state = ("active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
+                             else "armed" if thales_eligible else "rejected")
                     if official_eligible and weekly_officials >= 3:
                         reasons.append("Weekly limit of three official signals reached; stored as shadow")
                     elif official_eligible and active_official:
@@ -806,7 +1053,12 @@ class DankbitSignal(models.Model):
                         },
                         "candidate_plan": {
                             "entry": entry, "stop": stop, "target": target, "risk_reward": rr,
+                            "target_2": target_2, "entry_zone_low": entry_zone_low,
+                            "entry_zone_high": entry_zone_high,
+                            "invalidation_level": invalidation_level,
                             "swing_level": swing_level, "atr_4h": atr_4h,
+                            "setup_path": setup_path, "plan_status": plan_status,
+                            "provisional": plan_provisional,
                         },
                         "entry_trigger": {
                             "stage": setup_stage, "level": trigger_level,
@@ -815,9 +1067,10 @@ class DankbitSignal(models.Model):
                         },
                         "rtm": dict(rtm_zone, entry_model=entry_model) if rtm_zone else None,
                         "rtm_opposing_zone": rtm_opposing_zone,
+                        "breakout": breakout,
                     }
                     regime = ", ".join(sorted({r.activity_regime for r in rows4.values() if r.activity_regime}))
-                    visible_plan = kind in ("official", "shadow")
+                    visible_plan = kind in ("official", "shadow") or breakout_watch
                     self.sudo().create({
                         "asset": asset, "evaluated_at": now_naive, "utc_day": now.date(),
                         "kind": kind, "state": state, "direction": direction,
@@ -834,6 +1087,15 @@ class DankbitSignal(models.Model):
                         "gamma_direction_score": gamma_score,
                         "greek_direction_score": greek_score,
                         "setup_stage": setup_stage,
+                        "setup_path": setup_path,
+                        "plan_status": plan_status,
+                        "entry_zone_low": entry_zone_low,
+                        "entry_zone_high": entry_zone_high,
+                        "invalidation_level": invalidation_level,
+                        "target_2": target_2,
+                        "breakout_level": breakout_level,
+                        "breakout_at": breakout_at,
+                        "plan_provisional": plan_provisional,
                         "trigger_level": trigger_level,
                         "trigger_basis": trigger_basis,
                         "liquidity_swept": liquidity_swept,
@@ -860,8 +1122,13 @@ class DankbitSignal(models.Model):
                         "risk_reward": rr if visible_plan else 0.0,
                         "swing_level": swing_level,
                         "atr_4h": atr_4h,
-                        "stop_basis": "4H Swing High + ATR buffer" if direction == "short" else "4H Swing Low - ATR buffer" if direction == "long" else "",
-                        "expires_at": now_naive + timedelta(hours=24),
+                        "stop_basis": ("1H Retest Swing High + 0.15 ATR buffer" if setup_path == "breakout_retest" and direction == "short"
+                                       else "1H Retest Swing Low - 0.15 ATR buffer" if setup_path == "breakout_retest" and direction == "long"
+                                       else "4H Swing High + ATR buffer" if direction == "short"
+                                       else "4H Swing Low - ATR buffer" if direction == "long" else ""),
+                        "expires_at": (breakout_at + timedelta(hours=28)
+                                       if setup_path == "breakout_retest" and breakout_at
+                                       else now_naive + timedelta(hours=24)),
                         "reason": "; ".join(reasons) if reasons else "All signal gates passed",
                         "snapshot_json": json.dumps(payload, sort_keys=True),
                     })
@@ -878,6 +1145,13 @@ class DankbitSignal(models.Model):
         ])
         Trade = self.env["dankbit.trade"]
         for signal in open_signals:
+            # WATCH/ARMED breakout plans are displayed early but are not
+            # hypothetical fills. Forward testing starts only after the 1H
+            # retest has actually triggered the plan.
+            if signal.setup_path == "breakout_retest" and signal.plan_status != "triggered":
+                if signal.expires_at and signal.expires_at <= now_naive:
+                    signal.write({"state": "cancelled", "closed_at": now_naive})
+                continue
             candles = Trade.get_candles(signal.asset, interval="1h", limit=72) or []
             relevant = []
             start_epoch = signal.evaluated_at.replace(tzinfo=timezone.utc).timestamp() * 1000

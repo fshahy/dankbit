@@ -28,7 +28,7 @@
 	     decision, then narrowed back down to Nearest+1/Nearest+2 per a
 	     still later product decision) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. "Window"
-	     dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
+	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
 	     "All" no-window-bound option, split out from /gt/<asset>'s own
 	     Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once this page's own set
 	     grew, 24h default — 16h/20h/48h/72h and "All" were offered at
@@ -41,7 +41,10 @@
 	     later product decision (default stayed "All"), and 4h after
 	     that; the default then moved back to 8h per a later product
 	     decision, then to 24h, then to 4h, then back to 24h per still
-	     later product decisions) independently picks
+	     later product decisions; 1h/2h/3h/5h/6h/7h were then re-added per
+	     a still later product decision, filling this dropdown back out to
+	     every 1h step from 1h through 8h plus 12h/24h/All) independently
+	     picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint. -->
 
@@ -165,7 +168,13 @@
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
+						<option value="1">1h</option>
+						<option value="2">2h</option>
+						<option value="3">3h</option>
 						<option value="4">4h</option>
+						<option value="5">5h</option>
+						<option value="6">6h</option>
+						<option value="7">7h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
 						<option value="24" selected="selected">24h</option>
@@ -213,16 +222,17 @@
 					let EXPIRY_MODE = 'nearest';
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
-					// EXPIRY_MODE. Choice set (4h/8h/12h/24h/All) split out from
-					// /gt/<asset>'s own 12h/24h/48h. 16h/20h/48h/72h were
-					// offered at one point and removed per product
-					// decision; 3h/5h/7h were added later, filling in the
-					// gaps left in the original 1h/2h/4h/6h/8h/12h set; 24h
-					// and "All" (?hours=all, skipping the trailing-hours
-					// trade filter entirely — a number in every other case)
-					// were both re-added afterwards per later product
-					// decisions; 1h/2h/3h/4h/5h/6h/7h/8h were then removed
-					// in a further round, leaving only 12h/24h/All, and the
+					// EXPIRY_MODE. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
+					// split out from /gt/<asset>'s own 12h/24h/48h.
+					// 16h/20h/48h/72h were offered at one point and removed
+					// per product decision; 3h/5h/7h were added later,
+					// filling in the gaps left in the original
+					// 1h/2h/4h/6h/8h/12h set; 24h and "All" (?hours=all,
+					// skipping the trailing-hours trade filter entirely —
+					// a number in every other case) were both re-added
+					// afterwards per later product decisions;
+					// 1h/2h/3h/4h/5h/6h/7h/8h were then removed in a
+					// further round, leaving only 12h/24h/All, and the
 					// default moved from 8h to "All" at that point; 8h was
 					// then re-added per a still later product decision
 					// (default stayed "All"), and 4h after that; the
@@ -232,7 +242,10 @@
 					// scanned the selected instrument's entire trade
 					// history — see FOUR_LEG_DEFAULT_WINDOW_HOURS), then to
 					// 24h, then to 4h, then back to 24h per still later
-					// product decisions.
+					// product decisions; 1h/2h/3h/5h/6h/7h were then
+					// re-added per a still later product decision, filling
+					// this dropdown back out to every 1h step from 1h
+					// through 8h plus 12h/24h/All.
 					let WINDOW_HOURS = 24;
 					// `includeAllAvg` appends `&all_avg=1`, which tells
 					// four_leg_gamma_json to also recompute the "ALL AVG"

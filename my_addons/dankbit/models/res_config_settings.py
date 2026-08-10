@@ -177,7 +177,7 @@ class ResConfigSettings(models.TransientModel):
     forecast_curve_center_weight = fields.Float(
         string="Curve Center Weight",
         config_parameter="dankbit.forecast_curve_center_weight",
-        default=0.20,
+        default=0.0,
         digits=(16, 4),
         help="Weight of the BML/SMP curve average in the blended center price. Default 0.20 (lowered from Thales's own 0.30 default).",
     )
@@ -778,7 +778,7 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.forecast_flow_imbalance_body_damping",
         default=0.20,
         digits=(16, 4),
-        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral (see Flow Imbalance Neutral Threshold). Default 0.20 (~20%, per Thales dev's own stated first fix).",
+        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral. Default 0.0 restores the original Forecast body behaviour; low-quality extreme paths are warned about on the chart instead of being silently flattened.",
     )
 
     forecast_zone_brake_atr_distance = fields.Float(
@@ -792,9 +792,9 @@ class ResConfigSettings(models.TransientModel):
     forecast_zone_brake_min_body_mult = fields.Float(
         string="Zone Brake Min Body Mult",
         config_parameter="dankbit.forecast_zone_brake_min_body_mult",
-        default=0.40,
+        default=1.0,
         digits=(16, 4),
-        help="Floor the Zone Brake's body_confidence multiplier won't shrink below, even right up against the level. Default 0.40.",
+        help="Floor the Zone Brake's body_confidence multiplier won't shrink below. Default 1.0 restores the original Forecast body behaviour; zone risk remains visible through the chart warning and other structural diagnostics.",
     )
 
     forecast_breakout_gate_wick_bleed = fields.Float(
@@ -849,7 +849,7 @@ class ResConfigSettings(models.TransientModel):
     eth_forecast_curve_center_weight = fields.Float(
         string="ETH Curve Center Weight",
         config_parameter="dankbit.eth_forecast_curve_center_weight",
-        default=0.20,
+        default=0.0,
         digits=(16, 4),
         help="Weight of the BML/SMP curve average in the blended center price. Default 0.20 (lowered from "
              "Thales's own 0.30 default).",
@@ -1410,7 +1410,7 @@ class ResConfigSettings(models.TransientModel):
         config_parameter="dankbit.eth_forecast_flow_imbalance_body_damping",
         default=0.20,
         digits=(16, 4),
-        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral (see Flow Imbalance Neutral Threshold). Default 0.20 (~20%, per Thales dev's own stated first fix).",
+        help="Fraction body_confidence is reduced by when the raw Long/Short trade count is near-neutral. Default 0.0 restores the original Forecast body behaviour; low-quality extreme paths are warned about on the chart instead of being silently flattened.",
     )
 
     eth_forecast_zone_brake_atr_distance = fields.Float(
@@ -1424,9 +1424,9 @@ class ResConfigSettings(models.TransientModel):
     eth_forecast_zone_brake_min_body_mult = fields.Float(
         string="ETH Zone Brake Min Body Mult",
         config_parameter="dankbit.eth_forecast_zone_brake_min_body_mult",
-        default=0.40,
+        default=1.0,
         digits=(16, 4),
-        help="Floor the Zone Brake's body_confidence multiplier won't shrink below, even right up against the level. Default 0.40.",
+        help="Floor the Zone Brake's body_confidence multiplier won't shrink below. Default 1.0 restores the original Forecast body behaviour; zone risk remains visible through the chart warning and other structural diagnostics.",
     )
 
     eth_forecast_breakout_gate_wick_bleed = fields.Float(
@@ -1566,5 +1566,4 @@ class ResConfigSettings(models.TransientModel):
         icp.set_param("dankbit.show_weekly_lines", str(self.show_weekly_lines))
         icp.set_param("dankbit.show_monthly_lines", str(self.show_monthly_lines))
         icp.set_param("dankbit.forecast_trade_weighted_greeks", str(self.forecast_trade_weighted_greeks))
-
 

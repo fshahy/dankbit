@@ -21,21 +21,24 @@ from . import next_candle_forecast
 Y_CHART_DEFAULT_WINDOW_HOURS = 12
 Y_CHART_WINDOW_HOURS_CHOICES = (12, 24, 48)
 
-# /4l/<asset>'s own "Window" dropdown numeric choice set — 4h/8h/12h/24h —
-# split out from Y_CHART_WINDOW_HOURS_CHOICES (which /gt/<asset> still
-# uses unchanged) once this page's own choice set grew past that shared
-# 12/24/48 tuple, so /gt/<asset>'s own "Window" dropdown is unaffected.
-# 16h/20h/48h/72h and the "All" (no-window-bound) option were offered at
-# one point and removed per product decision; 3h/5h/7h were added later,
-# filling in the gaps left in the original 1h/2h/4h/6h/8h/12h set; 24h
-# and "All" were both re-added afterwards per later product decisions;
-# 1h/2h/3h/4h/5h/6h/7h/8h were then removed in a further round, leaving
-# only 12h/24h in this tuple; 8h was then re-added per a later product
-# decision, and 4h after that. "All" (`?hours=all`) is handled as a
+# /4l/<asset>'s own "Window" dropdown numeric choice set — 1h/2h/3h/4h/
+# 5h/6h/7h/8h/12h/24h — split out from Y_CHART_WINDOW_HOURS_CHOICES
+# (which /gt/<asset> still uses unchanged) once this page's own choice
+# set grew past that shared 12/24/48 tuple, so /gt/<asset>'s own
+# "Window" dropdown is unaffected. 16h/20h/48h/72h and the "All"
+# (no-window-bound) option were offered at one point and removed per
+# product decision; 3h/5h/7h were added later, filling in the gaps left
+# in the original 1h/2h/4h/6h/8h/12h set; 24h and "All" were both
+# re-added afterwards per later product decisions; 1h/2h/3h/4h/5h/6h/
+# 7h/8h were then removed in a further round, leaving only 12h/24h in
+# this tuple; 8h was then re-added per a later product decision, and 4h
+# after that; 1h/2h/3h/5h/6h/7h were then re-added per a further
+# product decision, filling this tuple back out to every 1h step from
+# 1h through 8h plus 12h/24h. "All" (`?hours=all`) is handled as a
 # separate string sentinel in four_leg_gamma_json, not a member of this
 # tuple — it skips the trailing-hours trade filter entirely rather than
 # mapping to a number of hours.
-FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24)
+FOUR_LEG_WINDOW_HOURS_CHOICES = (1, 2, 3, 4, 5, 6, 7, 8, 12, 24)
 
 # /4l/<asset>'s own "Window" dropdown default — also the fallback used
 # by four_leg_gamma_json when `?hours=` is missing/malformed, same as
@@ -111,15 +114,66 @@ def _forecast_leg_completeness(snapshot):
     return not missing, missing
 
 
+def _forecast_quality_warning(points, anchor_meta, index_price, sigma_annual, timeframe):
+    """Assess confidence separately from the Forecast geometry.
+
+    The restored Forecast engine is intentionally allowed to show its raw
+    directional path again.  This guard does not reshape, clamp, reject, or
+    hide a candle.  It raises a warning only when option-data quality is low
+    *and* the resulting path is statistically large relative to the current
+    implied-volatility move for the selected candle width/horizon.
+    """
+    available = [a for a in (anchor_meta or []) if a.get("available")]
+    coverage = len(available) / 3.0
+    confidences = [float(a.get("confidence") or 0.0) for a in available]
+    mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    quality_score = max(min(coverage * 60.0 + mean_confidence * 0.40, 100.0), 0.0)
+    low_quality = quality_score < 65.0
+
+    step_hours = {"1h": 1.0, "4h": 4.0, "1d": 24.0}.get(timeframe, 4.0)
+    base_price = float(index_price or 0.0)
+    sigma = float(sigma_annual or 0.0)
+    max_body_sigma = 0.0
+    max_path_sigma = 0.0
+    if base_price > 0 and sigma > 0:
+        for point in points or []:
+            hours_out = max(float(point.get("hours") or step_hours), step_hours)
+            body_expected = float(base_price * sigma * np.sqrt(step_hours / (365.0 * 24.0)))
+            path_expected = float(base_price * sigma * np.sqrt(hours_out / (365.0 * 24.0)))
+            body_sigma = abs(float(point["close"]) - float(point["open"])) / max(body_expected, 1e-9)
+            path_sigma = abs(float(point["close"]) - base_price) / max(path_expected, 1e-9)
+            max_body_sigma = max(max_body_sigma, body_sigma)
+            max_path_sigma = max(max_path_sigma, path_sigma)
+
+    extremity = float(max(max_body_sigma, max_path_sigma))
+    extreme = bool(extremity >= 2.25)
+    active = bool(low_quality and extreme)
+    missing_reasons = [
+        a.get("unavailable_reason") for a in (anchor_meta or [])
+        if not a.get("available") and a.get("unavailable_reason")
+    ]
+    return {
+        "active": active,
+        "code": "LOW_OPTION_DATA_EXTREME_FORECAST" if active else None,
+        "severity": "high" if active and extremity >= 3.5 else ("warning" if active else "none"),
+        "quality_score": round(quality_score, 1),
+        "quality_level": "low" if low_quality else ("medium" if quality_score < 80.0 else "good"),
+        "anchor_coverage": len(available),
+        "mean_anchor_confidence": round(mean_confidence, 1),
+        "max_body_sigma": round(max_body_sigma, 2),
+        "max_path_sigma": round(max_path_sigma, 2),
+        "missing_reasons": missing_reasons,
+        "message": "Low option-data quality: the Forecast path may be exaggerated." if active else None,
+        "message_fa": "کیفیت داده آپشن پایین است؛ حرکت کندل‌های فورکست ممکن است افراطی باشد." if active else None,
+    }
+
+
 def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, timeframe="4h"):
     """Build a continuous three-expiry path around up to three anchors.
 
-    Anchor bodies and every raw intermediate body are confidence-weighted.
-    Missing-leg anchors are excluded by the caller.  The old implementation
-    corrected intermediate candles toward raw absolute opens and then let raw
-    bodies compound freely after E3; this could manufacture a large tail even
-    at C25.  The path now stays continuous, caps cumulative displacement by
-    aggregate confidence, and strongly decays the unanchored post-E3 tail.
+    Keep the original calculated body sizes. Intermediate bodies are corrected
+    only to connect expiry anchors without a gap. Data-quality risk is reported
+    separately; it must not flatten bodies or turn displacement into wicks.
     """
     limit = max(1, min(int(count or max_count), int(max_count)))
     source = list(raw_points or [])[:limit]
@@ -155,50 +209,38 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
             "close": new_close, "mode": mode or raw.get("mode"),
         }
 
-    def confidence_factor(anchor):
-        return max(min(float(anchor.get("confidence") or 0.0) / 100.0, 1.0), 0.0)
-
-    anchor_indices = sorted(anchor_by_index)
-    factors = [confidence_factor(a) for a in anchor_by_index.values()]
-    aggregate_confidence = sum(factors) / len(factors) if factors else 0.25
-    start_open = float(source[0]["open"])
-    # Three-day cumulative budget: 2% at C25, 3% at C50, 5% at C100.
-    cumulative_cap = max(start_open * (0.01 + 0.04 * aggregate_confidence), 1e-9)
-    last_anchor_index = max(anchor_indices) if anchor_indices else -1
     output = []
+    first_anchor = anchor_by_index.get(0)
+    if first_anchor:
+        output.append(geometry(
+            source[0], float(source[0]["open"]),
+            body=float(first_anchor["close"]) - float(first_anchor["open"]),
+            wick_source=first_anchor, mode="expiry_anchor_1",
+        ))
+    else:
+        output.append(dict(source[0]))
 
-    for index, raw in enumerate(source):
-        new_open = start_open if not output else float(output[-1]["close"])
-        anchor = anchor_by_index.get(index)
-        if anchor:
-            factor = confidence_factor(anchor)
-            body = (float(anchor["close"]) - float(anchor["open"])) * factor
-            candle = geometry(
-                raw, new_open, body=body, wick_source=anchor,
-                mode="expiry_anchor_%s" % (index // candles_per_day + 1),
-            )
-        else:
-            future_indices = [i for i in anchor_indices if i > index]
-            reference_index = future_indices[0] if future_indices else last_anchor_index
-            factor = confidence_factor(anchor_by_index[reference_index]) if reference_index >= 0 else aggregate_confidence
-            raw_body = float(raw["close"]) - float(raw["open"])
-            if index > last_anchor_index >= 0:
-                tail_step = index - last_anchor_index
-                factor *= 0.15 * (0.72 ** max(tail_step - 1, 0))
-            candle = geometry(raw, new_open, body=raw_body * factor)
+    cursor = 1
+    for anchor_index in sorted(i for i in anchor_by_index if i > 0):
+        anchor = anchor_by_index[anchor_index]
+        intermediate = source[cursor:anchor_index]
+        target_open = float(source[anchor_index]["open"])
+        if intermediate:
+            raw_total = sum(float(p["close"]) - float(p["open"]) for p in intermediate)
+            correction = (target_open - float(output[-1]["close"]) - raw_total) / len(intermediate)
+            for raw in intermediate:
+                adjusted_body = float(raw["close"]) - float(raw["open"]) + correction
+                output.append(geometry(raw, output[-1]["close"], body=adjusted_body))
+        output.append(geometry(
+            source[anchor_index], float(output[-1]["close"]),
+            body=float(anchor["close"]) - float(anchor["open"]),
+            wick_source=anchor,
+            mode="expiry_anchor_%s" % (anchor_index // candles_per_day + 1),
+        ))
+        cursor = anchor_index + 1
 
-        unclamped_close = float(candle["close"])
-        clamped_close = max(min(unclamped_close, start_open + cumulative_cap), start_open - cumulative_cap)
-        if clamped_close != unclamped_close:
-            # Preserve rejected excess as uncertainty (wick), never body.
-            if unclamped_close > clamped_close:
-                candle["high"] = max(float(candle["high"]), unclamped_close)
-            else:
-                candle["low"] = min(float(candle["low"]), unclamped_close)
-            candle["close"] = clamped_close
-            candle["high"] = max(float(candle["high"]), float(candle["open"]), clamped_close)
-            candle["low"] = min(float(candle["low"]), float(candle["open"]), clamped_close)
-        output.append(candle)
+    for raw in source[cursor:]:
+        output.append(geometry(raw, float(output[-1]["close"])))
     return output
 
 
@@ -2162,7 +2204,8 @@ class ChartController(http.Controller):
         "nearest_plus_2" per a still later product decision. The trailing-hours trade window
         is independently user-selectable via the page's own "Window"
         dropdown — an optional `?hours=` query param, restricted to
-        FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24 — or the literal string
+        FOUR_LEG_WINDOW_HOURS_CHOICES (1/2/3/4/5/6/7/8/12/24 — or the
+        literal string
         "all", skipping the trailing-hours trade filter entirely; any
         other/missing value falls back to
         FOUR_LEG_DEFAULT_WINDOW_HOURS=24 (24h, after moving several times
@@ -2177,7 +2220,8 @@ class ChartController(http.Controller):
         were removed in a further round, leaving 12h/24h/All, and the
         default moved from 8h to "All" at that point; 8h was then
         re-added per a still later product decision (default stayed
-        "All"). Trades are restricted
+        "All"); 1h/2h/3h/5h/6h/7h were then re-added per a still later
+        product decision, filling this tuple back out. Trades are restricted
         to the
         resolved instrument via the same anchored `=ilike` domain
         chart_png_zones uses (`f"{instrument}-%"`, left-prefix match so
@@ -2413,7 +2457,7 @@ class ChartController(http.Controller):
         Nearest+2 per a still later product decision, same
         nearest+1/nearest+2 ordinal notion /gt/<asset>'s own 2nd/3rd price
         lines use), and own "Window"
-        dropdown (4h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
+        dropdown (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_
         CHOICES plus the "All" no-window-bound option, split out from
         /gt/<asset>'s own Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once
         this page's own set grew, 24h default, independent of the
@@ -2430,7 +2474,10 @@ class ChartController(http.Controller):
         routine per-poll cost of the page's 4 gamma-leg lines, since
         "All" meant every poll scanned the selected instrument's entire
         trade history), then to 24h, then to 4h, then back to 24h per
-        still later product decisions; see four_leg_gamma_json for how each option resolves). A vertical
+        still later product decisions; 1h/2h/3h/5h/6h/7h were then
+        re-added per a still later product decision, filling this
+        dropdown back out to every 1h step from 1h through 8h plus
+        12h/24h/All; see four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
@@ -2853,6 +2900,9 @@ class ChartController(http.Controller):
             result["points"], anchors, forecast_count,
             max_count=max_count, timeframe=timeframe,
         )
+        forecast_warning = _forecast_quality_warning(
+            unified, anchor_meta, result["index_price"], result["sigma_annual"], timeframe,
+        )
         generated_at = result["generated_at"]
         now_ms = int(generated_at.timestamp() * 1000)
         points = [
@@ -2874,6 +2924,7 @@ class ChartController(http.Controller):
             "forecast_count": len(points),
             "first_candle": anchor_meta[0],
             "anchors": anchor_meta,
+            "forecast_warning": forecast_warning,
             "points": points,
             "generated_at": generated_at.isoformat(),
         }
@@ -3029,6 +3080,15 @@ class ChartController(http.Controller):
                 "weekly_signal_count": weekly_count,
                 "weekly_signal_limit": 3,
                 "setup_stage": row.setup_stage or "none",
+                "setup_path": row.setup_path or "",
+                "plan_status": row.plan_status or "",
+                "entry_zone_low": row.entry_zone_low,
+                "entry_zone_high": row.entry_zone_high,
+                "invalidation_level": row.invalidation_level,
+                "target_2": row.target_2,
+                "breakout_level": row.breakout_level,
+                "breakout_at": row.breakout_at.isoformat() if row.breakout_at else None,
+                "plan_provisional": row.plan_provisional,
                 "trigger_level": row.trigger_level,
                 "trigger_basis": row.trigger_basis or "",
                 "liquidity_swept": row.liquidity_swept,
@@ -3080,7 +3140,10 @@ class ChartController(http.Controller):
             asset = "ALL"
         if kind not in ("all", "official", "shadow"):
             kind = "official"
-        allowed_models = ("all", "ftb_confirmed", "ftb_reclaim_shadow", "later_touch_shadow")
+        allowed_models = (
+            "all", "ftb_confirmed", "ftb_reclaim_shadow", "later_touch_shadow",
+            "breakout_watch", "breakout_retest_shadow", "breakout_retest_confirmed",
+        )
         if entry_model not in allowed_models:
             entry_model = "all"
 

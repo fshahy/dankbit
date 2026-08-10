@@ -455,9 +455,9 @@ class ForecastSnapshot(models.Model):
         # near-neutral, and rode straight through the Zone High edge
         # without any real confirmation.
         cfg["FLOW_IMBALANCE_NEUTRAL_THRESHOLD"] = f("forecast_flow_imbalance_neutral_threshold", 0.05)
-        cfg["FLOW_IMBALANCE_BODY_DAMPING"] = f("forecast_flow_imbalance_body_damping", 0.20)
+        cfg["FLOW_IMBALANCE_BODY_DAMPING"] = f("forecast_flow_imbalance_body_damping", 0.0)
         cfg["ZONE_BRAKE_ATR_DISTANCE"] = f("forecast_zone_brake_atr_distance", 0.5)
-        cfg["ZONE_BRAKE_MIN_BODY_MULT"] = f("forecast_zone_brake_min_body_mult", 0.40)
+        cfg["ZONE_BRAKE_MIN_BODY_MULT"] = f("forecast_zone_brake_min_body_mult", 1.0)
         cfg["BREAKOUT_GATE_WICK_BLEED"] = f("forecast_breakout_gate_wick_bleed", 0.6)
 
         # Per-asset dollar-Greek activity scale — see forecast.py's own

@@ -147,10 +147,10 @@ WEEKEND_TAIL_RISK_MULT = 1.3
 # liquidity, session_activity_regime, _atr14) while keeping its own
 # per-step math self-contained.
 FLOW_IMBALANCE_NEUTRAL_THRESHOLD = 0.05
-FLOW_IMBALANCE_BODY_DAMPING = 0.20
+FLOW_IMBALANCE_BODY_DAMPING = 0.0
 
 ZONE_BRAKE_ATR_DISTANCE = 0.5
-ZONE_BRAKE_MIN_MOVE_MULT = 0.40
+ZONE_BRAKE_MIN_MOVE_MULT = 1.0
 
 
 def _zone_brake_mult(distance, atr, atr_distance, min_mult):

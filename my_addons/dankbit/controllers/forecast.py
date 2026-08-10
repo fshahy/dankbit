@@ -1610,12 +1610,13 @@ SWEEP_REJECTION_BODY_BOOST = 1.35
 # confidence decay, etc.) is deliberately deferred, scoped separately.
 # ============================================================
 FLOW_IMBALANCE_NEUTRAL_THRESHOLD = 0.05
-FLOW_IMBALANCE_BODY_DAMPING = 0.20
+FLOW_IMBALANCE_BODY_DAMPING = 0.0
 
 ZONE_BRAKE_ATR_DISTANCE = 0.5
-ZONE_BRAKE_MIN_BODY_MULT = 0.40
+ZONE_BRAKE_MIN_BODY_MULT = 1.0
 
 BREAKOUT_GATE_WICK_BLEED = 0.6
+BREAKOUT_GATE_ENABLED = False
 
 
 def flow_imbalance(long_count, short_count):
@@ -2222,10 +2223,10 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         pending_lower_bleed = 0.0
         upper_gate_open = consensus["confirms_top"] and consensus["consensus_direction"] > 0 and flow["impulse"] >= 0
         lower_gate_open = consensus["confirms_low"] and consensus["consensus_direction"] < 0 and flow["impulse"] <= 0
-        if top and projected_open <= top and projected_close > top and not upper_gate_open:
+        if BREAKOUT_GATE_ENABLED and top and projected_open <= top and projected_close > top and not upper_gate_open:
             pending_upper_bleed = (projected_close - top) * BREAKOUT_GATE_WICK_BLEED
             projected_close = top
-        if low and projected_open >= low and projected_close < low and not lower_gate_open:
+        if BREAKOUT_GATE_ENABLED and low and projected_open >= low and projected_close < low and not lower_gate_open:
             pending_lower_bleed = (low - projected_close) * BREAKOUT_GATE_WICK_BLEED
             projected_close = low
 
