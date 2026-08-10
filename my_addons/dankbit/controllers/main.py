@@ -2713,19 +2713,22 @@ class ChartController(http.Controller):
         this route just reads the latest persisted dankbit.5a row for
         `asset` (dankbit.5a.latest()) and serves it — a cheap search()
         instead of a multi-second curve rebuild on every page load/poll.
-        Response shape is unchanged from the old live-computed version
-        (see dankbit.5a.to_dict()): {"asset", "generated_at" (epoch ms,
-        None if no row exists yet), "scopes": {"nearest"/"weekly"/
-        "monthly"/"all"/"day": {"instrument" (None for "all"/"day", or
-        if that scope's own configured/resolved expiry is missing),
-        "avg_price", "avg_value", "trade_count"}}}. "nearest" is
-        isolated to the single soonest-expiring active instrument;
-        "weekly"/"monthly" are cumulative through the configured
-        weekly_expiry/monthly_expiry instrument; "all" is every one of
-        `asset`'s own non-expired instruments with no expiry cutoff;
-        "day" is that same "all" domain further restricted to trades
-        with deribit_ts in the trailing 24h (a rolling window, not a
-        UTC-midnight boundary) — see dankbit.5a.compute_and_create()
+        Response shape (see dankbit.5a.to_dict()): {"asset",
+        "generated_at" (epoch ms, None if no row exists yet), "scopes":
+        {"all"/"hour4"/"hour8"/"nearest_hour4"/"nearest_hour8":
+        {"instrument", "avg_price", "avg_value", "trade_count"}}}.
+        "all" is every one of `asset`'s own non-expired instruments
+        with no expiry cutoff; "hour4"/"hour8" are that same domain
+        further restricted to trades with deribit_ts in the trailing
+        4h/8h respectively (a rolling window, not a UTC-midnight
+        boundary) — "instrument" is always None for these 3, since
+        each spans every non-expired instrument at once, no single
+        instrument to report. "nearest_hour4"/"nearest_hour8" are
+        instead isolated to the single soonest-expiring active
+        instrument (same resolution `dankbit.bands.nearest_expiry()`
+        uses — "instrument" carries that instrument string, or None if
+        there's no active expiry at all), over those same 2
+        trailing-hours windows — see dankbit.5a.compute_and_create()
         for the exact domains. No row exists yet immediately after
         install, before the first cron tick — dankbit.5a.empty_dict()
         serves the same all-0.0/0 "absent" shape every other
@@ -2750,12 +2753,16 @@ class ChartController(http.Controller):
         """Standalone TradingView page — structurally the simplest of the
         Deribit-perpetual-candle standalone pages (/gt, /4l, /mwa): no
         Expiry/Window dropdown at all, since it draws all 5 of this
-        addon's standing expiry scopes at once (see five_a_gamma_json) —
-        "Nearest" (black/axisBlack), "Weekly" (blue), "Monthly" (orange),
-        "All" (teal), "Last 24h" (violet) — rather than letting the user
-        pick one. Unlike every other Deribit-perpetual-candle page in
-        this addon, the 5 gamma lines are no longer computed live per
-        request: dankbit.5a's own 15-minute cron
+        page's own standing scopes at once (see five_a_gamma_json) —
+        "All" (orange), "Last 4h" (blue), "Last 8h" (violet), "Nearest
+        4h" (green), "Nearest 8h" (red) — rather than letting the user
+        pick one. A scope is only drawn when its own average gamma
+        VALUE is negative (client-side rule in the template's
+        drawScopeLine() — a positive-value scope is computed same as
+        any other but simply skipped on the chart). Unlike every other
+        Deribit-perpetual-candle page in this addon, the gamma lines
+        are no longer computed live per request: dankbit.5a's own
+        15-minute cron
         (dankbit.5a.compute_snapshot()) does that work in the
         background, and five_a_gamma_json just reads the latest
         persisted row per asset — cheap enough to poll on

@@ -2,7 +2,7 @@
 	<!-- Standalone, minimal TradingView page for /5a/<asset> — its own file,
 	     structurally the simplest of the Deribit-perpetual-candle standalone
 	     pages (/gt, /4l, /mwa): no Expiry/Window dropdown at all, since it
-	     draws all 5 of this addon's standing expiry scopes at once rather
+	     draws all 5 of this page's own standing scopes at once rather
 	     than letting the user pick one. "Timeframe" dropdown (15m/1h/4h/1d,
 	     4h default — same options/default as /4l/<asset>'s own), candles
 	     from Deribit perpetual futures (dankbit.trade.
@@ -10,15 +10,22 @@
 	     proxy /gt/<asset>, /4l/<asset>, and /mwa/<asset> use) — the candle
 	     series alone keeps the normal 5s auto-refresh every TradingView page
 	     in this addon uses. 5 horizontal reference lines from
-	     /api/5a-gamma's own latest reading — Nearest (black/axisBlack),
-	     Weekly (blue), Monthly (orange), All (teal), Last 24h (violet, the
-	     same "all non-expired instruments" domain as All, restricted
-	     server-side to trades with deribit_ts in the trailing 24h) — one
-	     per this addon's 5 standing expiry scopes (see five_a_gamma_json) —
+	     /api/5a-gamma's own latest reading — All (orange, every one of
+	     the asset's own non-expired instruments, no expiry cutoff),
+	     Last 4h and Last 8h (blue/violet, that same "all non-expired
+	     instruments" domain further restricted server-side to trades
+	     with deribit_ts in the trailing 4h/8h), and Nearest 4h/Nearest 8h
+	     (green/red — isolated to the single soonest-expiring active
+	     instrument instead, over those same 2 trailing-hours windows) —
+	     one per this page's 5 standing scopes (see five_a_gamma_json) —
 	     each the average of that scope's own 4 leg gamma PRICE levels
 	     (BCG/BPG/SCG/SPG), same math as the "AVG" line /4l/<asset> and
-	     /mwa/<asset> draw for their own single selected scope. Unlike
-	     every other Deribit-perpetual-candle page in this addon,
+	     /mwa/<asset> draw for their own single selected scope. A scope's
+	     line is only drawn when its own average gamma VALUE is negative
+	     (drawScopeLine()'s own rule, applied uniformly to all 5 — a
+	     scope with a positive or absent value is simply skipped, not
+	     drawn as some other visual state). Unlike every other
+	     Deribit-perpetual-candle page in this addon,
 	     /api/5a-gamma no longer computes this live per request — the
 	     dankbit.5a model's own 15-minute cron
 	     (dankbit.5a.compute_snapshot()) does that work in the
@@ -96,7 +103,7 @@
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
 					/* "Settings" button/dialog — color pickers for the 5 scope
-					   lines (Nearest/Weekly/Monthly/All/Last 24h). Plain
+					   lines (All/Last 4h/Last 8h/Nearest 4h/Nearest 8h). Plain
 					   centered overlay + box, same hand-rolled approach as the
 					   Delta/Gamma Chart's own "Chart Appearance" modal
 					   (dankbit_templates.xml), trimmed to just color rows
@@ -200,11 +207,11 @@
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Gamma Lines</div>
-							<label class="color-row">Nearest <input type="color" id="color-nearest"/></label>
-							<label class="color-row">Weekly <input type="color" id="color-weekly"/></label>
-							<label class="color-row">Monthly <input type="color" id="color-monthly"/></label>
 							<label class="color-row">All <input type="color" id="color-all"/></label>
-							<label class="color-row">Last 24h <input type="color" id="color-day"/></label>
+							<label class="color-row">Last 4h <input type="color" id="color-hour4"/></label>
+							<label class="color-row">Last 8h <input type="color" id="color-hour8"/></label>
+							<label class="color-row">Nearest 4h <input type="color" id="color-nearest_hour4"/></label>
+							<label class="color-row">Nearest 8h <input type="color" id="color-nearest_hour8"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -275,7 +282,7 @@
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
-					// "Settings" button/dialog — user-pickable colors for the 5
+					// "Settings" button/dialog — user-pickable colors for the 3
 					// scope lines, persisted per-browser via localStorage (own
 					// storage key, independent of the Delta/Gamma Chart's own
 					// "Chart Appearance" palette — dankbit_templates.xml). One
@@ -285,13 +292,15 @@
 					// same "kind" of value (average gamma), just over 5
 					// different trade domains, so each gets its own hue
 					// rather than reusing a leg-role color scheme.
+					// None defaults to black, so unlike this page's earlier
+					// Nearest line, no dark-mode color swap is needed here.
 					const COLOR_STORAGE_KEY = 'dankbit_5a_chart_colors';
 					const DEFAULT_COLORS = {
-						nearest: '#000000',
-						weekly:  '#1976d2', // blue
-						monthly: '#2e7d32', // green — same hue the Bands High/Resistance line uses
-						all:     '#fb8c00', // orange
-						day:     '#8e24aa', // violet — "day" scope: same "all non-expired instruments" domain as All, restricted server-side to the trailing 24h of trades
+						all:          '#fb8c00', // orange — every non-expired instrument, no expiry cutoff, no trailing-hours bound
+						hour4:        '#1976d2', // blue — same "all" domain, restricted to the trailing 4h of trades
+						hour8:        '#8e24aa', // violet — same "all" domain, restricted to the trailing 8h of trades
+						nearest_hour4: '#2e7d32', // green — isolated to the nearest active instrument, restricted to the trailing 4h of trades
+						nearest_hour8: '#c62828', // red — same nearest-instrument domain, restricted to the trailing 8h of trades
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -300,17 +309,6 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
-
-					// Black would vanish into the dark-mode chart background
-					// (#000000) — swap the Nearest line to a lighter gray
-					// there, same axisBlack()-style convention every other
-					// "plain black" line in this addon uses, but only while
-					// the user hasn't picked their own color for it (an
-					// explicit user choice is respected as-is in either theme).
-					function nearestLineColor() {
-						if (DARK_MODE && chartColors.nearest === DEFAULT_COLORS.nearest) return '#e8e8e8';
-						return chartColors.nearest;
-					}
 
 					function openSettingsModal() {
 						Object.keys(DEFAULT_COLORS).forEach(key => {
@@ -400,7 +398,8 @@
 					// cheap single-row lookup, not the per-request
 					// options.per_leg_gamma() computation this page used to
 					// trigger directly (see init() below).
-					let nearestPriceLine = null, weeklyPriceLine = null, monthlyPriceLine = null, allPriceLine = null, dayPriceLine = null;
+					let allPriceLine = null, hour4PriceLine = null, hour8PriceLine = null,
+						nearestHour4PriceLine = null, nearestHour8PriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -560,14 +559,18 @@
 					// (same convention every other gamma_band/smart_liq_*_price
 					// field in this addon uses — see five_a_gamma_json). Title
 					// carries the scope's own resolved instrument, if any
-					// (None for "all"/"day", or for weekly/monthly when that
-					// expiry isn't configured), followed by the averaged
-					// gamma VALUE — same formatAbbreviated() the other
-					// standalone pages' own per-leg/AVG lines already use
-					// for their own value.
+					// (None for All/Last 4h/Last 8h, which span every
+					// non-expired instrument at once; the resolved nearest
+					// instrument for Nearest 4h/Nearest 8h), followed by the
+					// averaged gamma VALUE — same formatAbbreviated() the
+					// other standalone pages' own per-leg/AVG lines already
+					// use for their own value. General rule for every line on
+					// this chart: only drawn when its own average gamma VALUE
+					// is negative — a positive-value scope is still computed
+					// and served by the API, just not drawn here.
 					function drawScopeLine(existingLine, scope, label, color) {
 						if (existingLine) { series.removePriceLine(existingLine); }
-						if (!scope || !scope.avg_price) return null;
+						if (!scope || !scope.avg_price || scope.avg_value >= 0) return null;
 						const title = label + (scope.instrument ? ' ' + scope.instrument : '') + ' AVG ' + formatAbbreviated(scope.avg_value);
 						return series.createPriceLine({
 							price: scope.avg_price, color, lineWidth: 2,
@@ -593,11 +596,11 @@
 						try {
 							const data = await (await fetch(fiveAGammaUrl())).json();
 							const scopes = data.scopes || {};
-							nearestPriceLine = drawScopeLine(nearestPriceLine, scopes.nearest, 'Nearest', nearestLineColor());
-							weeklyPriceLine  = drawScopeLine(weeklyPriceLine,  scopes.weekly,  'Weekly',  chartColors.weekly);
-							monthlyPriceLine = drawScopeLine(monthlyPriceLine, scopes.monthly, 'Monthly', chartColors.monthly);
-							allPriceLine     = drawScopeLine(allPriceLine,     scopes.all,     'All',     chartColors.all);
-							dayPriceLine     = drawScopeLine(dayPriceLine,     scopes.day,     'Last 24h', chartColors.day);
+							allPriceLine          = drawScopeLine(allPriceLine,          scopes.all,          'All',        chartColors.all);
+							hour4PriceLine         = drawScopeLine(hour4PriceLine,         scopes.hour4,        'Last 4h',    chartColors.hour4);
+							hour8PriceLine         = drawScopeLine(hour8PriceLine,         scopes.hour8,        'Last 8h',    chartColors.hour8);
+							nearestHour4PriceLine  = drawScopeLine(nearestHour4PriceLine,  scopes.nearest_hour4, 'Nearest 4h', chartColors.nearest_hour4);
+							nearestHour8PriceLine  = drawScopeLine(nearestHour8PriceLine,  scopes.nearest_hour8, 'Nearest 8h', chartColors.nearest_hour8);
 						} finally {
 							hideSpinner();
 						}

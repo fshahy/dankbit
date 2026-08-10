@@ -11,33 +11,33 @@
                         <field name="computed_at" />
                         <field name="asset" />
                     </group>
-                    <group string="Nearest">
-                        <field name="nearest_instrument" />
-                        <field name="nearest_avg_price" />
-                        <field name="nearest_avg_value" />
-                        <field name="nearest_trade_count" />
-                    </group>
-                    <group string="Weekly">
-                        <field name="weekly_instrument" />
-                        <field name="weekly_avg_price" />
-                        <field name="weekly_avg_value" />
-                        <field name="weekly_trade_count" />
-                    </group>
-                    <group string="Monthly">
-                        <field name="monthly_instrument" />
-                        <field name="monthly_avg_price" />
-                        <field name="monthly_avg_value" />
-                        <field name="monthly_trade_count" />
-                    </group>
                     <group string="All">
                         <field name="all_avg_price" />
                         <field name="all_avg_value" />
                         <field name="all_trade_count" />
                     </group>
-                    <group string="Last 24h">
-                        <field name="day_avg_price" />
-                        <field name="day_avg_value" />
-                        <field name="day_trade_count" />
+                    <group string="Last 4h">
+                        <field name="hour4_avg_price" />
+                        <field name="hour4_avg_value" />
+                        <field name="hour4_trade_count" />
+                    </group>
+                    <group string="Last 8h">
+                        <field name="hour8_avg_price" />
+                        <field name="hour8_avg_value" />
+                        <field name="hour8_trade_count" />
+                    </group>
+                    <group string="Nearest">
+                        <field name="nearest_instrument" />
+                    </group>
+                    <group string="Nearest 4h">
+                        <field name="nearest_hour4_avg_price" />
+                        <field name="nearest_hour4_avg_value" />
+                        <field name="nearest_hour4_trade_count" />
+                    </group>
+                    <group string="Nearest 8h">
+                        <field name="nearest_hour8_avg_price" />
+                        <field name="nearest_hour8_avg_value" />
+                        <field name="nearest_hour8_trade_count" />
                     </group>
                 </sheet>
             </form>
@@ -52,21 +52,21 @@
                 <field name="computed_at" />
                 <field name="asset" />
                 <field name="nearest_instrument" />
-                <field name="nearest_avg_price" />
-                <field name="weekly_avg_price" />
-                <field name="monthly_avg_price" />
                 <field name="all_avg_price" />
-                <field name="day_avg_price" />
-                <field name="nearest_avg_value" optional="hide" />
-                <field name="weekly_avg_value" optional="hide" />
-                <field name="monthly_avg_value" optional="hide" />
+                <field name="hour4_avg_price" />
+                <field name="hour8_avg_price" />
+                <field name="nearest_hour4_avg_price" />
+                <field name="nearest_hour8_avg_price" />
                 <field name="all_avg_value" optional="hide" />
-                <field name="day_avg_value" optional="hide" />
-                <field name="nearest_trade_count" optional="hide" />
-                <field name="weekly_trade_count" optional="hide" />
-                <field name="monthly_trade_count" optional="hide" />
+                <field name="hour4_avg_value" optional="hide" />
+                <field name="hour8_avg_value" optional="hide" />
+                <field name="nearest_hour4_avg_value" optional="hide" />
+                <field name="nearest_hour8_avg_value" optional="hide" />
                 <field name="all_trade_count" optional="hide" />
-                <field name="day_trade_count" optional="hide" />
+                <field name="hour4_trade_count" optional="hide" />
+                <field name="hour8_trade_count" optional="hide" />
+                <field name="nearest_hour4_trade_count" optional="hide" />
+                <field name="nearest_hour8_trade_count" optional="hide" />
             </list>
         </field>
     </record>

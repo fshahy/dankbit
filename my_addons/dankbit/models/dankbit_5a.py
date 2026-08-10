@@ -11,7 +11,7 @@ from ..controllers import options as options_lib
 
 _logger = logging.getLogger(__name__)
 
-_SCOPES = ("nearest", "weekly", "monthly", "all", "day")
+_SCOPES = ("all", "hour4", "hour8", "nearest_hour4", "nearest_hour8")
 
 
 class Dankbit5A(models.Model):
@@ -20,15 +20,18 @@ class Dankbit5A(models.Model):
     _order = "asset, computed_at desc"
 
     """Append-only snapshot backing /5a/<asset>'s 5 horizontal gamma
-    lines (Nearest/Weekly/Monthly/All/Last 24h) — same "create a brand
-    new row every cron tick" shape as dankbit.live.band, not the
+    lines (All/Last 4h/Last 8h/Nearest 4h/Nearest 8h) — same "create a
+    brand new row every cron tick" shape as dankbit.live.band, not the
     continuously-refined-then-frozen upsert dankbit.bands uses per
-    instrument, since there's no single "instrument" this model is
-    keyed on (the All/Last 24h scopes span every non-expired
-    instrument at once).
+    instrument. All/Last 4h/Last 8h have no single "instrument" they're
+    keyed on (every non-expired instrument at once, just over different
+    trailing-hours windows); Nearest 4h/Nearest 8h are isolated to the
+    single soonest-expiring active instrument instead, same resolution
+    `dankbit.bands.nearest_expiry()` uses, over those same two
+    trailing-hours windows.
 
     Exists because /api/5a-gamma/<asset> (five_a_gamma_json) used to
-    compute all 5 scopes fresh on every request via up to 5 separate
+    compute all scopes fresh on every request via separate
     options.per_leg_gamma() calls, most over an unbounded trade
     window — the heaviest single request in this addon. compute_and_create()
     now does that same computation on a 15-minute cron
@@ -39,36 +42,39 @@ class Dankbit5A(models.Model):
     asset = fields.Char(required=True, index=True)
     computed_at = fields.Datetime(string="Computed At", default=fields.Datetime.now, index=True)
 
-    nearest_instrument = fields.Char(string="Nearest Instrument")
-    nearest_avg_price = fields.Float(string="Nearest Avg Price", digits=(16, 4))
-    nearest_avg_value = fields.Float(string="Nearest Avg Value", digits=(16, 4))
-    nearest_trade_count = fields.Integer(string="Nearest Trade Count")
-
-    weekly_instrument = fields.Char(string="Weekly Instrument")
-    weekly_avg_price = fields.Float(string="Weekly Avg Price", digits=(16, 4))
-    weekly_avg_value = fields.Float(string="Weekly Avg Value", digits=(16, 4))
-    weekly_trade_count = fields.Integer(string="Weekly Trade Count")
-
-    monthly_instrument = fields.Char(string="Monthly Instrument")
-    monthly_avg_price = fields.Float(string="Monthly Avg Price", digits=(16, 4))
-    monthly_avg_value = fields.Float(string="Monthly Avg Value", digits=(16, 4))
-    monthly_trade_count = fields.Integer(string="Monthly Trade Count")
-
-    # "all"/"day" span every non-expired instrument at once — no single
-    # instrument to report, same None-instrument convention
-    # five_a_gamma_json's own scope_from_trades() always used for these 2.
+    # All/Last 4h/Last 8h span every non-expired instrument at once —
+    # no single instrument to report, same None-instrument convention
+    # this model has always used for its multi-instrument scopes.
     all_avg_price = fields.Float(string="All Avg Price", digits=(16, 4))
     all_avg_value = fields.Float(string="All Avg Value", digits=(16, 4))
     all_trade_count = fields.Integer(string="All Trade Count")
 
-    day_avg_price = fields.Float(string="Last 24h Avg Price", digits=(16, 4))
-    day_avg_value = fields.Float(string="Last 24h Avg Value", digits=(16, 4))
-    day_trade_count = fields.Integer(string="Last 24h Trade Count")
+    hour4_avg_price = fields.Float(string="Last 4h Avg Price", digits=(16, 4))
+    hour4_avg_value = fields.Float(string="Last 4h Avg Value", digits=(16, 4))
+    hour4_trade_count = fields.Integer(string="Last 4h Trade Count")
+
+    hour8_avg_price = fields.Float(string="Last 8h Avg Price", digits=(16, 4))
+    hour8_avg_value = fields.Float(string="Last 8h Avg Value", digits=(16, 4))
+    hour8_trade_count = fields.Integer(string="Last 8h Trade Count")
+
+    # Nearest 4h/Nearest 8h are both isolated to this same single
+    # soonest-expiring active instrument — one shared instrument field
+    # rather than two, since a given row can only ever have one
+    # "nearest" instrument at the moment it was computed.
+    nearest_instrument = fields.Char(string="Nearest Instrument")
+
+    nearest_hour4_avg_price = fields.Float(string="Nearest 4h Avg Price", digits=(16, 4))
+    nearest_hour4_avg_value = fields.Float(string="Nearest 4h Avg Value", digits=(16, 4))
+    nearest_hour4_trade_count = fields.Integer(string="Nearest 4h Trade Count")
+
+    nearest_hour8_avg_price = fields.Float(string="Nearest 8h Avg Price", digits=(16, 4))
+    nearest_hour8_avg_value = fields.Float(string="Nearest 8h Avg Value", digits=(16, 4))
+    nearest_hour8_trade_count = fields.Integer(string="Nearest 8h Trade Count")
 
     def compute_and_create(self, asset):
-        """Same 5-scope average-gamma computation five_a_gamma_json
-        (main.py) used to run inline on every request — moved here so
-        the 15-minute cron (compute_snapshot()) is the only thing that
+        """Same average-gamma computation five_a_gamma_json (main.py)
+        used to run inline on every request — moved here so the
+        15-minute cron (compute_snapshot()) is the only thing that
         ever pays for it now. Always creates a new row, even when a
         scope has zero trades (reported as the addon's usual 0.0/0
         "absent" sentinel, same as scope_from_trades() always did) —
@@ -104,76 +110,72 @@ class Dankbit5A(models.Model):
             return avg_price, avg_value, len(trades)
 
         # Naive UTC, same as every other `expiration` domain comparison
-        # in this addon.
-        def cumulative_through(config_key):
-            instrument = icp.get_param(config_key, default="").upper()
-            parts = instrument.split("-", 1) if instrument else []
-            if len(parts) != 2:
-                return self.env["dankbit.trade"], None
-            try:
-                expiry_dt = datetime.strptime(parts[1], "%d%b%y").replace(hour=8)
-            except ValueError:
-                return self.env["dankbit.trade"], None
-            domain = [
-                ("name", "=ilike", f"{asset}-%"),
-                ("expiration", ">=", as_of),
-                ("expiration", "<=", expiry_dt),
-            ]
-            return self.env["dankbit.trade"].search(domain), instrument
-
-        bands_model = self.env["dankbit.bands"]
-        nearest_expirations = bands_model._distinct_expirations(asset, as_of, 1)
-        nearest_instrument = bands_model._format_instrument(asset, nearest_expirations[0]) if nearest_expirations else None
-        nearest_trades = (
-            self.env["dankbit.trade"].with_context(active_test=False).search([("name", "=ilike", f"{nearest_instrument}-%")])
-            if nearest_instrument else self.env["dankbit.trade"]
-        )
-
-        weekly_key = "dankbit.eth_weekly_expiry" if asset == "ETH" else "dankbit.weekly_expiry"
-        monthly_key = "dankbit.eth_monthly_expiry" if asset == "ETH" else "dankbit.monthly_expiry"
-        weekly_trades, weekly_instrument = cumulative_through(weekly_key)
-        monthly_trades, monthly_instrument = cumulative_through(monthly_key)
-
+        # in this addon. Every non-expired instrument for `asset`, no
+        # expiry cutoff.
         all_trades = self.env["dankbit.trade"].search([
             ("name", "=ilike", f"{asset}-%"),
             ("expiration", ">=", as_of),
         ])
         # Same "all non-expired instruments" domain as `all`, further
-        # restricted to a rolling trailing-24h deribit_ts window (not a
-        # UTC-midnight boundary).
-        day_trades = self.env["dankbit.trade"].search([
+        # restricted to a rolling trailing-N-hour deribit_ts window (not
+        # a UTC-midnight boundary).
+        hour4_trades = self.env["dankbit.trade"].search([
             ("name", "=ilike", f"{asset}-%"),
             ("expiration", ">=", as_of),
-            ("deribit_ts", ">=", as_of - timedelta(hours=24)),
+            ("deribit_ts", ">=", as_of - timedelta(hours=4)),
+        ])
+        hour8_trades = self.env["dankbit.trade"].search([
+            ("name", "=ilike", f"{asset}-%"),
+            ("expiration", ">=", as_of),
+            ("deribit_ts", ">=", as_of - timedelta(hours=8)),
         ])
 
-        nearest_price, nearest_value, nearest_count = scope_from_trades(nearest_trades)
-        weekly_price, weekly_value, weekly_count = scope_from_trades(weekly_trades)
-        monthly_price, monthly_value, monthly_count = scope_from_trades(monthly_trades)
+        # Nearest 4h/Nearest 8h — isolated to the single soonest-expiring
+        # active instrument (same resolution dankbit.bands.nearest_expiry()
+        # uses), restricted to the same 2 trailing-hours windows as
+        # hour4_trades/hour8_trades above rather than every non-expired
+        # instrument.
+        bands_model = self.env["dankbit.bands"]
+        nearest_expirations = bands_model._distinct_expirations(asset, as_of, 1)
+        nearest_instrument = bands_model._format_instrument(asset, nearest_expirations[0]) if nearest_expirations else None
+        if nearest_instrument:
+            nearest_domain_base = self.env["dankbit.trade"].with_context(active_test=False)
+            nearest_hour4_trades = nearest_domain_base.search([
+                ("name", "=ilike", f"{nearest_instrument}-%"),
+                ("deribit_ts", ">=", as_of - timedelta(hours=4)),
+            ])
+            nearest_hour8_trades = nearest_domain_base.search([
+                ("name", "=ilike", f"{nearest_instrument}-%"),
+                ("deribit_ts", ">=", as_of - timedelta(hours=8)),
+            ])
+        else:
+            nearest_hour4_trades = nearest_hour8_trades = self.env["dankbit.trade"]
+
         all_price, all_value, all_count = scope_from_trades(all_trades)
-        day_price, day_value, day_count = scope_from_trades(day_trades)
+        hour4_price, hour4_value, hour4_count = scope_from_trades(hour4_trades)
+        hour8_price, hour8_value, hour8_count = scope_from_trades(hour8_trades)
+        nearest_hour4_price, nearest_hour4_value, nearest_hour4_count = scope_from_trades(nearest_hour4_trades)
+        nearest_hour8_price, nearest_hour8_value, nearest_hour8_count = scope_from_trades(nearest_hour8_trades)
 
         return self.sudo().create({
             "asset": asset,
             "computed_at": as_of,
-            "nearest_instrument": nearest_instrument,
-            "nearest_avg_price": nearest_price,
-            "nearest_avg_value": nearest_value,
-            "nearest_trade_count": nearest_count,
-            "weekly_instrument": weekly_instrument,
-            "weekly_avg_price": weekly_price,
-            "weekly_avg_value": weekly_value,
-            "weekly_trade_count": weekly_count,
-            "monthly_instrument": monthly_instrument,
-            "monthly_avg_price": monthly_price,
-            "monthly_avg_value": monthly_value,
-            "monthly_trade_count": monthly_count,
             "all_avg_price": all_price,
             "all_avg_value": all_value,
             "all_trade_count": all_count,
-            "day_avg_price": day_price,
-            "day_avg_value": day_value,
-            "day_trade_count": day_count,
+            "hour4_avg_price": hour4_price,
+            "hour4_avg_value": hour4_value,
+            "hour4_trade_count": hour4_count,
+            "hour8_avg_price": hour8_price,
+            "hour8_avg_value": hour8_value,
+            "hour8_trade_count": hour8_count,
+            "nearest_instrument": nearest_instrument,
+            "nearest_hour4_avg_price": nearest_hour4_price,
+            "nearest_hour4_avg_value": nearest_hour4_value,
+            "nearest_hour4_trade_count": nearest_hour4_count,
+            "nearest_hour8_avg_price": nearest_hour8_price,
+            "nearest_hour8_avg_value": nearest_hour8_value,
+            "nearest_hour8_trade_count": nearest_hour8_count,
         })
 
     def compute_snapshot(self):
@@ -210,35 +212,35 @@ class Dankbit5A(models.Model):
             "asset": self.asset,
             "generated_at": generated_at,
             "scopes": {
-                "nearest": {
-                    "instrument": self.nearest_instrument or None,
-                    "avg_price": self.nearest_avg_price,
-                    "avg_value": self.nearest_avg_value,
-                    "trade_count": self.nearest_trade_count,
-                },
-                "weekly": {
-                    "instrument": self.weekly_instrument or None,
-                    "avg_price": self.weekly_avg_price,
-                    "avg_value": self.weekly_avg_value,
-                    "trade_count": self.weekly_trade_count,
-                },
-                "monthly": {
-                    "instrument": self.monthly_instrument or None,
-                    "avg_price": self.monthly_avg_price,
-                    "avg_value": self.monthly_avg_value,
-                    "trade_count": self.monthly_trade_count,
-                },
                 "all": {
                     "instrument": None,
                     "avg_price": self.all_avg_price,
                     "avg_value": self.all_avg_value,
                     "trade_count": self.all_trade_count,
                 },
-                "day": {
+                "hour4": {
                     "instrument": None,
-                    "avg_price": self.day_avg_price,
-                    "avg_value": self.day_avg_value,
-                    "trade_count": self.day_trade_count,
+                    "avg_price": self.hour4_avg_price,
+                    "avg_value": self.hour4_avg_value,
+                    "trade_count": self.hour4_trade_count,
+                },
+                "hour8": {
+                    "instrument": None,
+                    "avg_price": self.hour8_avg_price,
+                    "avg_value": self.hour8_avg_value,
+                    "trade_count": self.hour8_trade_count,
+                },
+                "nearest_hour4": {
+                    "instrument": self.nearest_instrument or None,
+                    "avg_price": self.nearest_hour4_avg_price,
+                    "avg_value": self.nearest_hour4_avg_value,
+                    "trade_count": self.nearest_hour4_trade_count,
+                },
+                "nearest_hour8": {
+                    "instrument": self.nearest_instrument or None,
+                    "avg_price": self.nearest_hour8_avg_price,
+                    "avg_value": self.nearest_hour8_avg_value,
+                    "trade_count": self.nearest_hour8_trade_count,
                 },
             },
         }
