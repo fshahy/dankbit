@@ -6,7 +6,7 @@
         <field name="arch" type="xml">
             <list decoration-success="state == 'tp'" decoration-danger="state == 'sl'" decoration-muted="kind == 'no_trade'">
                 <field name="evaluated_at"/><field name="asset"/><field name="kind"/>
-                <field name="state"/><field name="setup_path"/><field name="plan_status"/><field name="setup_stage"/><field name="direction"/><field name="entry_model"/><field name="rtm_structure"/><field name="rtm_score"/><field name="rtm_touch_count"/><field name="trend_daily"/><field name="trend_4h"/><field name="trend_1h"/><field name="final_score"/>
+                <field name="state"/><field name="setup_path"/><field name="plan_status"/><field name="setup_stage"/><field name="direction"/><field name="entry_model"/><field name="rtm_structure"/><field name="rtm_score"/><field name="rtm_touch_count"/><field name="trend_daily"/><field name="trend_daily_tactical"/><field name="trend_4h"/><field name="trend_1h"/><field name="final_score"/>
                 <field name="quality_score"/><field name="entry"/><field name="stop_loss"/>
                 <field name="target"/><field name="risk_reward"/><field name="swing_level"/><field name="result_r"/>
             </list>
@@ -23,7 +23,7 @@
                     <group string="Entry timing"><field name="setup_path"/><field name="plan_status"/><field name="setup_stage"/><field name="trigger_level"/><field name="trigger_basis"/><field name="liquidity_swept"/></group>
                     <group string="Breakout-Retest plan"><field name="breakout_level"/><field name="breakout_at"/><field name="entry_zone_low"/><field name="entry_zone_high"/><field name="invalidation_level"/><field name="target_2"/><field name="plan_provisional"/></group>
                     <group string="RTM entry filter"><field name="entry_model"/><field name="rtm_structure"/><field name="rtm_score"/><field name="rtm_zone_type"/><field name="rtm_zone_low"/><field name="rtm_zone_high"/><field name="rtm_touch_count"/><field name="rtm_fresh"/><field name="rtm_base_candles"/><field name="rtm_departure_score"/><field name="rtm_compression"/><field name="rtm_gap"/><field name="rtm_nested"/><field name="rtm_opposing_structure"/><field name="rtm_opposing_level"/><field name="rtm_path_clear"/></group>
-                    <group string="Multi-timeframe and options direction"><field name="trend_daily"/><field name="trend_score_daily"/><field name="trend_4h"/><field name="trend_score_4h"/><field name="trend_1h"/><field name="gamma_direction_score"/><field name="greek_direction_score"/></group>
+                    <group string="Multi-timeframe and options direction"><field name="trend_daily" string="Daily Macro"/><field name="trend_score_daily" string="Daily Macro Score"/><field name="trend_daily_tactical"/><field name="trend_score_daily_tactical"/><field name="trend_4h"/><field name="trend_score_4h"/><field name="trend_1h"/><field name="gamma_direction_score"/><field name="greek_direction_score"/></group>
                     <group string="Trade plan"><field name="entry"/><field name="stop_loss"/><field name="target"/><field name="target_2"/><field name="risk_reward"/><field name="swing_level"/><field name="atr_4h"/><field name="stop_basis"/><field name="expires_at"/><field name="result_r"/></group>
                     <group string="Audit"><field name="anchor_coverage_4h"/><field name="anchor_coverage_1h"/><field name="activity_regime"/><field name="reason"/><field name="snapshot_json" widget="text"/></group>
                 </sheet>

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Auditable Thales signal bot.
 
-Closed Daily and 4H price trends form the hard direction gate. Forecast,
-moving Greek concentration and option structure confirm the setup; closed 1H
-price action times it. Every decision is append-only so later forecast
-revisions cannot rewrite the forward test.
+Daily macro/tactical and 4H price trends own direction. Forecast, moving
+Greek concentration and option structure grade the setup; closed 1H price
+action times it. Every decision is append-only so later revisions cannot
+rewrite the forward test.
 """
 
 import json
@@ -50,6 +50,9 @@ class DankbitSignal(models.Model):
     trend_daily = fields.Selection([
         ("up", "Up"), ("down", "Down"), ("neutral", "Neutral"),
     ], default="neutral", index=True)
+    trend_daily_tactical = fields.Selection([
+        ("up", "Up"), ("down", "Down"), ("neutral", "Neutral"),
+    ], default="neutral", index=True)
     trend_4h = fields.Selection([
         ("up", "Up"), ("down", "Down"), ("neutral", "Neutral"),
     ], default="neutral", index=True)
@@ -57,6 +60,7 @@ class DankbitSignal(models.Model):
         ("up", "Up"), ("down", "Down"), ("neutral", "Neutral"),
     ], default="neutral", index=True)
     trend_score_daily = fields.Float(digits=(16, 4))
+    trend_score_daily_tactical = fields.Float(digits=(16, 4))
     trend_score_4h = fields.Float(digits=(16, 4))
     gamma_direction_score = fields.Float(digits=(16, 4))
     greek_direction_score = fields.Float(digits=(16, 4))
@@ -107,6 +111,7 @@ class DankbitSignal(models.Model):
     rtm_gap = fields.Boolean()
     rtm_nested = fields.Boolean()
     entry_model = fields.Selection([
+        ("ftb_watch", "RTM FTB Watch"),
         ("ftb_confirmed", "FTB Confirmed"),
         ("ftb_reclaim_shadow", "FTB Reclaim Shadow"),
         ("later_touch_shadow", "Later Touch Confirmed Shadow"),
@@ -249,19 +254,49 @@ class DankbitSignal(models.Model):
         return value
 
     @classmethod
-    def _market_trend(cls, candles):
-        """Closed-candle trend from EMA location/slope and confirmed swings."""
+    def _market_trend(cls, candles, profile="tactical"):
+        """Closed-candle multi-horizon trend with profile-specific EMA windows.
+
+        Daily macro uses 300 requested candles and EMA50/200; Daily tactical
+        uses 90 and EMA20/50; 4H uses 240 and EMA20/50/200; 1H timing uses
+        240 and EMA20/50.  Only fully closed candles participate.
+        """
         closed = list(candles or [])[:-1]
-        if len(closed) < 55:
+        cfg = {
+            "daily_macro": (210, 50, 200, 20),
+            "daily_tactical": (60, 20, 50, 8),
+            "4h": (210, 20, 50, 8),
+            "1h": (80, 20, 50, 6),
+            "tactical": (55, 20, 50, 5),
+        }
+        minimum, fast_period, slow_period, slope_lookback = cfg.get(profile, cfg["tactical"])
+        if len(closed) < minimum:
             return "neutral", 0.0
         closes = [float(c.get("c", c.get("close", 0.0))) for c in closed]
-        ema20 = cls._ema(closes[-55:], 20)
-        ema50 = cls._ema(closes[-55:], 50)
-        ema20_prev = cls._ema(closes[-55:-5], 20)
+        sample_size = max(slow_period + 30, minimum)
+        sample = closes[-sample_size:]
+        ema_fast = cls._ema(sample, fast_period)
+        ema_slow = cls._ema(sample, slow_period)
+        prior_sample = sample[:-slope_lookback]
+        ema_fast_prev = cls._ema(prior_sample, fast_period)
         score = 0.0
-        score += 25.0 if closes[-1] > ema20 else -25.0
-        score += 20.0 if ema20 > ema20_prev else -20.0
-        score += 20.0 if ema20 > ema50 else -20.0
+        if profile == "daily_macro":
+            score += 30.0 if closes[-1] > ema_slow else -30.0
+            score += 30.0 if ema_fast > ema_slow else -30.0
+            score += 20.0 if ema_fast > ema_fast_prev else -20.0
+            structure_weight = 20.0
+        elif profile == "4h":
+            ema200 = cls._ema(closes[-240:], 200)
+            score += 20.0 if closes[-1] > ema_fast else -20.0
+            score += 20.0 if ema_fast > ema_slow else -20.0
+            score += 15.0 if ema_slow > ema200 else -15.0
+            score += 15.0 if ema_fast > ema_fast_prev else -15.0
+            structure_weight = 30.0
+        else:
+            score += 25.0 if closes[-1] > ema_fast else -25.0
+            score += 20.0 if ema_fast > ema_fast_prev else -20.0
+            score += 20.0 if ema_fast > ema_slow else -20.0
+            structure_weight = 35.0
 
         swing_highs, swing_lows = [], []
         for i in range(2, len(closed) - 2):
@@ -274,11 +309,14 @@ class DankbitSignal(models.Model):
                 swing_lows.append(low)
         if len(swing_highs) >= 2 and len(swing_lows) >= 2:
             if swing_highs[-1] > swing_highs[-2] and swing_lows[-1] > swing_lows[-2]:
-                score += 35.0
+                score += structure_weight
             elif swing_highs[-1] < swing_highs[-2] and swing_lows[-1] < swing_lows[-2]:
-                score -= 35.0
+                score -= structure_weight
         score = max(min(score, 100.0), -100.0)
-        return ("up" if score >= 40.0 else "down" if score <= -40.0 else "neutral"), score
+        # A 30-point boundary catches an established macro/4H direction while
+        # retaining a neutral buffer for mixed structure. Strong opposition is
+        # evaluated separately at 60, avoiding brittle label flips.
+        return ("up" if score >= 30.0 else "down" if score <= -30.0 else "neutral"), score
 
     @api.model
     def _option_direction_scores(self, asset, now_naive):
@@ -776,36 +814,44 @@ class DankbitSignal(models.Model):
                     snapshots = self._latest_snapshots(asset, now_naive)
                     Trade = self.env["dankbit.trade"]
                     entry = float(Trade.get_index_price(asset) or 0.0)
-                    candles_daily = Trade.get_candles(asset, interval="1d", limit=90) or []
-                    candles_4h = Trade.get_candles(asset, interval="4h", limit=100) or []
-                    candles_1h = Trade.get_candles(asset, interval="1h", limit=80) or []
-                    trend_daily, trend_score_daily = self._market_trend(candles_daily)
-                    trend_4h, trend_score_4h = self._market_trend(candles_4h)
-                    trend_1h, _trend_score_1h = self._market_trend(candles_1h)
+                    candles_daily = Trade.get_candles(asset, interval="1d", limit=320) or []
+                    candles_4h = Trade.get_candles(asset, interval="4h", limit=260) or []
+                    candles_1h = Trade.get_candles(asset, interval="1h", limit=260) or []
+                    trend_daily, trend_score_daily = self._market_trend(candles_daily, "daily_macro")
+                    trend_daily_tactical, trend_score_daily_tactical = self._market_trend(candles_daily[-100:], "daily_tactical")
+                    trend_4h, trend_score_4h = self._market_trend(candles_4h, "4h")
+                    trend_1h, _trend_score_1h = self._market_trend(candles_1h, "1h")
                     score4, coverage4 = self._anchor_score(rows4, entry)
                     score1, coverage1 = self._anchor_score(rows1, entry)
                     scored, _ = self._anchor_score(rowsd, entry)
                     gamma_score, greek_score, greek_components = self._option_direction_scores(asset, now_naive)
                     quality = self._quality(rows4, rows1, snapshots, is_weekend)
-                    standard_direction = ("long" if trend_daily == trend_4h == "up"
-                                          else "short" if trend_daily == trend_4h == "down"
-                                          else "neutral")
+                    # Daily Macro is the long-horizon bias. A neutral macro is
+                    # permissive; only a strong opposing Macro/Tactical score
+                    # vetoes the 4H direction. This preserves trend-following
+                    # while allowing valid setups during a neutral transition.
+                    if trend_4h == "up" and trend_score_daily > -60.0 and trend_score_daily_tactical > -60.0:
+                        standard_direction = "long"
+                    elif trend_4h == "down" and trend_score_daily < 60.0 and trend_score_daily_tactical < 60.0:
+                        standard_direction = "short"
+                    else:
+                        standard_direction = "neutral"
                     breakout = self._breakout_retest_setup(candles_4h, candles_1h, entry)
                     breakout_direction = breakout["direction"] if breakout else "neutral"
                     breakout_sign = 1.0 if breakout_direction == "long" else -1.0 if breakout_direction == "short" else 0.0
                     daily_not_opposed = bool(
                         breakout and (
-                            trend_daily == "neutral"
-                            or (breakout_direction == "long" and trend_daily == "up")
-                            or (breakout_direction == "short" and trend_daily == "down")
+                            (breakout_direction == "long" and trend_score_daily > -60.0 and trend_score_daily_tactical > -60.0)
+                            or (breakout_direction == "short" and trend_score_daily < 60.0 and trend_score_daily_tactical < 60.0)
                         )
                     )
-                    breakout_options_aligned = bool(
-                        breakout and breakout_sign * gamma_score >= 10.0
-                        and breakout_sign * greek_score >= 10.0
-                        and breakout_sign * score4 >= -35.0
-                    )
-                    breakout_candidate = bool(breakout and daily_not_opposed and breakout_options_aligned)
+                    # Price structure is sufficient for WATCH/ARMED. Options
+                    # grade later stages; they no longer hide a valid breakout.
+                    breakout_option_composite = breakout_sign * (
+                        0.40 * gamma_score + 0.35 * greek_score + 0.25 * score4
+                    ) if breakout else 0.0
+                    breakout_options_strongly_opposed = bool(breakout and breakout_option_composite <= -35.0)
+                    breakout_candidate = bool(breakout and daily_not_opposed)
                     direction = standard_direction if standard_direction != "neutral" else (
                         breakout_direction if breakout_candidate else "neutral"
                     )
@@ -813,8 +859,8 @@ class DankbitSignal(models.Model):
                     # Trend owns direction. Forecast and moving Greek centres
                     # confirm/predict it; none may reverse the hard MTF gate.
                     raw_final = direction_sign * (
-                        0.25 * trend_score_daily + 0.30 * trend_score_4h
-                        + 0.20 * score4 + 0.15 * gamma_score + 0.10 * greek_score
+                        0.20 * trend_score_daily + 0.10 * trend_score_daily_tactical + 0.30 * trend_score_4h
+                        + 0.20 * score4 + 0.15 * gamma_score + 0.05 * greek_score
                     )
                     final = raw_final * (quality / 100.0)
                     stop = target = rr = swing_level = 0.0
@@ -845,7 +891,7 @@ class DankbitSignal(models.Model):
                     if quality < min_quality:
                         reasons.append("Quality %.1f below %.1f threshold" % (quality, min_quality))
                     if standard_direction == "neutral":
-                        reasons.append("Daily and 4H real-price trends are not aligned")
+                        reasons.append("4H has no tradable direction or Daily Macro/Tactical is strongly opposed")
                     elif final < 35.0:
                         reasons.append("Combined trend/Forecast/Greeks score is below 35")
                     if standard_direction != "neutral" and direction_sign * score4 < 15.0:
@@ -864,7 +910,22 @@ class DankbitSignal(models.Model):
                         reasons.append("No confirmed 4H swing available for structural stop")
                     if standard_direction != "neutral" and rr < 2.0:
                         reasons.append("No structure-backed target with R:R >= 2.0 after 4H swing stop")
-                    thales_eligible = standard_direction != "neutral" and not reasons and entry > 0
+                    # Price structure owns setup visibility. Forecast/Greeks
+                    # and option-data quality gate Official, but cannot hide a
+                    # valid RTM Watch/Armed plan from the chart.
+                    thales_eligible = bool(
+                        standard_direction != "neutral" and entry > 0
+                        and swing_level and stop and target and rr >= 2.0
+                    )
+                    thales_official_filters = bool(
+                        thales_eligible and coverage4 >= 3 and coverage1 >= 3
+                        and quality >= min_quality and final >= 35.0
+                        and direction_sign * score4 >= 15.0
+                        and direction_sign * scored >= -35.0
+                        and direction_sign * gamma_score >= -30.0
+                        and direction_sign * greek_score >= -30.0
+                        and direction_sign * score1 >= -35.0
+                    )
                     if thales_eligible:
                         reference_levels = self._entry_reference_levels(asset, direction, snapshots)
                         if not reference_levels:
@@ -901,7 +962,7 @@ class DankbitSignal(models.Model):
                                     reasons.append("FTB reclaimed: waiting for closed 1H body Engulf/BOS")
 
                     rtm_official_eligible = bool(
-                        thales_eligible and rtm_zone and rtm_score >= 65.0
+                        thales_official_filters and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and entry_confirmed
                     )
                     reclaim_shadow = bool(
@@ -912,6 +973,7 @@ class DankbitSignal(models.Model):
                         thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] >= 2 and entry_confirmed
                     )
+                    rtm_watch = bool(thales_eligible and rtm_zone and rtm_path_clear)
 
                     breakout_official_eligible = False
                     breakout_shadow = False
@@ -984,8 +1046,11 @@ class DankbitSignal(models.Model):
                             reasons.append("Closed 1H retest and micro-structure confirmation completed")
                         if not rtm_path_clear:
                             reasons.append("Opposing RTM zone blocks the Breakout-Retest path before minimum 2R")
+                        if breakout_options_strongly_opposed:
+                            reasons.append("Options composite strongly opposes the break: Official is blocked, Watch/Shadow remains visible")
                         breakout_official_eligible = bool(
                             entry_confirmed and quality >= min_quality and rr >= 2.0 and rtm_path_clear
+                            and not breakout_options_strongly_opposed
                         )
                         breakout_shadow = bool(
                             quality >= 50.0 and rtm_path_clear and not breakout_official_eligible
@@ -1015,14 +1080,15 @@ class DankbitSignal(models.Model):
                         ("closed_at", ">", now_naive - timedelta(hours=8)),
                     ])
                     capacity_available = weekly_officials < 3 and not active_official and not cooldown
-                    shadow_candidate = official_eligible or reclaim_shadow or later_touch_shadow or breakout_shadow
+                    shadow_candidate = official_eligible or reclaim_shadow or later_touch_shadow or rtm_watch or breakout_shadow
                     kind = ("official" if official_eligible and capacity_available
                             else "shadow" if shadow_candidate else "no_trade")
                     if setup_path != "breakout_retest":
                         setup_path = "rtm_ftb" if thales_eligible or rtm_zone else False
                         entry_model = ("ftb_confirmed" if rtm_official_eligible
                                        else "ftb_reclaim_shadow" if reclaim_shadow
-                                       else "later_touch_shadow" if later_touch_shadow else False)
+                                       else "later_touch_shadow" if later_touch_shadow
+                                       else "ftb_watch" if rtm_watch else False)
                         setup_stage = "confirmed" if entry_confirmed else "armed" if thales_eligible else "setup" if direction != "neutral" else "none"
                         plan_status = "triggered" if entry_confirmed else "armed" if thales_eligible else "watch" if direction != "neutral" else False
                     state = ("active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
@@ -1043,7 +1109,9 @@ class DankbitSignal(models.Model):
                                          "confidence": v.confidence} for k, v in rowsd.items()},
                         "snapshot_ids": [r.id for r in snapshots.values()],
                         "market_trend": {
-                            "daily": trend_daily, "daily_score": trend_score_daily,
+                            "daily_macro": trend_daily, "daily_macro_score": trend_score_daily,
+                            "daily_tactical": trend_daily_tactical,
+                            "daily_tactical_score": trend_score_daily_tactical,
                             "4h": trend_4h, "4h_score": trend_score_4h,
                             "1h": trend_1h,
                         },
@@ -1080,9 +1148,11 @@ class DankbitSignal(models.Model):
                         "anchor_coverage_1h": coverage1, "is_weekend": is_weekend,
                         "activity_regime": regime,
                         "trend_daily": trend_daily,
+                        "trend_daily_tactical": trend_daily_tactical,
                         "trend_4h": trend_4h,
                         "trend_1h": trend_1h,
                         "trend_score_daily": trend_score_daily,
+                        "trend_score_daily_tactical": trend_score_daily_tactical,
                         "trend_score_4h": trend_score_4h,
                         "gamma_direction_score": gamma_score,
                         "greek_direction_score": greek_score,

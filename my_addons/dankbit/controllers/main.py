@@ -203,6 +203,108 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
     return output
 
 
+def _rsi_forecast_geometry(points, timeframe_candles, hourly_candles, timeframe="4h", period=14, ma_period=14):
+    """Adjust only early Forecast wick geometry from RSI mean-reversion risk.
+
+    Open/Close and therefore direction, path and EA locations are immutable.
+    A large RSI-vs-RSI-MA gap can lengthen the rejection-side wick, but the
+    effect is progressively suppressed while closed 1H price momentum in the
+    prevailing direction remains strong. Recomputed on every request.
+    """
+    output = [dict(p) for p in (points or [])]
+    tf_closed = list(timeframe_candles or [])[:-1]
+    h1_closed = list(hourly_candles or [])[:-1]
+
+    def value(row, key):
+        aliases = {"o": "open", "h": "high", "l": "low", "c": "close"}
+        return float(row.get(key, row.get(aliases[key], 0.0)) or 0.0)
+
+    def atr(rows, length=14):
+        if len(rows) < 2:
+            return 0.0
+        ranges = []
+        for prev, current in zip(rows[-length - 1:-1], rows[-length:]):
+            high, low, prev_close = value(current, "h"), value(current, "l"), value(prev, "c")
+            ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+        return sum(ranges) / len(ranges) if ranges else 0.0
+
+    def rsi_values(closes, length):
+        if len(closes) <= length:
+            return []
+        deltas = [b - a for a, b in zip(closes, closes[1:])]
+        gains = [max(d, 0.0) for d in deltas]
+        losses = [max(-d, 0.0) for d in deltas]
+        avg_gain = sum(gains[:length]) / length
+        avg_loss = sum(losses[:length]) / length
+        values = [100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)]
+        for gain, loss in zip(gains[length:], losses[length:]):
+            avg_gain = (avg_gain * (length - 1) + gain) / length
+            avg_loss = (avg_loss * (length - 1) + loss) / length
+            values.append(100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss))
+        return values
+
+    closes = [value(c, "c") for c in tf_closed]
+    rsi_series = rsi_values(closes, period)
+    if len(rsi_series) < ma_period or not output:
+        return output, {"available": False}
+    rsi = rsi_series[-1]
+    rsi_ma = sum(rsi_series[-ma_period:]) / ma_period
+    gap = rsi - rsi_ma
+    gap_strength = max(min((abs(gap) - 5.0) / 10.0, 1.0), 0.0)
+    correction_sign = 1.0 if gap < 0 else -1.0 if gap > 0 else 0.0
+
+    atr_1h = atr(h1_closed)
+    recent = h1_closed[-8:]
+    persistence_sign = -correction_sign
+    momentum = 0.0
+    if gap_strength and len(recent) >= 4 and atr_1h > 0:
+        cumulative = persistence_sign * (value(recent[-1], "c") - value(recent[0], "o"))
+        cumulative_score = max(min(cumulative / (2.0 * atr_1h), 1.0), 0.0)
+        bodies = [value(c, "c") - value(c, "o") for c in recent]
+        body_total = sum(abs(b) for b in bodies) or 1.0
+        body_score = max(min(sum(max(persistence_sign * b, 0.0) for b in bodies) / body_total, 1.0), 0.0)
+        locations = []
+        for candle in recent[-4:]:
+            high, low = value(candle, "h"), value(candle, "l")
+            location = (value(candle, "c") - low) / max(high - low, 1e-9)
+            locations.append(location if persistence_sign > 0 else 1.0 - location)
+        close_score = sum(locations) / len(locations)
+        h1_closes = [value(c, "c") for c in h1_closed]
+        def ema(values, length):
+            alpha = 2.0 / (length + 1.0)
+            result = float(values[0])
+            for item in values[1:]:
+                result = alpha * float(item) + (1.0 - alpha) * result
+            return result
+        ema_now = ema(h1_closes[-60:], 20)
+        previous_closes = h1_closes[-66:-6] if len(h1_closes) >= 66 else h1_closes[:-6]
+        ema_prev = ema(previous_closes, 20) if previous_closes else ema_now
+        slope_score = max(min(persistence_sign * (ema_now - ema_prev) / max(atr_1h, 1e-9), 1.0), 0.0)
+        momentum = max(min(0.35 * cumulative_score + 0.25 * body_score + 0.20 * close_score + 0.20 * slope_score, 1.0), 0.0)
+
+    effective = gap_strength * (1.0 - 0.90 * momentum)
+    tf_atr = atr(tf_closed)
+    affected = {"1h": 6, "4h": 3, "1d": 1}.get(timeframe, 3)
+    max_wick = 0.20 * tf_atr
+    for index in range(min(affected, len(output))):
+        decay = (affected - index) / affected
+        adjustment = max_wick * effective * decay
+        if correction_sign > 0:
+            # RSI below its average: express upward correction probability as
+            # an upper rejection wick without changing the bearish body/path.
+            output[index]["high"] = max(float(output[index]["high"]), max(float(output[index]["open"]), float(output[index]["close"])) + adjustment)
+        elif correction_sign < 0:
+            # RSI above its average: express downward correction probability
+            # as a lower rejection wick without changing the bullish body/path.
+            output[index]["low"] = min(float(output[index]["low"]), min(float(output[index]["open"]), float(output[index]["close"])) - adjustment)
+    return output, {
+        "available": True, "rsi": round(rsi, 2), "rsi_ma": round(rsi_ma, 2),
+        "gap": round(gap, 2), "gap_strength": round(gap_strength, 3),
+        "momentum_1h": round(momentum * 100.0, 1),
+        "effective_geometry_weight": round(effective, 3), "affected_candles": affected,
+    }
+
+
 class _AggTrade:
     """SQL-aggregated trade row — duck-typed for portfolio_delta/gamma."""
     __slots__ = ("strike", "option_type", "direction", "amount", "iv", "_expiration")
@@ -2138,6 +2240,20 @@ class ChartController(http.Controller):
             result["points"], anchors, forecast_count,
             max_count=max_count, timeframe=timeframe,
         )
+        # RSI is deliberately retrospective and never participates in the
+        # forward direction/EA calculation. It only shapes rejection wicks on
+        # the first few candles, with a closed-1H momentum persistence gate.
+        Trade = request.env["dankbit.trade"]
+        try:
+            timeframe_candles = Trade.get_candles(asset, interval=timeframe, limit=260) or []
+            hourly_candles = (timeframe_candles if timeframe == "1h"
+                              else Trade.get_candles(asset, interval="1h", limit=260) or [])
+            unified, rsi_context = _rsi_forecast_geometry(
+                unified, timeframe_candles, hourly_candles, timeframe=timeframe,
+            )
+        except Exception:
+            _logger.exception("RSI Forecast geometry failed for %s %s; serving untouched Forecast", asset, timeframe)
+            rsi_context = {"available": False, "error": "geometry-unavailable"}
         forecast_warning = _forecast_quality_warning(
             unified, anchor_meta, result["index_price"], result["sigma_annual"], timeframe,
         )
@@ -2163,6 +2279,7 @@ class ChartController(http.Controller):
             "first_candle": anchor_meta[0],
             "anchors": anchor_meta,
             "forecast_warning": forecast_warning,
+            "rsi_context": rsi_context,
             "points": points,
             "generated_at": generated_at.isoformat(),
         }
@@ -2309,9 +2426,11 @@ class ChartController(http.Controller):
                 "atr_4h": row.atr_4h,
                 "stop_basis": row.stop_basis or "",
                 "trend_daily": row.trend_daily or "neutral",
+                "trend_daily_tactical": row.trend_daily_tactical or "neutral",
                 "trend_4h": row.trend_4h or "neutral",
                 "trend_1h": row.trend_1h or "neutral",
                 "trend_score_daily": row.trend_score_daily,
+                "trend_score_daily_tactical": row.trend_score_daily_tactical,
                 "trend_score_4h": row.trend_score_4h,
                 "gamma_direction_score": row.gamma_direction_score,
                 "greek_direction_score": row.greek_direction_score,

@@ -210,6 +210,11 @@
 					* { margin: 0; padding: 0; box-sizing: border-box; }
 					html, body { width: 100vw; height: 100vh; overflow: hidden; background: #ffffff; }
 					#chart-container { width: 100%; height: 100%; }
+					#rsi-container { position:fixed; left:0; bottom:0; width:100%; height:22vh; display:none; border-top:1px solid #ccc; z-index:2; }
+					body.rsi-visible #chart-container { height:78vh; }
+					body.rsi-visible #rsi-container { display:block; }
+					body.rsi-visible #status { bottom:calc(22vh + 32px); }
+					body.dark #rsi-container { border-top-color:#444; }
 					#status {
 						position: fixed; bottom: 32px; left: 12px;
 						font-family: monospace; font-size: 11pt;
@@ -222,16 +227,15 @@
 						display: flex; gap: 4px; align-items: center; z-index: 10;
 					}
 					#exchange-label {
-						position: fixed; top: 8px; right: 80px;
+						position: fixed; top: 36px; left: 12px;
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
 					/* Unified Forecast status pill (Delta Chart only) — same fixed pill
-					   pattern as #exchange-label, positioned right below it.
-					   Empty/no-op text collapses to zero visible content
-					   rather than an empty box. */
+					   pattern as #exchange-label. Empty/no-op text collapses to zero
+					   visible content rather than an empty box. */
 					#forecast-status-label {
 						position: fixed; top: 40px; right: 80px;
 						font-family: monospace; font-size: 11pt;
@@ -374,6 +378,7 @@
 			<body>
 				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="rsi-container"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="forecast-status-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
@@ -410,6 +415,10 @@
 						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="rsi-toggle" onchange="onToggleRsi()"/>
+							RSI
 						</label>
 						<div class="signal-bot-control" id="signal-bot-control">
 							<label class="toggle-label">
@@ -710,6 +719,7 @@
 					// Draws a fully deterministic path (see FORECAST_URL) ported
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
+					let SHOW_RSI = false;
 					let SHOW_SIGNAL_BOT = false;
 					let SIGNAL_BOT_DETAILS_OPEN = false;
 					let latestSignalBotData = null;
@@ -762,8 +772,31 @@
 						},
 					});
 
-					window.addEventListener('resize', () => {
-						chart.resize(window.innerWidth, window.innerHeight);
+					const rsiChart = LightweightCharts.createChart(document.getElementById('rsi-container'), {
+						width: window.innerWidth, height: Math.round(window.innerHeight * 0.22),
+						layout: { background:{ type:'solid', color:DARK_MODE ? '#000000' : '#ffffff' }, textColor:DARK_MODE ? '#d1d4dc' : '#333333' },
+						grid: { vertLines:{ visible:false }, horzLines:{ visible:false } },
+						crosshair: { mode:LightweightCharts.CrosshairMode.Normal },
+						rightPriceScale: { borderColor:DARK_MODE ? '#444444' : '#cccccc', scaleMargins:{ top:0.08, bottom:0.08 } },
+						timeScale: { borderColor:DARK_MODE ? '#444444' : '#cccccc', timeVisible:true, secondsVisible:false },
+					});
+					const rsiSeries = rsiChart.addLineSeries({ color:'#7e57c2', lineWidth:2, lastValueVisible:true, priceLineVisible:false });
+					const rsiMaSeries = rsiChart.addLineSeries({ color:'#d4af37', lineWidth:2, lastValueVisible:true, priceLineVisible:false });
+					[30, 50, 70].forEach(value => rsiSeries.createPriceLine({ price:value, color:value === 50 ? '#777777' : '#999999', lineWidth:1, lineStyle:LightweightCharts.LineStyle.Dashed, axisLabelVisible:true, title:String(value) }));
+					function resizeCharts() {
+						const rsiHeight = SHOW_RSI ? Math.round(window.innerHeight * 0.22) : 0;
+						chart.resize(window.innerWidth, window.innerHeight - rsiHeight);
+						if (SHOW_RSI) rsiChart.resize(window.innerWidth, rsiHeight);
+					}
+					window.addEventListener('resize', resizeCharts);
+					let syncingTimeScale = false;
+					chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+						if (!SHOW_RSI || !range || syncingTimeScale) return;
+						syncingTimeScale = true; rsiChart.timeScale().setVisibleLogicalRange(range); syncingTimeScale = false;
+					});
+					rsiChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+						if (!SHOW_RSI || !range || syncingTimeScale) return;
+						syncingTimeScale = true; chart.timeScale().setVisibleLogicalRange(range); syncingTimeScale = false;
 					});
 
 					const series = chart.addCandlestickSeries({
@@ -913,10 +946,42 @@
 						const days = TF_WINDOW[INTERVAL] || 21;
 						const barsPerDay = BARS_PER_DAY[INTERVAL] || 24;
 						const lastIndex = realCandles.length + futureTickCount - 1;
-						chart.timeScale().setVisibleLogicalRange({
+						const range = {
 							from: lastIndex - days * barsPerDay,
 							to:   lastIndex,
-						});
+						};
+						chart.timeScale().setVisibleLogicalRange(range);
+						if (SHOW_RSI) rsiChart.timeScale().setVisibleLogicalRange(range);
+					}
+
+					function refreshRsi() {
+						const period = 14;
+						if (realCandles.length <= period) { rsiSeries.setData([]); rsiMaSeries.setData([]); return; }
+						const values = [];
+						let gain = 0, loss = 0;
+						for (let i = 1; i <= period; i++) {
+							const delta = realCandles[i].close - realCandles[i - 1].close;
+							gain += Math.max(delta, 0); loss += Math.max(-delta, 0);
+						}
+						gain /= period; loss /= period;
+						const pushValue = i => values.push({ time:realCandles[i].time, value:loss === 0 ? 100 : 100 - 100 / (1 + gain / loss) });
+						pushValue(period);
+						for (let i = period + 1; i < realCandles.length; i++) {
+							const delta = realCandles[i].close - realCandles[i - 1].close;
+							gain = (gain * (period - 1) + Math.max(delta, 0)) / period;
+							loss = (loss * (period - 1) + Math.max(-delta, 0)) / period;
+							pushValue(i);
+						}
+						rsiSeries.setData(values);
+						const ma = values.map((point, i) => i < period - 1 ? null : ({ time:point.time, value:values.slice(i - period + 1, i + 1).reduce((sum, row) => sum + row.value, 0) / period })).filter(Boolean);
+						rsiMaSeries.setData(ma);
+					}
+
+					function onToggleRsi() {
+						SHOW_RSI = Boolean(document.getElementById('rsi-toggle')?.checked);
+						document.body.classList.toggle('rsi-visible', SHOW_RSI);
+						resizeCharts();
+						if (SHOW_RSI) { refreshRsi(); applyVisibleRange(); }
 					}
 
 					// Right-click "Reset chart view" — mirrors original TradingView's
@@ -989,6 +1054,7 @@
 						const klines = (resp.result || []).slice().reverse();
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
+						refreshRsi();
 						applyVisibleRange();
 					}
 
@@ -1003,6 +1069,7 @@
 							realCandles.push(updated);
 						}
 						rebuildSeriesData();
+						refreshRsi();
 					}
 
 					async function setTf(iv) {
@@ -2208,7 +2275,8 @@
 						signalMetric(grid, 'Path to 2R', signal.rtm_path_clear ? 'CLEAR' : 'BLOCKED');
 						signalMetric(grid, 'RTM Touch', Number(signal.rtm_touch_count || 0) === 1 ? 'FTB' : Number(signal.rtm_touch_count || 0) > 1 ? Number(signal.rtm_touch_count) + 'TB' : 'WAITING');
 						signalMetric(grid, 'RTM Quality', [signal.rtm_fresh ? 'FRESH' : '', signal.rtm_nested ? 'NESTED' : '', signal.rtm_compression ? 'CP' : '', signal.rtm_gap ? 'GAP' : ''].filter(Boolean).join(' · ') || '—');
-						signalMetric(grid, 'Trend D / 4H / 1H', [signal.trend_daily, signal.trend_4h, signal.trend_1h].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
+						signalMetric(grid, 'Trend D-Macro / D-Tactical', [signal.trend_daily, signal.trend_daily_tactical].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
+						signalMetric(grid, 'Trend 4H / 1H', [signal.trend_4h, signal.trend_1h].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
 						signalMetric(grid, 'Gamma Direction', Number(signal.gamma_direction_score || 0).toFixed(1));
 						signalMetric(grid, 'Greeks Direction', Number(signal.greek_direction_score || 0).toFixed(1));
 						signalMetric(grid, 'Weekly Signals', Number(signal.weekly_signal_count || 0) + ' / ' + Number(signal.weekly_signal_limit || 3));
@@ -2310,6 +2378,11 @@
 							},
 							rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
 							timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
+						});
+						rsiChart.applyOptions({
+							layout: { background:{ type:'solid', color:DARK_MODE ? '#000000' : '#ffffff' }, textColor:DARK_MODE ? '#d1d4dc' : '#333333' },
+							rightPriceScale: { borderColor:DARK_MODE ? '#444444' : '#cccccc' },
+							timeScale: { borderColor:DARK_MODE ? '#444444' : '#cccccc' },
 						});
 					}
 
