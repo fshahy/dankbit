@@ -245,18 +245,28 @@
 						border-color: #ef6c00; font-weight: 700;
 					}
 					#signal-bot-panel {
-						position: fixed; top: 72px; right: 80px; min-width: 310px; max-width: 470px;
+						position: fixed; top: 44px; left: 12px; right: auto; min-width: 310px; max-width: 470px;
+						max-height: calc(100vh - 96px); overflow-y: auto;
 						font-family: monospace; font-size: 10.5pt; line-height: 1.45;
 						color: #333; background: rgba(255,255,255,0.94);
 						padding: 8px 12px; border-radius: 6px; border: 1px solid #bbb;
 						z-index: 11; display: none; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 					}
 					#signal-bot-panel .signal-head { display:flex; justify-content:space-between; gap:12px; font-weight:bold; }
+					#signal-bot-panel .signal-close { margin-left:auto; border:0; background:transparent; color:inherit; cursor:pointer; font-size:14pt; line-height:1; }
 					#signal-bot-panel .signal-long { color:#16833b; }
 					#signal-bot-panel .signal-short { color:#c62828; }
 					#signal-bot-panel .signal-neutral { color:#777; }
 					#signal-bot-panel .signal-grid { display:grid; grid-template-columns:auto auto; gap:1px 14px; margin-top:4px; }
 					#signal-bot-panel .signal-reason { margin-top:5px; color:#666; white-space:normal; }
+					.signal-bot-control { position:relative; display:flex; align-items:stretch; }
+					.signal-bot-control .toggle-label { border-radius:4px 0 0 4px; border-right:0; }
+					.signal-bot-summary { max-width:165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777; font-size:9.5pt; }
+					.signal-bot-menu-button { border-radius:0 4px 4px 0; min-width:25px; padding:2px 6px; }
+					.signal-bot-menu { position:absolute; top:calc(100% + 4px); right:0; min-width:235px; display:none; padding:5px; background:rgba(255,255,255,0.98); border:1px solid #bbb; border-radius:5px; box-shadow:0 3px 12px rgba(0,0,0,0.22); z-index:30; }
+					.signal-bot-menu.open { display:grid; gap:4px; }
+					.signal-bot-menu button, .signal-bot-menu a { display:block; width:100%; padding:6px 9px; border:0; border-radius:3px; background:transparent; color:#333; text-align:left; text-decoration:none; font:10.5pt monospace; cursor:pointer; }
+					.signal-bot-menu button:hover, .signal-bot-menu a:hover { background:#eee; }
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -344,6 +354,9 @@
 					body.dark #forecast-status-label.forecast-risk-warning { color:#ffe0b2; background:rgba(183,75,0,0.94); border-color:#ff9800; }
 					body.dark #signal-bot-panel { color:#ddd; background:rgba(0,0,0,0.88); border-color:#555; box-shadow:0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #signal-bot-panel .signal-reason { color:#aaa; }
+					body.dark .signal-bot-menu { background:rgba(20,20,20,0.98); border-color:#555; }
+					body.dark .signal-bot-menu button, body.dark .signal-bot-menu a { color:#ddd; }
+					body.dark .signal-bot-menu button:hover, body.dark .signal-bot-menu a:hover { background:#333; }
 					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
@@ -398,10 +411,17 @@
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
 						</label>
-						<label class="toggle-label">
-							<input type="checkbox" id="signal-bot-toggle" onchange="onToggleSignalBot()"/>
-							Signal Bot
-						</label>
+						<div class="signal-bot-control" id="signal-bot-control">
+							<label class="toggle-label">
+								<input type="checkbox" id="signal-bot-toggle" onchange="onToggleSignalBot()"/>
+								<span>Signal Bot</span><span class="signal-bot-summary" id="signal-bot-summary">OFF</span>
+							</label>
+							<button class="tf-btn signal-bot-menu-button" type="button" onclick="toggleSignalBotMenu(event)" title="Signal Bot menu">▾</button>
+							<div class="signal-bot-menu" id="signal-bot-menu">
+								<button type="button" id="signal-bot-details-button" onclick="toggleSignalBotDetails()">Show signal details</button>
+								<a href="/signal-bot/report" target="_blank" rel="noopener">Forward Test Dashboard ↗</a>
+							</div>
+						</div>
 						<span class="tf-label">Option Flow:</span>
 						<select class="tf-btn" id="zones-box-window-select" onchange="onZonesBoxWindowChange()">
 							<option value="midnight">00:00 UTC</option>
@@ -691,6 +711,8 @@
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
 					let SHOW_SIGNAL_BOT = false;
+					let SIGNAL_BOT_DETAILS_OPEN = false;
+					let latestSignalBotData = null;
 					let signalBotPriceLines = [];
 					let signalBotRequestSeq = 0;
 					let   INTERVAL         = '4h';
@@ -769,6 +791,10 @@
 					// Smart Liquidity.
 					const bandUpperSeries = chart.addLineSeries({ color: chartColors.bandUpper, lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.bandUpper), lastValueVisible: false, priceLineVisible: false });
 					const bandLowerSeries = chart.addLineSeries({ color: chartColors.bandLower, lineWidth: 2, lineStyle: lineStyleFromName(chartLineStyles.bandLower), lastValueVisible: false, priceLineVisible: false });
+					// Unconfirmed E1/E2/E3 anchors use separate dashed series. They
+					// extend the structural path without visually claiming confirmation.
+					const bandUpperProvisionalSeries = chart.addLineSeries({ color: hexToRgba(chartColors.bandUpper, 0.68), lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
+					const bandLowerProvisionalSeries = chart.addLineSeries({ color: hexToRgba(chartColors.bandLower, 0.68), lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false });
 					// Smart Liquidity remains available, but as a separate optional layer.
 					// Dominance used to be drawn as a second, thicker line series shown
 					// only on the dominant side's own points (the rest left as blank
@@ -1159,8 +1185,12 @@
 					function clearBandOnlyLines() {
 						bandUpperSeries.setData([]);
 						bandLowerSeries.setData([]);
+						bandUpperProvisionalSeries.setData([]);
+						bandLowerProvisionalSeries.setData([]);
 						bandUpperSeries.setMarkers([]);
 						bandLowerSeries.setMarkers([]);
+						bandUpperProvisionalSeries.setMarkers([]);
+						bandLowerProvisionalSeries.setMarkers([]);
 						gammaBandSeries.setData([]);
 					}
 
@@ -1329,12 +1359,26 @@
 						const rows = data.bands || [];
 
 						if (SHOW_BANDS) {
-							gammaBandSeries.setData(rows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
-							const upperRows = rows.filter(r => r.high_resistance);
-							const lowerRows = rows.filter(r => r.low_support);
-							const adaptiveBands = buildAdaptiveBands(rows);
-							bandUpperSeries.setData(adaptiveBands.upper);
-							bandLowerSeries.setData(adaptiveBands.lower);
+							const confirmedRows = rows.filter(r => r.confirmation_status !== 'provisional');
+							const provisionalRows = rows.filter(r => r.confirmation_status === 'provisional')
+								.sort((a, b) => Number(a.t) - Number(b.t));
+							gammaBandSeries.setData(confirmedRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
+							const confirmedBands = buildAdaptiveBands(confirmedRows);
+							bandUpperSeries.setData(confirmedBands.upper);
+							bandLowerSeries.setData(confirmedBands.lower);
+
+							// Begin the dashed route at the final confirmed anchor so the
+							// transition is continuous, then continue through provisional E1-E3.
+							const confirmedSorted = confirmedRows.slice().sort((a, b) => Number(a.t) - Number(b.t));
+							const bridge = provisionalRows.length && confirmedSorted.length
+								? [confirmedSorted[confirmedSorted.length - 1]].concat(provisionalRows)
+								: provisionalRows;
+							const provisionalBands = buildAdaptiveBands(bridge);
+							bandUpperProvisionalSeries.setData(provisionalBands.upper);
+							bandLowerProvisionalSeries.setData(provisionalBands.lower);
+
+							const upperRows = confirmedRows.filter(r => r.high_resistance);
+							const lowerRows = confirmedRows.filter(r => r.low_support);
 							bandUpperSeries.setMarkers(upperRows.map(r => ({
 								time: Math.floor(r.t / 1000) + tzOffset,
 								position: 'inBar',
@@ -1351,6 +1395,10 @@
 								size: 1,
 								text: r.low_support_positive ? '+' : '-',
 							})));
+							// Dashed, slightly transparent lines are the only provisional
+							// cue. No labels/markers: they could be confused with Forecast E anchors.
+							bandUpperProvisionalSeries.setMarkers([]);
+							bandLowerProvisionalSeries.setMarkers([]);
 						} else {
 							clearBandOnlyLines();
 						}
@@ -1665,7 +1713,7 @@
 								boxShadow: '0 0 0 1px rgba(255,255,255,0.9)', pointerEvents: 'auto',
 							});
 							const label = document.createElement('span');
-							label.textContent = 'E' + (idx + 1);
+							label.textContent = 'EA' + (idx + 1);
 							Object.assign(label.style, {
 								position: 'absolute', left: '-3px', top: '-18px', color,
 								font: '600 11px monospace', whiteSpace: 'nowrap',
@@ -2008,7 +2056,7 @@
 						forecastSeries.setMarkers(anchorSlots.filter(a => a.expiry_index * perDay < points.length).map(a => ({
 							time: firstTime + Number(a.expiry_index) * perDay * intervalSec,
 							position: 'aboveBar', shape: 'circle', color: chartColors.gammaBand,
-							text: 'E' + (Number(a.expiry_index) + 1),
+							text: 'EA' + (Number(a.expiry_index) + 1),
 						})));
 						const label = document.getElementById('forecast-status-label');
 						if (label) {
@@ -2016,7 +2064,7 @@
 							const baseStatus = !availableAnchors.length
 								? requestedTf.toUpperCase() + ' Forecast · ' + points.length + ' candle' + (points.length === 1 ? '' : 's')
 								: requestedTf.toUpperCase() + ' Forecast · Anchors ' + availableAnchors.length + '/3 · '
-									+ availableAnchors.map(a => 'E' + (a.expiry_index + 1) + (a.expiry_instrument ? ' ' + a.expiry_instrument : '') + ' R' + a.revision + '/' + a.max_revisions + ' C' + Math.round(a.confidence) + '%').join(' · ')
+									+ availableAnchors.map(a => 'EA' + (a.expiry_index + 1) + (a.expiry_instrument ? ' ' + a.expiry_instrument : '') + ' R' + a.revision + '/' + a.max_revisions + ' C' + Math.round(a.confidence) + '%').join(' · ')
 									+ (availableAnchors[0].is_preview ? ' · ' + availableAnchors[0].window_hours + 'h Preview' : '')
 									+ ' · ' + points.length + ' candle' + (points.length === 1 ? '' : 's');
 							const risk = data.forecast_warning || {};
@@ -2045,9 +2093,50 @@
 						signalBotRequestSeq += 1;
 						signalBotPriceLines.forEach(line => series.removePriceLine(line));
 						signalBotPriceLines = [];
+						latestSignalBotData = null;
+						SIGNAL_BOT_DETAILS_OPEN = false;
+						const summary = document.getElementById('signal-bot-summary');
+						if (summary) summary.textContent = 'OFF';
+						const detailsButton = document.getElementById('signal-bot-details-button');
+						if (detailsButton) detailsButton.textContent = 'Show signal details';
 						const panel = document.getElementById('signal-bot-panel');
 						if (panel) { panel.style.display = 'none'; panel.replaceChildren(); }
 					}
+
+					function toggleSignalBotMenu(event) {
+						if (event) event.stopPropagation();
+						const menu = document.getElementById('signal-bot-menu');
+						if (menu) menu.classList.toggle('open');
+					}
+
+					function closeSignalBotMenu() {
+						const menu = document.getElementById('signal-bot-menu');
+						if (menu) menu.classList.remove('open');
+					}
+
+					function toggleSignalBotDetails() {
+						SIGNAL_BOT_DETAILS_OPEN = !SIGNAL_BOT_DETAILS_OPEN;
+						const button = document.getElementById('signal-bot-details-button');
+						if (button) button.textContent = SIGNAL_BOT_DETAILS_OPEN ? 'Hide signal details' : 'Show signal details';
+						closeSignalBotMenu();
+						if (SIGNAL_BOT_DETAILS_OPEN && !SHOW_SIGNAL_BOT) {
+							const toggle = document.getElementById('signal-bot-toggle');
+							if (toggle) toggle.checked = true;
+							SHOW_SIGNAL_BOT = true;
+							refreshSignalBot();
+							return;
+						}
+						if (SIGNAL_BOT_DETAILS_OPEN && latestSignalBotData) drawSignalBotPanel(latestSignalBotData);
+						else {
+							const panel = document.getElementById('signal-bot-panel');
+							if (panel) panel.style.display = 'none';
+						}
+					}
+
+					document.addEventListener('click', event => {
+						const control = document.getElementById('signal-bot-control');
+						if (control && !control.contains(event.target)) closeSignalBotMenu();
+					});
 
 					function signalMetric(grid, label, value) {
 						const key = document.createElement('span');
@@ -2072,7 +2161,13 @@
 						const title = document.createElement('span');
 						const state = document.createElement('span');
 						const head = document.createElement('div');
+						const close = document.createElement('button');
 						head.className = 'signal-head';
+						close.className = 'signal-close';
+						close.type = 'button';
+						close.title = 'Close details';
+						close.textContent = '×';
+						close.onclick = () => toggleSignalBotDetails();
 						title.className = direction === 'long' ? 'signal-long' : direction === 'short' ? 'signal-short' : 'signal-neutral';
 						title.textContent = isOfficial
 							? 'OFFICIAL ' + direction.toUpperCase()
@@ -2081,8 +2176,13 @@
 							: signal.setup_stage === 'armed' ? 'ARMED ' + direction.toUpperCase()
 							: signal.setup_stage === 'setup' ? 'SETUP ' + direction.toUpperCase() : 'NO TRADE';
 						state.textContent = String(signal.state || '').toUpperCase();
-						head.append(title, state);
+						head.append(title, state, close);
 						panel.append(head);
+						const summary = document.getElementById('signal-bot-summary');
+						if (summary) {
+							const rr = Number(signal.risk_reward || 0) > 0 ? ' · 1:' + Number(signal.risk_reward).toFixed(1) : '';
+							summary.textContent = title.textContent + rr;
+						}
 
 						const grid = document.createElement('div');
 						grid.className = 'signal-grid';
@@ -2125,7 +2225,7 @@
 						reason.className = 'signal-reason';
 						reason.textContent = (signal.stop_basis ? signal.stop_basis + ' · ' : '') + (signal.reason || 'No explanation recorded.');
 						panel.append(reason);
-						panel.style.display = 'block';
+						panel.style.display = SIGNAL_BOT_DETAILS_OPEN ? 'block' : 'none';
 					}
 
 					async function refreshSignalBot() {
@@ -2139,10 +2239,12 @@
 							signalBotPriceLines.forEach(line => series.removePriceLine(line));
 							signalBotPriceLines = [];
 							if (!data.signal) {
-								drawSignalBotPanel({ kind:'no_trade', state:'waiting', direction:'neutral', reason:'No Signal Bot evaluation has been recorded for this UTC day.' });
+								latestSignalBotData = { kind:'no_trade', state:'waiting', direction:'neutral', reason:'No Signal Bot evaluation has been recorded for this UTC day.' };
+								drawSignalBotPanel(latestSignalBotData);
 								return;
 							}
 							const signal = data.signal;
+							latestSignalBotData = signal;
 							drawSignalBotPanel(signal);
 							// Potential plans are deliberately visible before the official
 							// trigger. Dashed lines mean WATCH/SHADOW; a triggered official
@@ -2173,7 +2275,8 @@
 							});
 						} catch (error) {
 							if (!SHOW_SIGNAL_BOT || requestSeq !== signalBotRequestSeq) return;
-							drawSignalBotPanel({ kind:'no_trade', state:'error', direction:'neutral', reason:error.message });
+							latestSignalBotData = { kind:'no_trade', state:'error', direction:'neutral', reason:error.message };
+							drawSignalBotPanel(latestSignalBotData);
 						}
 					}
 
@@ -2246,6 +2349,8 @@
 						gammaBandSeries.applyOptions({ color: c.gammaBand, lineStyle: lineStyleFromName(s.gammaBand) });
 						bandUpperSeries.applyOptions({ color: c.bandUpper, lineStyle: lineStyleFromName(s.bandUpper) });
 						bandLowerSeries.applyOptions({ color: c.bandLower, lineStyle: lineStyleFromName(s.bandLower) });
+						bandUpperProvisionalSeries.applyOptions({ color: hexToRgba(c.bandUpper, 0.68), lineStyle: LightweightCharts.LineStyle.Dashed });
+						bandLowerProvisionalSeries.applyOptions({ color: hexToRgba(c.bandLower, 0.68), lineStyle: LightweightCharts.LineStyle.Dashed });
 						smartLiqUpperSeries.applyOptions({ color: c.smartLiqUpper, lineStyle: lineStyleFromName(s.smartLiqUpper) });
 						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower, lineStyle: lineStyleFromName(s.smartLiqLower) });
 						forecastSeries.applyOptions({

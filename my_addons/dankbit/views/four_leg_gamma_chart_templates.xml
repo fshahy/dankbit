@@ -413,6 +413,30 @@
 						chart.resize(window.innerWidth, window.innerHeight);
 					});
 
+					// Light-orange fill between LP/SP (when LP is below SP) and between
+					// LC/SC (when LC is above SC) — same addBaselineSeries flat-top +
+					// baseValue-bottom fill trick the Delta Chart's own zones boxes use
+					// (dankbit_templates.xml) to fake a bounded rectangle: two data
+					// points at the top price, baseValue set to the bottom price, so
+					// the area between fills instead of only stroking a single line.
+					// No border stroke (topLineColor/bottomLineColor transparent) since
+					// this is meant as a plain shaded zone, not another bordered box.
+					// Added to the chart BEFORE the candlestick series below, so it
+					// renders underneath the candles and the LC/LP/SC/SP reference
+					// lines (series added later draw on top) rather than muddying them.
+					const putFillSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
+						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+					const callFillSeries = chart.addBaselineSeries({
+						baseValue: { type: 'price', price: 0 },
+						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
+						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
+						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
+					});
+
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -495,6 +519,18 @@
 					// Same future-margin length as the Delta Chart's own
 					// FUTURE_MARGIN_DAYS.
 					const FUTURE_MARGIN_DAYS = 5;
+
+					// Time span the LP/SP and LC/SC fill rectangles stretch across —
+					// from the earliest loaded candle out to the same future-axis
+					// edge applyVisibleRange() scrolls to, so the shaded zone spans
+					// the full plotted width instead of stopping at the last real bar.
+					function fillRectTimeRange() {
+						if (!realCandles.length) return null;
+						return {
+							fromTime: realCandles[0].time,
+							toTime: realCandles[realCandles.length - 1].time + FUTURE_MARGIN_DAYS * 86400,
+						};
+					}
 
 					function applyVisibleRange() {
 						if (!realCandles.length) return;
@@ -644,7 +680,11 @@
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
-							if (!latest) return;
+							if (!latest) {
+								putFillSeries.setData([]);
+								callFillSeries.setData([]);
+								return;
+							}
 
 							// 0.0 means absent (same convention every gamma_band/
 							// smart_liq_*_price field in this addon uses) — no
@@ -688,6 +728,32 @@
 									axisLabelVisible: true, axisLabelColor: chartColors.spg,
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
 								});
+							}
+
+							// Light-orange shaded zone between LP/SP when LP sits below SP,
+							// and between LC/SC when LC sits above SC — see putFillSeries/
+							// callFillSeries above. 0.0 (falsy) on either price means that
+							// leg had no trades in the window, same absent-price convention
+							// the lines above already check, so the fill is skipped rather
+							// than drawn against a spurious price-0 edge.
+							const fillRange = fillRectTimeRange();
+							if (fillRange && latest.bpg_price && latest.spg_price && latest.bpg_price < latest.spg_price) {
+								putFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.bpg_price } });
+								putFillSeries.setData([
+									{ time: fillRange.fromTime, value: latest.spg_price },
+									{ time: fillRange.toTime, value: latest.spg_price },
+								]);
+							} else {
+								putFillSeries.setData([]);
+							}
+							if (fillRange && latest.bcg_price && latest.scg_price && latest.bcg_price > latest.scg_price) {
+								callFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.scg_price } });
+								callFillSeries.setData([
+									{ time: fillRange.fromTime, value: latest.bcg_price },
+									{ time: fillRange.toTime, value: latest.bcg_price },
+								]);
+							} else {
+								callFillSeries.setData([]);
 							}
 						} finally {
 							hideSpinner();

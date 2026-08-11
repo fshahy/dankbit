@@ -1459,6 +1459,8 @@ class ChartController(http.Controller):
             series.append({
                 "instrument": instrument,
                 "t": int(ts.timestamp() * 1000),
+                "confirmation_status": "confirmed",
+                "expiry_index": None,
                 "index_price": float(index_price or 0.0),
                 "high_resistance": float(high_resistance or 0.0),
                 "low_support": float(low_support or 0.0),
@@ -1475,12 +1477,60 @@ class ChartController(http.Controller):
                 "smart_liq_lower_strength": float(smart_liq_lower_strength or 0.0),
             })
 
+        # Keep all three active expiry anchors visible.  A newly rolled E2/E3
+        # can exist in option trades before its structural Bands row passes
+        # the mature-session confirmation gate.  Previously that missing row
+        # vanished from the response, making the Green/Red paths stop one or
+        # two days early.  Serve a non-persisted raw calculation for only the
+        # missing active instruments and label it provisional.  The chart
+        # renders these additions dashed; confirmed history is never replaced.
+        bands_model = request.env["dankbit.bands"]
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        expirations = bands_model._distinct_expirations(
+            asset, now_naive, bands_model.TRACKED_EXPIRY_COUNT,
+            future_days_only=True,
+        )
+        active_instruments = {
+            bands_model._format_instrument(asset, expiration): (expiry_index, expiration)
+            for expiry_index, expiration in enumerate(expirations)
+        }
+        by_instrument = {row["instrument"]: row for row in series}
+        for instrument, (expiry_index, expiration) in active_instruments.items():
+            confirmed = by_instrument.get(instrument)
+            if confirmed is not None:
+                confirmed["expiry_index"] = expiry_index
+                continue
+            live = bands_model._compute_asset(
+                asset, expiry_index=expiry_index, future_days_only=True,
+            )
+            if not live or not live.get("high_resistance") or not live.get("low_support"):
+                continue
+            exp_ts = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
+            provisional = {
+                "instrument": instrument,
+                "t": int(exp_ts.timestamp() * 1000),
+                "confirmation_status": "provisional",
+                "expiry_index": expiry_index,
+                "index_price": float(live.get("index_price") or 0.0),
+                "high_resistance": float(live.get("high_resistance") or 0.0),
+                "low_support": float(live.get("low_support") or 0.0),
+                "high_resistance_positive": bool(live.get("high_resistance_positive")),
+                "low_support_positive": bool(live.get("low_support_positive")),
+                "gamma_band": float(live.get("gamma_band") or 0.0),
+                "delta_band": float(live.get("delta_band") or 0.0),
+                "smart_liq_upper_price": float(live.get("smart_liq_upper_price") or 0.0),
+                "smart_liq_lower_price": float(live.get("smart_liq_lower_price") or 0.0),
+                "smart_liq_upper_strength": float(live.get("smart_liq_upper_strength") or 0.0),
+                "smart_liq_lower_strength": float(live.get("smart_liq_lower_strength") or 0.0),
+            }
+            series.append(provisional)
+            by_instrument[instrument] = provisional
+
         # In trailing-window preview mode the structural Green/Red Bands
         # remain the persisted session-confirmed values, while Gamma and
         # Smart Liquidity are replaced by a fresh computation using only
         # the selected option-flow window.  Nothing is persisted here.
         if hours is not None:
-            by_instrument = {row["instrument"]: row for row in series}
             for expiry_index in range(request.env["dankbit.bands"].TRACKED_EXPIRY_COUNT):
                 live = request.env["dankbit.bands"]._compute_asset(
                     asset, expiry_index=expiry_index, hours=hours,
@@ -1495,6 +1545,8 @@ class ChartController(http.Controller):
                     row = {
                         "instrument": live["instrument"],
                         "t": int(expiration.timestamp() * 1000),
+                        "confirmation_status": "provisional",
+                        "expiry_index": expiry_index,
                         "index_price": float(live["index_price"] or 0.0),
                         "high_resistance": 0.0, "low_support": 0.0,
                         "high_resistance_positive": False, "low_support_positive": False,

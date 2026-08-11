@@ -841,7 +841,7 @@ class DankbitSignal(models.Model):
                     min_quality = 72.0 if is_weekend else 65.0
                     reasons = []
                     if coverage4 < 3 or coverage1 < 3:
-                        reasons.append("Incomplete E1/E2/E3 coverage")
+                        reasons.append("Incomplete EA1/EA2/EA3 coverage")
                     if quality < min_quality:
                         reasons.append("Quality %.1f below %.1f threshold" % (quality, min_quality))
                     if standard_direction == "neutral":
