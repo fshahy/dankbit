@@ -299,6 +299,7 @@ class Bands(models.Model):
             ("expiration", "=", target_expiration),
             ("deribit_ts", ">=", window_start),
             ("deribit_ts", "<=", as_of),
+            ("iv", "!=", 0),
         ]
         trades = Trade.search(domain=domain)
         if not trades:

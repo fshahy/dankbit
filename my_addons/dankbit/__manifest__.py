@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "Dankbit",
-    "version": "18.0.0.0.32",
+    "version": "18.0.0.0.33",
     "category": "Options Greeks",
     "author": "Farid Shahy <fshahy@gmail.com>",
     "license": "Other OSI approved licence",

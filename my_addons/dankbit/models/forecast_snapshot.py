@@ -254,6 +254,7 @@ class ForecastSnapshot(models.Model):
             ("name", "=ilike", f"{instrument}-%"),
             ("deribit_ts", ">=", window_start),
             ("deribit_ts", "<=", as_of),
+            ("iv", "!=", 0),
         ])
         if not trades:
             return fallback
@@ -565,6 +566,7 @@ class ForecastSnapshot(models.Model):
             FROM dankbit_trade
             WHERE name ILIKE %s
               AND deribit_ts >= %s
+              AND iv <> 0
         """, (f"{asset}-%", iv_window_start))
         avg_iv_row = cr.fetchone()
         sigma_annual = float(avg_iv_row[0]) / 100.0 if avg_iv_row and avg_iv_row[0] else None

@@ -258,6 +258,7 @@ class ChartController(http.Controller):
             ("name", "ilike", f"{instrument}"),
             ("expiration", ">=", datetime.now(timezone.utc).replace(tzinfo=None)),
             ("deribit_ts", ">=", cutoff),
+            ("iv", "!=", 0),
         ]
 
         trades = request.env["dankbit.trade"].search(domain=domain)
@@ -399,6 +400,7 @@ class ChartController(http.Controller):
             ("name", "=ilike", f"{instrument}-%"),
             ("expiration", ">=", datetime.now(timezone.utc).replace(tzinfo=None)),
             ("deribit_ts", ">=", midnight_utc),
+            ("iv", "!=", 0),
         ]
         trades = request.env["dankbit.trade"].search(domain=domain)
 
@@ -672,6 +674,7 @@ class ChartController(http.Controller):
             ("deribit_ts", ">=", midnight_utc),
             ("direction", "=", cfg["direction"]),
             ("option_type", "=", cfg["option_type"]),
+            ("iv", "!=", 0),
         ]
         trades = request.env["dankbit.trade"].search(domain=domain)
 
@@ -1828,7 +1831,7 @@ class ChartController(http.Controller):
             if len(expirations) > expiry_index:
                 instrument = bands_model._format_instrument(asset, expirations[expiry_index])
             if instrument:
-                domain = [("name", "=ilike", f"{instrument}-%")]
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
                     domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
                 trades = trades.with_context(active_test=False).search(domain)
@@ -1853,7 +1856,7 @@ class ChartController(http.Controller):
                     expiry_dt = None
 
             if expiry_mode == "all" or expiry_dt:
-                domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of)]
+                domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of), ("iv", "!=", 0)]
                 if expiry_dt:
                     domain.append(("expiration", "<=", expiry_dt))
                 if window_start is not None:
