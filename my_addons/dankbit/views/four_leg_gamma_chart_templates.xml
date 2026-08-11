@@ -22,28 +22,22 @@
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms).
 	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default —
-	     this page originally also offered Weekly/Monthly/All, removed
-	     per product decision in favor of Nearest+1/Nearest+2, later
-	     widened to Nearest+3/Nearest+4/Nearest+5 per a further product
-	     decision, then narrowed back down to Nearest+1/Nearest+2 per a
-	     still later product decision) picks that
-	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. "Window"
-	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the
-	     "All" no-window-bound option, split out from /gt/<asset>'s own
-	     Y_CHART_WINDOW_HOURS_CHOICES (12/24/48) once this page's own set
-	     grew, 24h default — 16h/20h/48h/72h and "All" were offered at
-	     one point and removed per product decision; 3h/5h/7h were added
-	     later, filling in the gaps left in the original 1h/2h/4h/6h/8h/
-	     12h set; 24h and "All" were both re-added afterwards per later
-	     product decisions; 1h/2h/3h/4h/5h/6h/7h/8h were then removed in
-	     a further round, leaving only 12h/24h/All, and the default moved
-	     from 8h to "All" at that point; 8h was then re-added per a still
-	     later product decision (default stayed "All"), and 4h after
-	     that; the default then moved back to 8h per a later product
-	     decision, then to 24h, then to 4h, then back to 24h per still
-	     later product decisions; 1h/2h/3h/5h/6h/7h were then re-added per
-	     a still later product decision, filling this dropdown back out to
-	     every 1h step from 1h through 8h plus 12h/24h/All) independently
+	     ISOLATED to that one resolved instrument's own trades — PLUS
+	     Weekly/Monthly/All, CUMULATIVE through the selected expiry, same
+	     domain the since-removed standalone /mwa/<asset> page's own
+	     mwa_gamma_json used before that page was folded into this one
+	     and removed; see four_leg_gamma_json for the full option-family
+	     history and resolution) picks that
+	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. The routine
+	     poll (dankbit.refresh_interval) is skipped client-side while a
+	     cumulative Weekly/Monthly/All expiry is selected — same reason
+	     /mwa/<asset> never polled that class of computation on a timer
+	     at all — see CUMULATIVE_EXPIRY_MODES in the template's own
+	     script. "Window" dropdown (4h/8h/12h/24h/48h/72h/All —
+	     FOUR_LEG_WINDOW_HOURS_CHOICES plus the "All" no-window-bound
+	     option, 24h default; see FOUR_LEG_WINDOW_HOURS_CHOICES/
+	     FOUR_LEG_DEFAULT_WINDOW_HOURS in main.py for this choice set's
+	     full history) independently
 	     picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint. -->
@@ -113,6 +107,39 @@
 					}
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
+					/* "Settings" button/dialog (see openSettingsModal() below) —
+					   color pickers for this page's own 4 gamma-leg lines.
+					   Plain centered overlay + box, no library — same
+					   hand-rolled shape as the Delta Chart's own modal
+					   (dankbit_templates.xml), copied rather than shared so
+					   the two pages' color settings stay completely
+					   independent (see COLOR_STORAGE_KEY below). */
+					.modal-overlay {
+						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+						background: rgba(0,0,0,0.4);
+						z-index: 30;
+						display: flex; align-items: center; justify-content: center;
+					}
+					.modal-box {
+						background: #fff; border-radius: 6px; padding: 16px 20px;
+						font-family: monospace; font-size: 11pt; color: #333;
+						min-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+					}
+					.modal-header {
+						display: flex; justify-content: space-between; align-items: center;
+						font-weight: bold; margin-bottom: 12px; font-size: 12pt;
+					}
+					.modal-close { cursor: pointer; padding: 0 4px; }
+					.modal-close:hover { color: #c00; }
+					.modal-section { margin-bottom: 12px; }
+					.modal-section-title { font-weight: bold; margin-bottom: 6px; color: #555; }
+					.color-row {
+						display: flex; align-items: center; justify-content: space-between;
+						gap: 8px; padding: 3px 0;
+					}
+					.color-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
 					/* "Light"/"Dark" theme dropdown — same localStorage key
 					   (dankbit_theme) every other TV chart page in this addon
 					   uses, so the preference carries over across all of them. */
@@ -127,6 +154,9 @@
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
+					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
+					body.dark .modal-section-title { color: #aaa; }
+					body.dark .modal-close:hover { color: #f66; }
 
 					/* Shown while refreshFourLegGamma() is fetching/computing the
 					   4 gamma lines (a fresh options.per_leg_greeks() call
@@ -165,19 +195,18 @@
 						<option value="nearest" selected="selected">Nearest</option>
 						<option value="nearest_plus_1">Nearest+1</option>
 						<option value="nearest_plus_2">Nearest+2</option>
+						<option value="weekly">Weekly</option>
+						<option value="monthly">Monthly</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="1">1h</option>
-						<option value="2">2h</option>
-						<option value="3">3h</option>
 						<option value="4">4h</option>
-						<option value="5">5h</option>
-						<option value="6">6h</option>
-						<option value="7">7h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
 						<option value="24" selected="selected">24h</option>
+						<option value="48">48h</option>
+						<option value="72">72h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -186,10 +215,30 @@
 						<option value="dark">Dark</option>
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
 					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
+				<div id="settings-modal" class="modal-overlay" style="display:none" onclick="if (event.target === this) closeSettingsModal()">
+					<div class="modal-box">
+						<div class="modal-header">
+							<span>Chart Appearance</span>
+							<span class="modal-close" onclick="closeSettingsModal()">&#10005;</span>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Gamma Lines</div>
+							<label class="color-row">Buyer Call (LC) <input type="color" id="color-bcg"/></label>
+							<label class="color-row">Buyer Put (LP) <input type="color" id="color-bpg"/></label>
+							<label class="color-row">Seller Call (SC) <input type="color" id="color-scg"/></label>
+							<label class="color-row">Seller Put (SP) <input type="color" id="color-spg"/></label>
+						</div>
+						<div class="modal-actions">
+							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
+							<button class="tf-btn" onclick="saveChartColors()">Save</button>
+						</div>
+					</div>
 				</div>
 				<script>//<![CDATA[
 					const cfg      = document.getElementById('cfg').dataset;
@@ -208,18 +257,33 @@
 					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
 					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
-					// "Expiry" dropdown — which single expiry's trades feed
-					// the 4 gamma legs, "nearest" default. "nearest_plus_1"/
-					// "nearest_plus_2" are the 1st/2nd active expiry after
-					// the nearest one, same ordinal notion /gt/<asset>'s own
-					// 2nd/3rd price lines use (this page originally also
-					// offered weekly/monthly/"every active expiry at once",
-					// removed per product decision in favor of
-					// nearest_plus_1/nearest_plus_2, later widened to
-					// nearest_plus_3/nearest_plus_4/nearest_plus_5, then
-					// narrowed back down to nearest_plus_1/nearest_plus_2
-					// per a still later product decision).
+					// "Expiry" dropdown — which expiry's trades feed the 4
+					// gamma legs, "nearest" default. Two families:
+					// "nearest"/"nearest_plus_1"/"nearest_plus_2" (the
+					// nearest active expiry and the 1st/2nd one after it)
+					// ISOLATE trades to that one resolved instrument's own
+					// trades; "weekly"/"monthly"/"all" instead resolve
+					// against the configured weekly_expiry/monthly_expiry
+					// instrument (or every non-expired instrument at all
+					// for "all") and compute CUMULATIVE through it — same
+					// domain the since-removed /mwa/<asset> page's own
+					// mwa_gamma_json used, folded onto this dropdown
+					// alongside the original ordinal options once that
+					// standalone page was removed — see four_leg_gamma_json.
 					let EXPIRY_MODE = 'nearest';
+					// The cumulative family (weekly/monthly/all) is the
+					// same class of "every active instrument at once"
+					// computation /mwa/<asset> never polled on a timer at
+					// all (options.per_leg_gamma() loops per trade in
+					// plain Python, so cost scales directly with trade
+					// count). setInterval(refreshFourLegGamma, REFRESH)
+					// below skips its own fetch entirely while EXPIRY_MODE
+					// is one of these — refreshFourLegGamma() itself is
+					// still called directly (bypassing this list) on page
+					// load and on any manual Timeframe/Expiry/Window
+					// change, same "on-demand only" pattern /mwa/<asset>
+					// used for every one of its own expiry options.
+					const CUMULATIVE_EXPIRY_MODES = ['weekly', 'monthly', 'all'];
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
 					// EXPIRY_MODE. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
@@ -247,20 +311,8 @@
 					// this dropdown back out to every 1h step from 1h
 					// through 8h plus 12h/24h/All.
 					let WINDOW_HOURS = 24;
-					// `includeAllAvg` appends `&all_avg=1`, which tells
-					// four_leg_gamma_json to also recompute the "ALL AVG"
-					// line's average-gamma-across-every-active-expiry
-					// reading — the same class of heavy, every-instrument-
-					// at-once computation /mwa/<asset>'s own gamma lines
-					// are (deliberately never polled on a timer there, see
-					// mwa_gamma_chart's own docstring). Left off by default
-					// so the routine refreshFourLegGamma() timer tick below
-					// stays as cheap as it was before the ALL AVG line
-					// existed; only passed true on page load and on a
-					// manual Expiry/Window change (see setExpiry()/
-					// setWindow()/init() below).
-					const fourLegGammaUrl = includeAllAvg =>
-						'/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS + (includeAllAvg ? '&all_avg=1' : '');
+					const fourLegGammaUrl = () =>
+						'/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -307,21 +359,34 @@
 					const THEME_STORAGE_KEY = 'dankbit_theme';
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
-					// Black would vanish into the dark-mode chart background
-					// (#000000), so LC/LP swap to a lighter gray there, same
-					// axisBlack()-style convention every other "plain black"
-					// line in this addon already uses (see dankbit_templates.xml).
-					function axisBlack() { return DARK_MODE ? '#e8e8e8' : '#000000'; }
-					// No pre-existing per-leg color convention elsewhere in
-					// this addon to match (the Zones page's own Gamma
-					// section header is a single violet label, not 4
-					// separate per-leg colors). LC/LP are both black (via
-					// axisBlack()); SC/SP are both orange — per product
-					// decision, not distinct hues per leg.
-					const SCG_COLOR = '#fb8c00'; // Seller Call Gamma — orange
-					const SPG_COLOR = '#fb8c00'; // Seller Put Gamma — orange
-					const AVG_GAMMA_COLOR = '#bdbdbd'; // Average of LC/LP/SC/SP prices — light gray
-					const ALL_AVG_GAMMA_COLOR = '#bdbdbd'; // Average across every active expiry — light gray, same hue AVG_GAMMA_COLOR uses (distinguished from it only by title text, same convention SCG/SPG's shared orange already uses on this page)
+
+					// "Settings" button/dialog (see openSettingsModal() below,
+					// after Ruler) — user-pickable colors for this page's own
+					// 4 gamma-leg lines, persisted per-browser to localStorage
+					// under a key completely separate from the Delta Chart's
+					// own 'dankbit_chart_colors' (dankbit_templates.xml) — the
+					// two pages' color settings are deliberately independent,
+					// not shared/synced, since they're maintained by different
+					// people (Delta Chart: Thales's dev; this page: dankbit's
+					// own). No line-style picker (unlike the Delta Chart's own
+					// modal) since these 4 lines are always solid
+					// createPriceLine()s. Defaults match this page's original
+					// fixed colors (LC/LP black, SC/SP orange) — no longer
+					// tied to DARK_MODE the way the old axisBlack()-based LC/LP
+					// color was, same as every other user-configurable color
+					// elsewhere in this addon (e.g. the Delta Chart's own Bands/
+					// Smart Liquidity colors, which are likewise fixed once
+					// chosen rather than swapping with the theme).
+					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
+					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
+					let chartColors = Object.assign({}, DEFAULT_COLORS);
+					try {
+						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							if (savedColors[key]) chartColors[key] = savedColors[key];
+						});
+					} catch (e) { /* malformed stored value — fall back to defaults */ }
+
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
@@ -360,7 +425,7 @@
 					// "whitespace" points, so a real, fully-valued (if
 					// invisible) line series is used instead; all series on a
 					// chart share one time scale, so its future points extend
-					// the same axis the candlesticks and the 5 gamma price
+					// the same axis the candlesticks and the 4 gamma price
 					// lines are drawn on, leaving room to see those lines
 					// extend forward instead of ending flush at the last bar.
 					const futureAxisSeries = chart.addLineSeries({
@@ -375,7 +440,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, allAvgGammaPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -526,12 +591,12 @@
 
 					async function setExpiry(mode) {
 						EXPIRY_MODE = mode;
-						await refreshFourLegGamma(true);
+						await refreshFourLegGamma();
 					}
 
 					async function setWindow(hours) {
 						WINDOW_HOURS = hours === 'all' ? 'all' : parseInt(hours, 10);
-						await refreshFourLegGamma(true);
+						await refreshFourLegGamma();
 						setStatus(statusText());
 					}
 
@@ -561,10 +626,10 @@
 					// error still clears it rather than leaving it spinning
 					// forever — same pattern the /gt page's own
 					// refreshGammaTriple() uses.
-					async function refreshFourLegGamma(includeAllAvg = false) {
+					async function refreshFourLegGamma() {
 						showSpinner();
 						try {
-							const data = await (await fetch(fourLegGammaUrl(includeAllAvg))).json();
+							const data = await (await fetch(fourLegGammaUrl())).json();
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
@@ -579,16 +644,6 @@
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
-							// allAvgGammaPriceLine is deliberately left untouched
-							// unless this call actually requested a fresh
-							// all-expiries reading (includeAllAvg) — see
-							// fourLegGammaUrl()'s own comment above. The routine
-							// timer tick (includeAllAvg=false) never re-requests
-							// that heavy computation, so it must not clear the
-							// line either; it simply keeps showing its last
-							// computed value until the next load/dropdown change.
-							if (includeAllAvg && allAvgGammaPriceLine) { series.removePriceLine(allAvgGammaPriceLine); allAvgGammaPriceLine = null; }
 							if (!latest) return;
 
 							// 0.0 means absent (same convention every gamma_band/
@@ -598,88 +653,40 @@
 							// (unlike most other price lines in this addon, which
 							// force a black axis label regardless of line color)
 							// so the label is identifiable by color at a glance
-							// with 4 lines on one chart — except LC/LP, which are
-							// deliberately both black (axisBlack(), theme-aware)
-							// per product decision, so their axis labels match
-							// each other instead of standing apart.
+							// with 4 lines on one chart. Colors come from
+							// chartColors (user-configurable via the "Settings"
+							// button/dankbit_4l_chart_colors — see above), not a
+							// theme-reactive axisBlack()/fixed constant.
 							if (latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
-									price: latest.bcg_price, color: axisBlack(), lineWidth: 2,
+									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: axisBlack(),
+									axisLabelVisible: true, axisLabelColor: chartColors.bcg,
 									title: 'LC ' + formatAbbreviated(latest.bcg_value),
 								});
 							}
 							if (latest.bpg_price) {
 								bpgPriceLine = series.createPriceLine({
-									price: latest.bpg_price, color: axisBlack(), lineWidth: 2,
+									price: latest.bpg_price, color: chartColors.bpg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: axisBlack(),
+									axisLabelVisible: true, axisLabelColor: chartColors.bpg,
 									title: 'LP ' + formatAbbreviated(latest.bpg_value),
 								});
 							}
 							if (latest.scg_price) {
 								scgPriceLine = series.createPriceLine({
-									price: latest.scg_price, color: SCG_COLOR, lineWidth: 2,
+									price: latest.scg_price, color: chartColors.scg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: SCG_COLOR,
+									axisLabelVisible: true, axisLabelColor: chartColors.scg,
 									title: 'SC ' + formatAbbreviated(latest.scg_value),
 								});
 							}
 							if (latest.spg_price) {
 								spgPriceLine = series.createPriceLine({
-									price: latest.spg_price, color: SPG_COLOR, lineWidth: 2,
+									price: latest.spg_price, color: chartColors.spg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: SPG_COLOR,
+									axisLabelVisible: true, axisLabelColor: chartColors.spg,
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
-								});
-							}
-							// Average of the legs' own gamma PRICE levels (not
-							// their gamma value) — over whichever legs are
-							// actually present (0.0 means absent, see above),
-							// not a fixed /4, since dividing a partial sum by 4
-							// would silently skew the average toward 0 for
-							// every missing leg. Skipped only when none of the
-							// 4 are present at all. The label additionally
-							// shows the average of those same legs' own gamma
-							// VALUES (paired with price so both are averaged
-							// over the identical present-leg set), same
-							// formatAbbreviated() the other 4 lines already
-							// use for their own value.
-							const gammaLegs = [
-								{ price: latest.bcg_price, value: latest.bcg_value },
-								{ price: latest.bpg_price, value: latest.bpg_value },
-								{ price: latest.scg_price, value: latest.scg_value },
-								{ price: latest.spg_price, value: latest.spg_value },
-							].filter(leg => leg.price);
-							if (gammaLegs.length) {
-								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
-								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
-								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
-									title: 'AVG ' + formatAbbreviated(avgGammaValue),
-								});
-							}
-							// Average gamma across EVERY active expiry (not just the
-							// one selected in "Expiry"), over the same trailing-hours
-							// Window this page already has selected — server-computed
-							// (four_leg_gamma_json's own all_avg_price/all_avg_value,
-							// same present-leg-only averaging as the AVG line above,
-							// just over the all-expiries trade set). Only drawn when
-							// this fetch actually requested it (includeAllAvg) —
-							// the server leaves all_avg_price at its 0.0 "absent"
-							// sentinel on every routine-tick request that omitted
-							// `all_avg=1`, so gating on includeAllAvg here (rather
-							// than just the 0.0 check) avoids misreading "didn't
-							// ask" as "genuinely no trades".
-							if (includeAllAvg && latest.all_avg_price) {
-								allAvgGammaPriceLine = series.createPriceLine({
-									price: latest.all_avg_price, color: ALL_AVG_GAMMA_COLOR, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: ALL_AVG_GAMMA_COLOR,
-									title: 'ALL AVG ' + formatAbbreviated(latest.all_avg_value),
 								});
 							}
 						} finally {
@@ -703,6 +710,46 @@
 						DARK_MODE = document.getElementById('theme-select').value === 'dark';
 						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
 						applyTheme();
+					}
+
+					// "Settings" modal — see COLOR_STORAGE_KEY/DEFAULT_COLORS/
+					// chartColors above. Unlike the Delta Chart's own version
+					// of these 4 functions (which call applyOptions() on
+					// already-created, persistent line series), this page's 4
+					// gamma lines are plain createPriceLine()s recreated fresh
+					// on every refreshFourLegGamma() call — there's no series
+					// object to restyle in place, so Save/Reset just trigger
+					// an immediate redraw instead.
+					function openSettingsModal() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						document.getElementById('settings-modal').style.display = 'flex';
+					}
+
+					function closeSettingsModal() {
+						document.getElementById('settings-modal').style.display = 'none';
+					}
+
+					function saveChartColors() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) chartColors[key] = input.value;
+						});
+						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
+						refreshFourLegGamma();
+						closeSettingsModal();
+					}
+
+					function resetChartColors() {
+						chartColors = Object.assign({}, DEFAULT_COLORS);
+						localStorage.removeItem(COLOR_STORAGE_KEY);
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const input = document.getElementById('color-' + key);
+							if (input) input.value = chartColors[key];
+						});
+						refreshFourLegGamma();
 					}
 
 					let rulerActive = false;
@@ -748,7 +795,7 @@
 					async function init() {
 						try {
 							await loadCandles();
-							await refreshFourLegGamma(true);
+							await refreshFourLegGamma();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -756,11 +803,15 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					// includeAllAvg deliberately omitted here (defaults false)
-					// — the routine timer only refreshes the 4 per-instrument
-					// gamma lines, not the heavier all-expiries "ALL AVG" line
-					// (see fourLegGammaUrl()'s own comment above).
-					setInterval(() => refreshFourLegGamma(false), REFRESH);
+					// Skips the routine poll entirely while a cumulative
+					// Weekly/Monthly/All Expiry is selected (see
+					// CUMULATIVE_EXPIRY_MODES above) — refreshFourLegGamma()
+					// still runs directly from init()/setExpiry()/setWindow()
+					// regardless of mode, so a manual dropdown change always
+					// gets a fresh read.
+					setInterval(() => {
+						if (!CUMULATIVE_EXPIRY_MODES.includes(EXPIRY_MODE)) refreshFourLegGamma();
+					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>

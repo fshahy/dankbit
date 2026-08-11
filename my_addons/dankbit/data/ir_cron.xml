@@ -166,24 +166,6 @@
             <field name="state">code</field><field name="code">model.check_outcomes()</field><field name="priority">7</field>
         </record>
 
-        <record id="dankbit_compute_5a_cron" model="ir.cron">
-            <field name="active">True</field>
-            <field name="name">Dankbit - Compute 5A Gamma Snapshot</field>
-            <field name="model_id" ref="model_dankbit_5a"/>
-            <field name="interval_number">15</field>
-            <field name="interval_type">minutes</field>
-            <!-- Phase-aligned to :00/:15/:30/:45 UTC, same anchor trick the
-                 1H Next Candle Forecast cron above uses — not required for
-                 correctness here (unlike that cron, nothing downstream
-                 expects a specific boundary), just keeps this tick's
-                 timing predictable/inspectable regardless of when the
-                 record was created/activated. -->
-            <field name="nextcall">2020-01-01 00:00:00</field>
-            <field name="state">code</field>
-            <field name="code">model.compute_snapshot()</field>
-            <field name="priority">5</field>
-        </record>
-
         <record id="dankbit_delete_old_http_logs_cron" model="ir.cron">
             <field name="active">False</field>
             <field name="name">Dankbit - Delete Old HTTP Logs</field>

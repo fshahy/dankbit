@@ -439,14 +439,12 @@ def per_leg_gamma(STs, trades, r=0.0):
     both delta computations (delta_saturation_price() plus the interpolated
     delta_value), each its own full O(trades x len(STs)) pass per leg, that
     per_leg_greeks() always computes regardless of whether a caller needs
-    them. Built for dankbit.5a.compute_and_create() (models/dankbit_5a.py),
-    which combines up to 5 scopes (mostly unbounded-time-window, plus
-    one trailing-24h scope) into a single cron tick and only ever reads
+    them. Originally built for the since-removed dankbit.5a model, which
+    combined up to 5 scopes into a single cron tick and only ever read
     gamma_price/gamma_value — calling per_leg_greeks() there was doing
-    ~5x the necessary Black-Scholes curve work per leg. Formerly called
-    directly from five_a_gamma_json (main.py) on every request, before
-    that computation moved onto dankbit.5a's own 15-minute cron; the
-    route now just reads the latest persisted row. Returns
+    ~5x the necessary Black-Scholes curve work per leg. Still used by
+    four_leg_gamma_json (main.py), which only ever needs the gamma
+    numbers too. Returns
     {leg_name: {"trades", "gamma_price", "gamma_value"}}, same None-price/
     0.0-value "absent" convention as per_leg_greeks() for a leg with zero
     trades."""
@@ -576,27 +574,3 @@ def build_zone_curves(instrument_name, index_price, trades, from_price, to_price
 
     return longs_obj, shorts_obj
 
-
-def max_pain(strikes, call_oi, put_oi):
-    """The Max Pain strike for an option chain: the strike in `strikes`
-    (a plain price list, no synthetic grid — the payout curve below is
-    piecewise-linear and only bends at a strike, so its minimum always
-    lands exactly on one, same reasoning options.zone_summary's own
-    crossing-based extrema rely on) at which the total intrinsic value
-    owed to every option holder in the chain — sum over every strike k of
-    call_oi[k] * max(S - k, 0) + put_oi[k] * max(k - S, 0), evaluated at
-    settlement price S — is smallest, i.e. where option sellers/writers
-    as a group are collectively best off. `call_oi`/`put_oi` are plain
-    {strike: open_interest} dicts (real Deribit open interest, not
-    trade-derived positioning — see
-    ChartController._max_pain_for_expiry). None for an empty chain."""
-    if not strikes:
-        return None
-
-    def total_payout(S):
-        return (
-            sum(call_oi.get(k, 0.0) * max(S - k, 0.0) for k in strikes)
-            + sum(put_oi.get(k, 0.0) * max(k - S, 0.0) for k in strikes)
-        )
-
-    return float(min(strikes, key=total_payout))

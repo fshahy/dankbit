@@ -424,13 +424,11 @@ class Trade(models.Model):
     def get_candles_deribit_perpetual(self, asset, interval="4h", limit=500):
         """Real Deribit perpetual-futures candles (BTC-PERPETUAL/
         ETH-PERPETUAL), oldest-first, same {t, o, h, l, c} shape
-        get_candles() returns — used by /gt/<asset>, /4l/<asset>,
-        /mwa/<asset>, and /5a/<asset> (all via the shared
-        klines_futures_proxy route), per
-        product decision to source those pages' candles from
-        Deribit's own perpetual futures instead of Kraken Futures; every
-        other TradingView page in this addon (/chart, /oi, /mp) keeps
-        using get_candles()/Binance spot unchanged.
+        get_candles() returns — used by /4l/<asset> (via
+        klines_futures_proxy), per product decision to source that
+        page's candles from Deribit's own perpetual futures instead of
+        Kraken Futures; every other TradingView page in this addon
+        (/chart) keeps using get_candles()/Binance spot unchanged.
 
         Deribit's public get_tradingview_chart_data endpoint takes an
         explicit start_timestamp/end_timestamp window (unlike Binance's/
@@ -449,7 +447,7 @@ class Trade(models.Model):
         fetched. Cached in the separate _DERIBIT_PERP_CACHE dict (same
         short fixed _DERIBIT_PERP_CANDLES_CACHE_TTL=5s reasoning as
         _BINANCE_CANDLES_CACHE_TTL — this gets polled every 5s per open
-        /gt, /4l, /mwa, or /5a tab), keyed by the *requested* interval/limit
+        /4l tab), keyed by the *requested* interval/limit
         (not the native resolution actually fetched), so a 4h request and
         a 1h request never collide in the cache despite both hitting
         Deribit at resolution=60."""

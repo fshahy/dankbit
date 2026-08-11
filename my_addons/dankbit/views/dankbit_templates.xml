@@ -377,12 +377,6 @@
 						<option value="light">Light</option>
 						<option value="dark">Dark</option>
 					</select>
-					<t t-if="show_gamma_point == 'true'">
-						<label class="toggle-label">
-							<input type="checkbox" id="gamma-tops-toggle" onchange="onToggleGammaTops()"/>
-							Top OI(s)
-						</label>
-					</t>
 					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
 						<label class="toggle-label">
 							<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
@@ -418,9 +412,6 @@
 					</t>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
-					<t t-if="show_strike_gamma == 'true'">
-						<span class="tf-label" id="strike-gamma-instrument-label"><t t-esc="strike_gamma_instrument"/></span>
-					</t>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -448,10 +439,6 @@
 							<div class="modal-section-title">Smart Liquidity</div>
 							<label class="line-row"><span>Upper</span><input type="color" id="color-smartLiqUpper"/><select id="style-smartLiqUpper"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
 							<label class="line-row"><span>Lower</span><input type="color" id="color-smartLiqLower"/><select id="style-smartLiqLower"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
-						</div>
-						<div class="modal-section">
-							<div class="modal-section-title">Strike Gamma</div>
-							<label class="line-row"><span>Max Pain</span><input type="color" id="color-maxPain"/><select id="style-maxPain"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title" id="forecast-settings-title">Forecast Candles (4H)</div>
@@ -485,24 +472,14 @@
 					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
 					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
 					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
-					// Only true on /oi/<asset> — /chart/<asset> and
-					// /mp/<instrument> always pass show_gamma_point="false"
-					// (see _build_tv_chart_context).
+					// Always "false" now — /oi/<asset> (its own "Top OI(s)"
+					// checkbox) has been removed; kept as an explicit context
+					// key/flag since MINIMAL_CHART below still reads it.
 					const SHOW_GAMMA_POINT = cfg.showGammaPoint === 'true';
-					// Only true on /mp/<instrument> — the restored "Strike
-					// Gamma" indicator (see drawStrikeGammaLines below), one
-					// price line per distinct strike rather than /oi/<asset>'s
-					// single top-strike-per-scope "Top OI(s)" line set.
+					// Always "false" now — /mp/<instrument> (its own "Strike
+					// Gamma" indicator) has been removed; kept as an explicit
+					// context key/flag since MINIMAL_CHART below still reads it.
 					const SHOW_STRIKE_GAMMA = cfg.showStrikeGamma === 'true';
-					// The instrument /mp/<instrument> was requested with
-					// (e.g. "BTC-25JUL26") — unrelated to INSTRUMENT above
-					// (the configured *weekly* expiry), this is whatever
-					// specific expiry the URL named, used as the isolated
-					// cutoff for gamma-by-strike-at (see refreshStrikeGamma) —
-					// that one instrument's own trades only, not cumulative
-					// through it the way Top OI(s)' scopes are.
-					const STRIKE_GAMMA_INSTRUMENT = cfg.strikeGammaInstrument || '';
-					const SGI_URL = STRIKE_GAMMA_INSTRUMENT ? '/api/gamma-by-strike-at/' + STRIKE_GAMMA_INSTRUMENT : '';
 					// Thales Forecast candle colors — user-configurable via
 					// Settings → Dankbit → Thales Forecast (res.config.settings),
 					// defaults are light red/green so forecast candles stay
@@ -576,19 +553,6 @@
 						if (hours === null) return url;
 						return url + (url.includes('?') ? '&' : '?') + 'hours=' + hours;
 					}
-					// "Top OI(s)" checkbox (Gamma Chart only) — replaces the
-					// old separate "Strike Gamma"/"Strike Gamma Nearest"/
-					// "Strike Gamma Weekly"/"Strike Gamma Monthly" checkboxes
-					// with one: instead of drawing every strike that has
-					// traded (the old light-gray-to-black gradient), this
-					// draws exactly one line per scope (Weekly/Monthly/All
-					// expiries) — that scope's own single
-					// highest-positive-gamma strike, via the same
-					// _gamma_by_strike()-backed
-					// gamma_by_strike_json/gamma_by_strike_until_json routes
-					// the old checkboxes used (see refreshGammaTops below).
-					// Unchecked by default.
-					let SHOW_GAMMA_TOPS = false;
 					// "Light"/"Dark" theme dropdown (all 3 TV chart pages — Delta
 					// Chart, Gamma Chart, Strike Gamma) — see onThemeChange()/
 					// applyTheme() further down. Light is the default, matching
@@ -640,7 +604,6 @@
 						smartLiqUpper: '#2e7d32',
 						smartLiqLower: '#c62828',
 						gammaBand: '#c9a0dc',
-						maxPain: '#fb8c00',
 						forecastUp: FORECAST_UP_COLOR,
 						forecastDown: FORECAST_DOWN_COLOR,
 						forecastWickUp: FORECAST_WICK_UP_COLOR,
@@ -652,7 +615,6 @@
 						gammaBand: 'dashed',
 						smartLiqUpper: 'dashed',
 						smartLiqLower: 'dashed',
-						maxPain: 'solid',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					let chartLineStyles = Object.assign({}, DEFAULT_LINE_STYLES);
@@ -712,9 +674,6 @@
 					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
 					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
 					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
-					const SG_URL           = '/api/gamma-by-strike/' + ASSET;
-					const SGW_URL          = '/api/gamma-by-strike-until/' + INSTRUMENT;
-					const SGM_URL          = MONTHLY_INST ? '/api/gamma-by-strike-until/' + MONTHLY_INST : '';
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -891,186 +850,6 @@
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
-					// "Top OI(s)" lines (only on /oi/<asset>, see
-					// SHOW_GAMMA_POINT) — one black, lineWidth-2 price line
-					// per scope (Weekly/Monthly/All expiries), marking that
-					// scope's own single highest-positive-gamma strike. A
-					// scope with no strikes at all, or whose highest gamma
-					// is <= 0 (nothing to mark), simply contributes no
-					// line. All 3 scopes reuse the same
-					// _gamma_by_strike()-backed endpoints: All (SG_URL, no
-					// cutoff), Weekly (SGW_URL), Monthly (SGM_URL, skipped
-					// if unconfigured).
-					function gammaTop(data) {
-						const strikes = data.strikes || [];
-						if (!strikes.length) return null;
-						const top = strikes.reduce((best, item) => (item.gamma > best.gamma ? item : best), strikes[0]);
-						return top.gamma > 0 ? top : null;
-					}
-
-					// Signed leg contribution, /1e6 like the combined value —
-					// unlike the Abs. lines elsewhere in this addon, sign is
-					// kept (not abs()'d) here since the whole point of the
-					// breakdown is showing which legs pushed gamma up vs
-					// down at this strike, not just how big each one is.
-					function fmtLegGamma(v) {
-						const r = Math.round(v / 1e6);
-						return (r >= 0 ? '+' : '') + r;
-					}
-
-					function drawGammaTopLine(top, label) {
-						if (!top) return;
-						gammaTopsLines.push(series.createPriceLine({
-							price: top.price, color: axisBlack(), lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: axisBlack(),
-							title: label + ' +' + Math.round(top.gamma / 1e6) +
-								'  LC:' + fmtLegGamma(top.long_call) + ' LP:' + fmtLegGamma(top.long_put) +
-								' SC:' + fmtLegGamma(top.short_call) + ' SP:' + fmtLegGamma(top.short_put),
-						}));
-					}
-
-					// "Top OI(s)" checkbox (Gamma Chart only) — single
-					// checkbox replacing the old separate "Strike Gamma"/
-					// "Strike Gamma Nearest"/"Strike Gamma Weekly"/"Strike
-					// Gamma Monthly" checkboxes; flips SHOW_GAMMA_TOPS and
-					// re-fetches all 3 scopes (or clears, if just turned
-					// off).
-					// Re-checked between every awaited fetch below (see each
-					// `if (gammaTopsOff())` call) — the checkbox may get switched
-					// off mid-sequence, since this function chains 3 sequential
-					// fetches; without re-checking, a toggle-off partway through
-					// would still let the remaining fetches draw their lines a few
-					// seconds later. On a mid-sequence bail, clears whatever this
-					// run had already drawn so far too, not just skips new lines.
-					function gammaTopsOff() { return !SHOW_GAMMA_POINT || !SHOW_GAMMA_TOPS; }
-
-					async function refreshGammaTops() {
-						// Re-entrancy guard (see gammaTopsRefreshing's own comment) —
-						// a call that finds one already in flight just skips this
-						// tick entirely rather than racing it; the next poll or
-						// toggle will pick up fresh data anyway.
-						if (gammaTopsRefreshing) return;
-						gammaTopsRefreshing = true;
-						try {
-							gammaTopsLines.forEach(l => series.removePriceLine(l));
-							gammaTopsLines.length = 0;
-							if (gammaTopsOff()) return;
-
-							const allData = await (await fetch(SG_URL)).json();
-							if (gammaTopsOff()) return;
-							drawGammaTopLine(gammaTop(allData), 'All');
-
-							const weeklyData = await (await fetch(SGW_URL)).json();
-							if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-							drawGammaTopLine(gammaTop(weeklyData), 'Weekly');
-
-							if (SGM_URL) {
-								const monthlyData = await (await fetch(SGM_URL)).json();
-								if (gammaTopsOff()) { gammaTopsLines.forEach(l => series.removePriceLine(l)); gammaTopsLines.length = 0; return; }
-								drawGammaTopLine(gammaTop(monthlyData), 'Monthly');
-							}
-						} finally {
-							gammaTopsRefreshing = false;
-						}
-					}
-
-					function onToggleGammaTops() {
-						SHOW_GAMMA_TOPS = document.getElementById('gamma-tops-toggle').checked;
-						refreshGammaTops();
-					}
-
-					// "Strike Gamma" lines (/mp/<instrument> only) — the
-					// restored per-strike indicator: one price line per
-					// distinct strike that has ever traded, isolated to
-					// STRIKE_GAMMA_INSTRUMENT's own expiry alone (see SGI_URL
-					// — gamma-by-strike-at, not the cumulative
-					// gamma-by-strike-until Top OI(s) uses), unlike Gamma
-					// Tops' single top-strike-per-scope line. Color is a
-					// light-gray-to-black gradient by
-					// |gamma| magnitude relative to the largest |gamma| in
-					// this same response — the strike with the biggest
-					// exposure is always pure black, the smallest is light
-					// gray. Title is signed dollar-gamma (abs/1e6, rounded,
-					// '+' for net buy-side/taker-dominant, '-' for net
-					// sell-side, same raw buy/sell convention every other
-					// Buyer/Seller-labeled line in this app uses), followed
-					// by that strike's own dominant leg — whichever of
-					// long_call/long_put/short_call/short_put has the
-					// largest |value| at that strike (same 4-leg split
-					// options.per_leg_greeks()/Top OI(s) use), labeled
-					// LC/LP/SC/SP — so a glance at the line says not just
-					// how much gamma is at this strike but which position
-					// is driving it.
-					let strikeGammaLines = [];
-					// Max Pain (/mp/<instrument> only, alongside Strike
-					// Gamma above) — the strike where Deribit's real open
-					// interest, not dankbit's own recorded trades (see
-					// ChartController._max_pain_for_expiry), would pay out
-					// the least total intrinsic value to option holders
-					// across the whole chain if settled there. A single
-					// reference level, so — unlike the per-strike gamma
-					// lines above, which are axis-label-only
-					// (lineVisible: false) — this one draws a real visible
-					// line.
-					let maxPainLine = null;
-
-					function dominantLeg(item) {
-						const legs = { LC: item.long_call, LP: item.long_put, SC: item.short_call, SP: item.short_put };
-						return Object.keys(legs).reduce((best, k) => Math.abs(legs[k]) > Math.abs(legs[best]) ? k : best, 'LC');
-					}
-
-					function drawStrikeGammaLines(data) {
-						strikeGammaLines.forEach(l => series.removePriceLine(l));
-						strikeGammaLines.length = 0;
-						if (maxPainLine) { series.removePriceLine(maxPainLine); maxPainLine = null; }
-						const strikes = data.strikes || [];
-						const maxAbsGamma = strikes.reduce((m, item) => Math.max(m, Math.abs(item.gamma)), 0);
-						strikes.forEach(item => {
-							const sign = item.gamma >= 0 ? '+' : '-';
-							const intensity = maxAbsGamma > 0 ? Math.abs(item.gamma) / maxAbsGamma : 0;
-							// Light mode: biggest exposure -> near-black (high contrast
-							// on white), smallest -> light gray, as before. Dark mode
-							// mirrors that same gradient (255 - lightShade) so the
-							// biggest exposure instead lands near-white (high contrast
-							// on black) rather than vanishing into it.
-							const lightShade = Math.round(220 - intensity * 220);
-							const shade = DARK_MODE ? 255 - lightShade : lightShade;
-							const color = 'rgb(' + shade + ',' + shade + ',' + shade + ')';
-							strikeGammaLines.push(series.createPriceLine({
-								price: item.price, color, lineWidth: 1, lineVisible: false,
-								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: color,
-								title: 'Γ ' + sign + Math.round(Math.abs(item.gamma) / 1e6) + ' ' + dominantLeg(item),
-							}));
-						});
-
-						// 0/null means no open interest at all for this expiry
-						// (see options.max_pain) — same "falsy means absent"
-						// convention every other price-level field in this
-						// addon uses, so no line is drawn rather than a
-						// spurious price-0 one.
-						if (data.max_pain) {
-							maxPainLine = series.createPriceLine({
-								price: data.max_pain, color: chartColors.maxPain, lineWidth: 2,
-								lineStyle: lineStyleFromName(chartLineStyles.maxPain),
-								axisLabelVisible: true, axisLabelColor: chartColors.maxPain,
-								title: 'Max Pain',
-							});
-						}
-					}
-
-					// No checkbox — this is /mp/<instrument>'s sole
-					// purpose, so it's always on (gated only by
-					// SHOW_STRIKE_GAMMA/SGI_URL themselves being set at all,
-					// same as every other minimal-page indicator's
-					// MINIMAL_CHART gating elsewhere on this page).
-					async function refreshStrikeGamma() {
-						if (!SHOW_STRIKE_GAMMA || !SGI_URL) return;
-						const data = await (await fetch(SGI_URL)).json();
-						drawStrikeGammaLines(data);
-					}
-
 					let priceLines    = [];
 					let monthlyLines  = [];
 					let allLines      = [];
@@ -1081,20 +860,6 @@
 						arr.forEach(pl => series.removePriceLine(pl));
 						arr.length = 0;
 					}
-					// Gamma Chart's own "Top OI(s)" line set (see
-					// refreshGammaTops above) — the Delta Chart has no
-					// gamma peak/bottom line indicator of its own; that
-					// indicator lives only on the Gamma Chart.
-					let gammaTopsLines = [];
-					// refreshGammaTops does 3 sequential awaited fetches, and is
-					// itself called from init(), the checkbox's onToggleGammaTops(),
-					// and setInterval(refreshGammaTops, REFRESH) — without this
-					// guard, an overlapping invocation (e.g. a poll tick firing
-					// while a previous run is still mid-flight) races on the
-					// shared gammaTopsLines array: each clears what the other
-					// already drew and pushes its own lines on top, leaving
-					// duplicated/orphaned price lines behind.
-					let gammaTopsRefreshing = false;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -2459,8 +2224,6 @@
 						refreshAllDeltaZero();
 						refreshTomorrowDeltaZero();
 						refreshDayAfterTomorrowDeltaZero();
-						refreshGammaTops();
-						refreshStrikeGamma();
 					}
 
 					// "Settings" button/dialog (after Ruler, all 3 TV chart pages) —
@@ -2497,13 +2260,6 @@
 						// currently off/not fetched yet. Sequenced, same reason as
 						// onToggleBands() above.
 						if (SHOW_BANDS || SHOW_SMART_LIQUIDITY) { refreshBands().then(refreshLiveBandDots); }
-
-						// Max Pain also bakes its color in at draw time via
-						// createPriceLine (see drawStrikeGammaLines), same
-						// reasoning as the dominance dots above — harmless no-op
-						// on /chart/<asset> and /oi/<asset>, where
-						// SHOW_STRIKE_GAMMA is always false.
-						if (SHOW_STRIKE_GAMMA) { refreshStrikeGamma(); }
 					}
 
 					function openSettingsModal() {
@@ -2627,7 +2383,7 @@
 					});
 
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await refreshGammaTops(); await refreshStrikeGamma(); await updateForecastVisibility(); await refreshSignalBot(); }
+						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await updateForecastVisibility(); await refreshSignalBot(); }
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
@@ -2654,8 +2410,6 @@
 					// dankbit.live.band, refreshBands() only dankbit.bands.
 					setInterval(() => { refreshBands().then(refreshLiveBandDots); }, ZONES_BOX_REFRESH);
 					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
-					setInterval(refreshGammaTops, REFRESH);
-					setInterval(refreshStrikeGamma, REFRESH);
 					setInterval(refreshForecast, REFRESH);
 					setInterval(refreshSignalBot, REFRESH);
 				//]]></script>

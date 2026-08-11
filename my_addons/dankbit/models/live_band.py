@@ -28,9 +28,9 @@ class LiveBand(models.Model):
     reusing dankbit.bands._compute_asset() unmodified (the same pure
     computation, called fresh) rather than reading dankbit.bands' own
     persisted table or touching its compute_snapshot()/cron in any way,
-    so /chart/<asset>, /oi/<asset>, and /mp/<instrument> are all
-    completely unaffected. Data-collection only — no route/chart/checkbox
-    reads this model; it's browsable via the backend "Live Band" menu.
+    so /chart/<asset> is completely unaffected. Data-collection only — no
+    route/chart/checkbox reads this model; it's browsable via the backend
+    "Live Band" menu.
     """
 
     asset = fields.Char(required=True, index=True)
