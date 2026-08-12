@@ -20,24 +20,39 @@
 	     reference lines redrawn fresh on every poll from
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
-	     trailing trades restricted to one expiry, peaks or bottoms).
-	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2, Nearest default —
-	     ISOLATED to that one resolved instrument's own trades — PLUS
-	     Weekly/Monthly/All, CUMULATIVE through the selected expiry, same
-	     domain the since-removed standalone /mwa/<asset> page's own
-	     mwa_gamma_json used before that page was folded into this one
-	     and removed; see four_leg_gamma_json for the full option-family
-	     history and resolution) picks that
+	     trailing trades restricted to one expiry, peaks or bottoms), plus
+	     a 5th light-violet dashed AVG line, gated behind its own "AVG"
+	     checkbox (unchecked by default — see SHOW_AVG in the template's
+	     own script) — the average of whichever of those 4 are actually
+	     present, computed and drawn purely client-side off the same 4
+	     prices (no server field of its own), only while checked; removed
+	     per an earlier product decision alongside a heavier "ALL AVG"
+	     all-expiries variant, then restored on its own (ALL AVG stays
+	     removed) per a further product decision, then put behind this
+	     opt-in checkbox per a still later product decision.
+	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2 and Weekly/Monthly,
+	     Nearest default — all ISOLATED to that one resolved instrument's
+	     own trades — PLUS All, CUMULATIVE across every non-expired
+	     instrument at once, same domain the since-removed standalone
+	     /mwa/<asset> page's own mwa_gamma_json used before that page was
+	     folded into this one and removed; Weekly/Monthly used to be
+	     CUMULATIVE through the selected expiry too, changed to
+	     single-instrument isolation per product decision; see
+	     four_leg_gamma_json for the full option-family history and
+	     resolution) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. The routine
-	     poll (dankbit.refresh_interval) is skipped client-side while a
-	     cumulative Weekly/Monthly/All expiry is selected — same reason
-	     /mwa/<asset> never polled that class of computation on a timer
-	     at all — see CUMULATIVE_EXPIRY_MODES in the template's own
-	     script. "Window" dropdown (4h/8h/12h/24h/48h/72h/All —
-	     FOUR_LEG_WINDOW_HOURS_CHOICES plus the "All" no-window-bound
-	     option, 24h default; see FOUR_LEG_WINDOW_HOURS_CHOICES/
-	     FOUR_LEG_DEFAULT_WINDOW_HOURS in main.py for this choice set's
-	     full history) independently
+	     poll (dankbit.refresh_interval) is skipped client-side only while
+	     the cumulative All expiry is selected — same reason /mwa/<asset>
+	     never polled that class of computation on a timer at all —
+	     Weekly/Monthly poll routinely like the ordinal family now that
+	     they're isolated too — see CUMULATIVE_EXPIRY_MODES in the
+	     template's own script. "Window" dropdown (4h/8h/12h/1d/2d/3d/4d/
+	     5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the "All"
+	     no-window-bound option, 1d (24h) default; option values are
+	     still raw hours (24-240 for the 1d-10d entries) — see
+	     windowLabel() for the hours-vs-days display split; see
+	     FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
+	     main.py for this choice set's full history) independently
 	     picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint. -->
@@ -90,6 +105,17 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+					/* "AVG" checkbox — same toggle-label shape the Delta
+					   Chart's own S/D, Zones, etc. checkboxes use
+					   (dankbit_templates.xml), copied rather than shared
+					   since this page's CSS is otherwise self-contained. */
+					.toggle-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+						display: flex; align-items: center; gap: 4px;
+					}
 
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
@@ -151,6 +177,7 @@
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
@@ -204,11 +231,22 @@
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
-						<option value="24" selected="selected">24h</option>
-						<option value="48">48h</option>
-						<option value="72">72h</option>
+						<option value="24" selected="selected">1d</option>
+						<option value="48">2d</option>
+						<option value="72">3d</option>
+						<option value="96">4d</option>
+						<option value="120">5d</option>
+						<option value="144">6d</option>
+						<option value="168">7d</option>
+						<option value="192">8d</option>
+						<option value="216">9d</option>
+						<option value="240">10d</option>
 						<option value="all">All</option>
 					</select>
+					<label class="toggle-label">
+						<input type="checkbox" id="avg-toggle" onchange="onToggleAvg()"/>
+						AVG
+					</label>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
 						<option value="light">Light</option>
@@ -261,29 +299,37 @@
 					// gamma legs, "nearest" default. Two families:
 					// "nearest"/"nearest_plus_1"/"nearest_plus_2" (the
 					// nearest active expiry and the 1st/2nd one after it)
-					// ISOLATE trades to that one resolved instrument's own
-					// trades; "weekly"/"monthly"/"all" instead resolve
-					// against the configured weekly_expiry/monthly_expiry
-					// instrument (or every non-expired instrument at all
-					// for "all") and compute CUMULATIVE through it — same
-					// domain the since-removed /mwa/<asset> page's own
-					// mwa_gamma_json used, folded onto this dropdown
-					// alongside the original ordinal options once that
-					// standalone page was removed — see four_leg_gamma_json.
+					// and "weekly"/"monthly" (the configured
+					// weekly_expiry/monthly_expiry instrument) all ISOLATE
+					// trades to that one resolved instrument's own trades;
+					// only "all" instead considers every non-expired
+					// instrument at once and computes CUMULATIVE across
+					// all of them — same domain the since-removed
+					// /mwa/<asset> page's own mwa_gamma_json used, folded
+					// onto this dropdown alongside the original ordinal
+					// options once that standalone page was removed — see
+					// four_leg_gamma_json. Weekly/Monthly used to be
+					// CUMULATIVE through the selected expiry too (pulling
+					// in every other active expiry's trades along the
+					// way); changed to single-instrument ISOLATION per
+					// product decision so they behave like the ordinal
+					// family instead.
 					let EXPIRY_MODE = 'nearest';
-					// The cumulative family (weekly/monthly/all) is the
-					// same class of "every active instrument at once"
+					// Only "all" is the "every active instrument at once"
 					// computation /mwa/<asset> never polled on a timer at
 					// all (options.per_leg_gamma() loops per trade in
 					// plain Python, so cost scales directly with trade
-					// count). setInterval(refreshFourLegGamma, REFRESH)
-					// below skips its own fetch entirely while EXPIRY_MODE
-					// is one of these — refreshFourLegGamma() itself is
-					// still called directly (bypassing this list) on page
-					// load and on any manual Timeframe/Expiry/Window
-					// change, same "on-demand only" pattern /mwa/<asset>
-					// used for every one of its own expiry options.
-					const CUMULATIVE_EXPIRY_MODES = ['weekly', 'monthly', 'all'];
+					// count) — Weekly/Monthly are now as cheap as the
+					// ordinal family (a single isolated instrument) and so
+					// poll routinely like they do.
+					// setInterval(refreshFourLegGamma, REFRESH) below skips
+					// its own fetch entirely while EXPIRY_MODE is one of
+					// these — refreshFourLegGamma() itself is still called
+					// directly (bypassing this list) on page load and on
+					// any manual Timeframe/Expiry/Window change, same
+					// "on-demand only" pattern /mwa/<asset> used for every
+					// one of its own expiry options.
+					const CUMULATIVE_EXPIRY_MODES = ['all'];
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
 					// EXPIRY_MODE. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
@@ -311,6 +357,13 @@
 					// this dropdown back out to every 1h step from 1h
 					// through 8h plus 12h/24h/All.
 					let WINDOW_HOURS = 24;
+					// "AVG" checkbox — unchecked by default. The average
+					// itself is cheap (4 already-fetched numbers), but
+					// skipping its computation/line-draw when unchecked is
+					// still one less price line to maintain per poll, so
+					// this stays off until explicitly requested rather than
+					// always drawn.
+					let SHOW_AVG = false;
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart uses —
@@ -386,6 +439,15 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
+					// Average of the 4 gamma legs' own price levels — fixed
+					// light violet (dashed line, see avgGammaPriceLine
+					// below), same "gamma" color association this addon
+					// uses elsewhere (the Zones page's violet Gamma section
+					// header, the Delta Chart's own dashed violet Gamma Band
+					// line) — not part of the "Chart Appearance" color
+					// picker above (that modal only covers the 4 raw
+					// BCG/BPG/SCG/SPG lines).
+					const AVG_GAMMA_COLOR = '#c9a0dc';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -464,7 +526,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -483,9 +545,15 @@
 
 					// WINDOW_HOURS is the string 'all' when the "All" option is
 					// selected (no trailing-hours trade filter at all — see
-					// four_leg_gamma_json), a number otherwise.
+					// four_leg_gamma_json), a number otherwise. Values >=24
+					// (the 1d-10d dropdown entries — still raw hours under
+					// the hood, see the window-select options) display in
+					// days rather than hours, matching the dropdown's own
+					// labels; 12h and below stay hour-labeled.
 					function windowLabel() {
-						return WINDOW_HOURS === 'all' ? 'all trades' : (WINDOW_HOURS + 'h trailing window');
+						if (WINDOW_HOURS === 'all') return 'all trades';
+						if (WINDOW_HOURS >= 24 && WINDOW_HOURS % 24 === 0) return (WINDOW_HOURS / 24) + 'd trailing window';
+						return WINDOW_HOURS + 'h trailing window';
 					}
 
 					function statusText() {
@@ -636,6 +704,22 @@
 						setStatus(statusText());
 					}
 
+					// "AVG" checkbox — unchecked by default (see SHOW_AVG
+					// above). Unchecking removes the already-drawn line
+					// immediately rather than waiting for the next poll;
+					// checking re-fetches right away so it appears without
+					// delay, same "on-demand only" pattern this page's other
+					// dropdowns already use.
+					async function onToggleAvg() {
+						SHOW_AVG = document.getElementById('avg-toggle').checked;
+						if (!SHOW_AVG && avgGammaPriceLine) {
+							series.removePriceLine(avgGammaPriceLine);
+							avgGammaPriceLine = null;
+						} else if (SHOW_AVG) {
+							await refreshFourLegGamma();
+						}
+					}
+
 					// Rounds and abbreviates large raw dollar-gamma values
 					// (hundreds of millions to billions is typical here) —
 					// thousands as K, millions as M, sign preserved (long
@@ -680,6 +764,7 @@
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
+							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
 							if (!latest) {
 								putFillSeries.setData([]);
 								callFillSeries.setData([]);
@@ -727,6 +812,36 @@
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: chartColors.spg,
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
+								});
+							}
+							// Average of the legs' own gamma PRICE levels (not their
+							// gamma value) — over whichever legs are actually present
+							// (0.0 means absent, same convention as the 4 lines
+							// above), not a fixed /4, since dividing a partial sum
+							// by 4 would silently skew the average toward 0 for
+							// every missing leg. Skipped entirely when none of the
+							// 4 are present, or when the "AVG" checkbox (unchecked
+							// by default) is off — one less price line to compute/
+							// maintain per poll while it's not wanted. The label
+							// additionally shows the average of those same legs'
+							// own gamma VALUES (paired with price so both are
+							// averaged over the identical present-leg set), same
+							// formatAbbreviated() the other 4 lines already use
+							// for their own value.
+							const gammaLegs = !SHOW_AVG ? [] : [
+								{ price: latest.bcg_price, value: latest.bcg_value },
+								{ price: latest.bpg_price, value: latest.bpg_value },
+								{ price: latest.scg_price, value: latest.scg_value },
+								{ price: latest.spg_price, value: latest.spg_value },
+							].filter(leg => leg.price);
+							if (gammaLegs.length) {
+								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
+								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
+								avgGammaPriceLine = series.createPriceLine({
+									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
+									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}
 
@@ -869,12 +984,14 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					// Skips the routine poll entirely while a cumulative
-					// Weekly/Monthly/All Expiry is selected (see
-					// CUMULATIVE_EXPIRY_MODES above) — refreshFourLegGamma()
-					// still runs directly from init()/setExpiry()/setWindow()
-					// regardless of mode, so a manual dropdown change always
-					// gets a fresh read.
+					// Skips the routine poll entirely while the cumulative
+					// "All" Expiry is selected (see CUMULATIVE_EXPIRY_MODES
+					// above) — Weekly/Monthly now poll routinely too, same
+					// as the ordinal Nearest family, since they're isolated
+					// to one instrument. refreshFourLegGamma() still runs
+					// directly from init()/setExpiry()/setWindow() regardless
+					// of mode, so a manual dropdown change always gets a
+					// fresh read.
 					setInterval(() => {
 						if (!CUMULATIVE_EXPIRY_MODES.includes(EXPIRY_MODE)) refreshFourLegGamma();
 					}, REFRESH);

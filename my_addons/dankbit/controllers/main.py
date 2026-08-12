@@ -12,7 +12,10 @@ from . import gamma
 from . import next_candle_forecast
 
 # /4l/<asset>'s own "Window" dropdown numeric choice set — 4h/8h/12h/
-# 24h/48h/72h — split out from Y_CHART_WINDOW_HOURS_CHOICES (which
+# 1d/2d/3d/4d/5d/6d/7d/8d/9d/10d (still stored/passed as raw hours —
+# 24/48/72/96/120/144/168/192/216/240 — the "d" labels are a client-side
+# display-only rename, see four_leg_gamma_chart_templates.xml's
+# windowLabel()) — split out from Y_CHART_WINDOW_HOURS_CHOICES (which
 # /gt/<asset> still uses unchanged) once this page's own choice set grew
 # past that shared 12/24/48 tuple, so /gt/<asset>'s own "Window"
 # dropdown is unaffected. 16h/20h/48h/72h and the "All" (no-window-bound)
@@ -25,12 +28,15 @@ from . import next_candle_forecast
 # 5h/6h/7h were then re-added per a further product decision, filling
 # this tuple back out to every 1h step from 1h through 8h plus 12h/24h;
 # 1h/2h/3h/5h/6h/7h were then removed again and 48h/72h added per a
-# still later product decision, leaving 4h/8h/12h/24h/48h/72h. "All"
+# still later product decision, leaving 4h/8h/12h/24h/48h/72h. 48h/72h
+# were then relabeled 2d/3d and 4d/5d/6d/7d/8d/9d/10d (96h/120h/144h/
+# 168h/192h/216h/240h) added per a still later product decision; 24h
+# was then relabeled 1d per a still later product decision. "All"
 # (`?hours=all`) is handled as a separate string sentinel in
 # four_leg_gamma_json, not a member of this tuple — it skips the
 # trailing-hours trade filter entirely rather than mapping to a number
 # of hours.
-FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24, 48, 72)
+FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240)
 
 # /4l/<asset>'s own "Window" dropdown default — also the fallback used
 # by four_leg_gamma_json when `?hours=` is missing/malformed, same as
@@ -1889,21 +1895,29 @@ class ChartController(http.Controller):
           chart_png_zones uses (`f"{instrument}-%"`, left-prefix match
           so one expiry's query can never pull in another's trades).
 
-        - "weekly", "monthly", or "all" — resolved against the
-          configured weekly_expiry/monthly_expiry instrument for `asset`
+        - "weekly" or "monthly" — resolved against the configured
+          weekly_expiry/monthly_expiry instrument for `asset`
           (eth_-prefixed for ETH, same convention
-          _build_tv_chart_context() uses); "all" skips that lookup
-          entirely and considers every one of `asset`'s own non-expired
+          _build_tv_chart_context() uses). Trades are ISOLATED to that
+          one configured instrument's own trades, same anchored `=ilike`
+          domain (and active_test bypass, in case that instrument has
+          since expired and been archived) as the ordinal family above —
+          previously CUMULATIVE through every active instrument whose
+          own expiration was <= that expiry's day-suffix (the same
+          expiration-column cutoff gamma_by_strike_until_json/
+          _gamma_by_strike still use for their own Weekly/Monthly
+          scopes); changed per product decision so Weekly/Monthly line
+          up with the ordinal family's single-instrument isolation
+          instead of pulling in every other active expiry's trades too.
+
+        - "all" — skips the weekly/monthly instrument lookup entirely
+          and considers every one of `asset`'s own non-expired
           instruments (`expiration >= now`, no upper bound — same
-          no-expiry-cutoff domain gamma_by_strike_json's own "All"
-          scope uses). Unlike the ordinal family above, trades here are
-          CUMULATIVE through the selected expiry — every active
-          instrument for `asset` whose own expiration is <= that
-          expiry's day-suffix (same expiration-column cutoff
-          gamma_by_strike_until_json/_gamma_by_strike use for their own
-          Weekly/Monthly scopes, not a per-instrument name match). This
-          is the same domain the since-removed /mwa/<asset> page's own
-          mwa_gamma_json route used, ported onto this route's own
+          no-expiry-cutoff domain gamma_by_strike_json's own "All" scope
+          uses), trades CUMULATIVE across all of them — unlike Weekly/
+          Monthly above, there's no single instrument to isolate to.
+          This is the same domain the since-removed /mwa/<asset> page's
+          own mwa_gamma_json route used, ported onto this route's own
           "Expiry" dropdown alongside its original ordinal options
           rather than as a separate page, once /mwa/<asset> was folded
           into this one and removed.
@@ -1912,10 +1926,12 @@ class ChartController(http.Controller):
         trailing-hours trade window is independently user-selectable via
         the page's own "Window" dropdown — an optional `?hours=` query
         param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24/
-        48/72 — or the literal string "all", skipping the trailing-hours
-        trade filter entirely; any other/missing value falls back to
-        FOUR_LEG_DEFAULT_WINDOW_HOURS=24) — applies to both expiry
-        families the same way. Computed via options.per_leg_gamma() — a
+        48/72/96/120/144/168/192/216/240, shown on the dropdown as
+        4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d — or the literal string
+        "all", skipping the trailing-hours trade filter entirely; any
+        other/missing value falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
+        — applies to both expiry families the same way. Computed via
+        options.per_leg_gamma() — a
         gamma-only slice of options.per_leg_greeks() (the single source
         of truth for the full gamma/delta/theta/vega set, also used by
         dankbit.bands/dankbit.forecast.snapshot/chart_png_zones) that
@@ -1989,33 +2005,35 @@ class ChartController(http.Controller):
                 if window_start is not None:
                     domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
                 trades = trades.with_context(active_test=False).search(domain)
+        elif expiry_mode == "all":
+            # "all" — cumulative, no upper bound: every one of asset's own
+            # non-expired instruments (same domain the since-removed
+            # /mwa/<asset>'s own mwa_gamma_json used). Unlike weekly/
+            # monthly below, there's no single instrument to isolate to.
+            domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of), ("iv", "!=", 0)]
+            if window_start is not None:
+                domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+            trades = request.env["dankbit.trade"].search(domain)
         else:
-            # weekly/monthly/all — cumulative through expiry, same domain
-            # the since-removed /mwa/<asset>'s own mwa_gamma_json used.
-            if expiry_mode != "all":
-                if asset == "ETH":
-                    expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
-                else:
-                    expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
-                instrument = icp.get_param(expiry_param, default="").upper() or None
-
-            # Naive UTC, same as every other `expiration` domain comparison
-            # in this file (see chart_png_until's own as_of/window_start).
-            expiry_dt = None
-            parts = instrument.split("-", 1) if instrument else []
-            if len(parts) == 2:
-                try:
-                    expiry_dt = datetime.strptime(parts[1], "%d%b%y").replace(hour=8)
-                except ValueError:
-                    expiry_dt = None
-
-            if expiry_mode == "all" or expiry_dt:
-                domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of), ("iv", "!=", 0)]
-                if expiry_dt:
-                    domain.append(("expiration", "<=", expiry_dt))
+            # weekly/monthly — ISOLATED to that one configured instrument's
+            # own trades, same anchored `=ilike` domain (and active_test
+            # bypass, in case that instrument has since expired and been
+            # archived) the ordinal Nearest/Nearest+1/Nearest+2 family
+            # above uses. Previously CUMULATIVE through every active
+            # instrument up to that expiry's own date (the "all" branch
+            # above still is); changed per product decision so Weekly/
+            # Monthly line up with the ordinal family's single-instrument
+            # isolation instead.
+            if asset == "ETH":
+                expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+            else:
+                expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
+            instrument = icp.get_param(expiry_param, default="").upper() or None
+            if instrument:
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
                     domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
-                trades = request.env["dankbit.trade"].search(domain)
+                trades = trades.with_context(active_test=False).search(domain)
 
         STs = np.arange(from_price, to_price, step, dtype=np.float64)
 
@@ -2076,9 +2094,12 @@ class ChartController(http.Controller):
         own 2nd/3rd price lines used before that page was removed;
         trades ISOLATED to that one resolved instrument), PLUS
         Weekly/Monthly/All (the configured weekly_expiry/monthly_expiry
-        instrument for `asset`, "All" considering every one of the
-        asset's own non-expired instruments; trades CUMULATIVE through
-        the selected expiry) — see four_leg_gamma_json for the full
+        instrument for `asset`; "All" considers every one of the
+        asset's own non-expired instruments, trades CUMULATIVE across
+        all of them — Weekly/Monthly instead have trades ISOLATED to
+        that one configured instrument, same as the ordinal family,
+        changed per product decision from an earlier CUMULATIVE-through-
+        that-expiry behavior) — see four_leg_gamma_json for the full
         history/resolution of both option families, including how
         Weekly/Monthly/All were originally this route's own options,
         removed per product decision in favor of Nearest+1/Nearest+2,
@@ -2086,14 +2107,19 @@ class ChartController(http.Controller):
         page (which had carried that Weekly/Monthly/All + cumulative
         behavior in the interim) was folded back into this one and
         removed. Own "Window"
-        dropdown (4h/8h/12h/24h/48h/72h/All — FOUR_LEG_WINDOW_HOURS_
-        CHOICES plus the "All" no-window-bound option, 24h default,
-        independent of the "Expiry" dropdown; this choice set has moved
-        several times across product decisions (see
+        dropdown (4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All —
+        FOUR_LEG_WINDOW_HOURS_CHOICES (raw hours 4/8/12/24/48/72/96/120/
+        144/168/192/216/240, the 1d-10d entries displayed as days rather
+        than hours — see four_leg_gamma_chart_templates.xml's
+        windowLabel()) plus the "All" no-window-bound option, 1d (24h)
+        default, independent of the "Expiry" dropdown; this choice set
+        has moved several times across product decisions (see
         FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
         this file for the full history), most recently narrowing from
         every 1h step 1h-8h plus 12h/24h/All down to 4h/8h/12h/24h/48h/
-        72h/All; see four_leg_gamma_json for how each option resolves). A vertical
+        72h/All, then relabeling 48h/72h to 2d/3d and adding 4d-10d, then
+        relabeling 24h to 1d; see four_leg_gamma_json for how each option
+        resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
