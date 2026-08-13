@@ -46,8 +46,9 @@
 	     never polled that class of computation on a timer at all —
 	     Weekly/Monthly poll routinely like the ordinal family now that
 	     they're isolated too — see CUMULATIVE_EXPIRY_MODES in the
-	     template's own script. "Window" dropdown (4h/8h/12h/1d/2d/3d/4d/
-	     5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES plus the "All"
+	     template's own script. "Window" dropdown (00:00 UTC/4h/8h/12h/1d/
+	     2d/3d/4d/5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES
+	     plus the "00:00 UTC" since-midnight option and the "All"
 	     no-window-bound option, 1d (24h) default; option values are
 	     still raw hours (24-240 for the 1d-10d entries) — see
 	     windowLabel() for the hours-vs-days display split; see
@@ -55,7 +56,10 @@
 	     main.py for this choice set's full history) independently
 	     picks
 	     the trailing-hours trade window via ?hours= on that same
-	     endpoint. -->
+	     endpoint — "00:00 UTC" instead restricts to trades since the
+	     most recent UTC midnight (options.day_window_start), same
+	     day-boundary convention the Zones/single-leg pages and
+	     dankbit.bands' own default window use. -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
 		<html>
@@ -228,10 +232,11 @@
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
+						<option value="midnight" selected="selected">00:00 UTC</option>
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
-						<option value="24" selected="selected">1d</option>
+						<option value="24">1d</option>
 						<option value="48">2d</option>
 						<option value="72">3d</option>
 						<option value="96">4d</option>
@@ -356,7 +361,7 @@
 					// re-added per a still later product decision, filling
 					// this dropdown back out to every 1h step from 1h
 					// through 8h plus 12h/24h/All.
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 'midnight';
 					// "AVG" checkbox — unchecked by default. The average
 					// itself is cheap (4 already-fetched numbers), but
 					// skipping its computation/line-draw when unchecked is
@@ -545,13 +550,17 @@
 
 					// WINDOW_HOURS is the string 'all' when the "All" option is
 					// selected (no trailing-hours trade filter at all — see
-					// four_leg_gamma_json), a number otherwise. Values >=24
-					// (the 1d-10d dropdown entries — still raw hours under
-					// the hood, see the window-select options) display in
-					// days rather than hours, matching the dropdown's own
-					// labels; 12h and below stay hour-labeled.
+					// four_leg_gamma_json), the string 'midnight' when the
+					// "00:00 UTC" option is selected (trades since the most
+					// recent UTC midnight instead of a trailing-hours count),
+					// or a number otherwise. Values >=24 (the 1d-10d dropdown
+					// entries — still raw hours under the hood, see the
+					// window-select options) display in days rather than
+					// hours, matching the dropdown's own labels; 12h and
+					// below stay hour-labeled.
 					function windowLabel() {
 						if (WINDOW_HOURS === 'all') return 'all trades';
+						if (WINDOW_HOURS === 'midnight') return 'since 00:00 UTC';
 						if (WINDOW_HOURS >= 24 && WINDOW_HOURS % 24 === 0) return (WINDOW_HOURS / 24) + 'd trailing window';
 						return WINDOW_HOURS + 'h trailing window';
 					}
@@ -699,7 +708,7 @@
 					}
 
 					async function setWindow(hours) {
-						WINDOW_HOURS = hours === 'all' ? 'all' : parseInt(hours, 10);
+						WINDOW_HOURS = (hours === 'all' || hours === 'midnight') ? hours : parseInt(hours, 10);
 						await refreshFourLegGamma();
 						setStatus(statusText());
 					}

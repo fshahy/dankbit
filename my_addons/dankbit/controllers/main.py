@@ -1928,8 +1928,13 @@ class ChartController(http.Controller):
         param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24/
         48/72/96/120/144/168/192/216/240, shown on the dropdown as
         4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d — or the literal string
-        "all", skipping the trailing-hours trade filter entirely; any
-        other/missing value falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
+        "all", skipping the trailing-hours trade filter entirely, or the
+        literal string "midnight", restricting to trades since the most
+        recent UTC midnight (options.day_window_start) instead of a
+        trailing-hours count — same day-boundary convention chart_png_zones/
+        the /lp,lc,sp,sc single-leg routes/dankbit.bands._compute_asset's
+        default window already use; any other/missing value falls back to
+        FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
         — applies to both expiry families the same way. Computed via
         options.per_leg_gamma() — a
         gamma-only slice of options.per_leg_greeks() (the single source
@@ -1975,12 +1980,15 @@ class ChartController(http.Controller):
         if expiry_mode not in expiry_ordinals and expiry_mode not in cumulative_modes:
             expiry_mode = "nearest"
 
-        # "all" (?hours=all) skips the trailing-hours trade filter entirely
-        # — checked before the int() parse below so it isn't mistaken for
-        # a malformed value and overwritten with the default.
+        # "all" (?hours=all) skips the trailing-hours trade filter entirely,
+        # and "midnight" (?hours=midnight) restricts to trades since the
+        # most recent UTC midnight (options.day_window_start) instead of a
+        # trailing-hours window — both checked before the int() parse below
+        # so neither is mistaken for a malformed value and overwritten with
+        # the default.
         hours_param = request.httprequest.args.get("hours")
-        if hours_param == "all":
-            hours = "all"
+        if hours_param in ("all", "midnight"):
+            hours = hours_param
         else:
             try:
                 hours = int(hours_param)
@@ -1990,7 +1998,12 @@ class ChartController(http.Controller):
                 hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
 
         as_of = datetime.now(timezone.utc).replace(tzinfo=None)
-        window_start = as_of - timedelta(hours=hours) if hours != "all" else None
+        if hours == "all":
+            window_start = None
+        elif hours == "midnight":
+            window_start = options.day_window_start(as_of)
+        else:
+            window_start = as_of - timedelta(hours=hours)
 
         instrument = None
         trades = request.env["dankbit.trade"]
@@ -2107,19 +2120,24 @@ class ChartController(http.Controller):
         page (which had carried that Weekly/Monthly/All + cumulative
         behavior in the interim) was folded back into this one and
         removed. Own "Window"
-        dropdown (4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All —
+        dropdown (00:00 UTC/4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All —
         FOUR_LEG_WINDOW_HOURS_CHOICES (raw hours 4/8/12/24/48/72/96/120/
         144/168/192/216/240, the 1d-10d entries displayed as days rather
         than hours — see four_leg_gamma_chart_templates.xml's
-        windowLabel()) plus the "All" no-window-bound option, 1d (24h)
-        default, independent of the "Expiry" dropdown; this choice set
-        has moved several times across product decisions (see
+        windowLabel()) plus the "00:00 UTC" since-midnight option
+        (?hours=midnight — trades since the most recent UTC midnight,
+        options.day_window_start, same day-boundary convention
+        chart_png_zones/the single-leg routes/dankbit.bands' own default
+        window use) and the "All" no-window-bound option, 00:00 UTC
+        default (was 1d), independent of the "Expiry" dropdown; this
+        choice set has moved several times across product decisions (see
         FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
         this file for the full history), most recently narrowing from
         every 1h step 1h-8h plus 12h/24h/All down to 4h/8h/12h/24h/48h/
         72h/All, then relabeling 48h/72h to 2d/3d and adding 4d-10d, then
-        relabeling 24h to 1d; see four_leg_gamma_json for how each option
-        resolves). A vertical
+        relabeling 24h to 1d, then adding the "00:00 UTC" option and
+        making it the default; see four_leg_gamma_json for how each
+        option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.
