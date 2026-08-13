@@ -32,6 +32,7 @@ class DankbitSignal(models.Model):
         ("watch", "Watch"), ("armed", "Armed"), ("active", "Active"),
         ("tp", "Target Hit"), ("sl", "Stop Hit"),
         ("expired", "Expired"), ("cancelled", "Cancelled"),
+        ("missed", "Missed Entry"),
         ("ambiguous", "Ambiguous"), ("rejected", "Rejected"),
     ], required=True, default="watch", index=True)
     direction = fields.Selection([
@@ -75,7 +76,7 @@ class DankbitSignal(models.Model):
     plan_status = fields.Selection([
         ("watch", "Watch"), ("planned", "Planned"),
         ("armed", "Armed"), ("triggered", "Triggered"),
-        ("cancelled", "Cancelled"),
+        ("missed", "Missed Entry"), ("cancelled", "Cancelled"),
     ], index=True)
     entry_zone_low = fields.Float(digits=(16, 4))
     entry_zone_high = fields.Float(digits=(16, 4))
@@ -512,7 +513,7 @@ class DankbitSignal(models.Model):
         return False, (usable[0][0] if usable else 0.0), (usable[0][1] if usable else ""), False, atr_1h
 
     @classmethod
-    def _breakout_retest_setup(cls, candles_4h, candles_1h, index_price):
+    def _breakout_retest_setup(cls, candles_4h, candles_1h, index_price, rtm_zones=None):
         """Detect a closed-4H structural break and time its 1H retest.
 
         This is an independent entry path beside RTM FTB.  It never chases
@@ -569,6 +570,23 @@ class DankbitSignal(models.Model):
         level = breakout["level"]
         direction = breakout["direction"]
         tolerance = max(0.25 * atr1, 0.001 * index_price)
+        # Breakout/Retest is subordinate to the 1H RTM entry engine.  When a
+        # credible same-direction Base exists, its complete wick-to-wick
+        # range replaces the synthetic +/- tolerance around the broken line.
+        # This prevents a late chase entry below an RBD/DBD supply Base (or
+        # above a DBR/RBR demand Base).
+        formed_before = [z for z in (rtm_zones or [])
+                         if z.get("score", 0.0) >= 50.0
+                         and (not breakout["at_ms"] or not z.get("formed_at")
+                              or (z["formed_at"] * (1000 if z["formed_at"] < 10 ** 12 else 1)) <= breakout["at_ms"])]
+        if direction == "short":
+            relevant = [z for z in formed_before if z.get("type") == "supply" and z["high"] >= level]
+            rtm_entry_zone = min(relevant, key=lambda z: (abs(z["low"] - level), -z["score"]), default=None)
+        else:
+            relevant = [z for z in formed_before if z.get("type") == "demand" and z["low"] <= level]
+            rtm_entry_zone = min(relevant, key=lambda z: (abs(z["high"] - level), -z["score"]), default=None)
+        zone_low = float(rtm_entry_zone["low"]) if rtm_entry_zone else level - tolerance
+        zone_high = float(rtm_entry_zone["high"]) if rtm_entry_zone else level + tolerance
         # The 4H timestamp is its open time. Retest evidence may only start
         # after that breakout candle has fully closed, never from one of its
         # own constituent 1H bars.
@@ -577,10 +595,11 @@ class DankbitSignal(models.Model):
         retest = confirmation = None
         for pos, candle in enumerate(after):
             high, low, close, open_ = (v(candle, k) for k in ("h", "l", "c", "o"))
+            overlaps_zone = low <= zone_high and high >= zone_low
             if direction == "short":
-                rejected = high >= level - tolerance and close < level and close < open_
+                rejected = overlaps_zone and close < zone_low and close < open_
             else:
-                rejected = low <= level + tolerance and close > level and close > open_
+                rejected = overlaps_zone and close > zone_high and close > open_
             if not rejected:
                 continue
             retest = candle
@@ -591,10 +610,18 @@ class DankbitSignal(models.Model):
                     break
             break
 
-        stage = "confirmed" if confirmation else "armed" if retest else "watch"
-        entry_zone_low = level - tolerance
-        entry_zone_high = level + tolerance
-        if confirmation:
+        confirmation_is_latest = bool(
+            confirmation and after and ts_ms(confirmation) == max(ts_ms(c) for c in after)
+        )
+        entry_missed = bool(rtm_entry_zone and confirmation and not confirmation_is_latest)
+        stage = "missed" if entry_missed else "confirmed" if confirmation else "armed" if retest else "watch"
+        entry_zone_low = zone_low
+        entry_zone_high = zone_high
+        if rtm_entry_zone and (confirmation or retest):
+            # The intended fill is the proximal edge inside the Base, not the
+            # later confirmation close after price has already departed.
+            plan_entry = zone_low if direction == "short" else zone_high
+        elif confirmation:
             plan_entry = v(confirmation, "c")
         elif retest:
             plan_entry = v(retest, "c")
@@ -604,14 +631,16 @@ class DankbitSignal(models.Model):
         recent_after = after[-8:] if after else []
         if direction == "short":
             local_high = (max(v(c, "h") for c in recent_after)
-                          if retest and recent_after else breakout["candle_high"])
+                          if retest and recent_after else max(breakout["candle_high"], zone_high))
+            local_high = max(local_high, zone_high)
             invalidation = local_high + 0.15 * atr1
             risk = invalidation - plan_entry
             tp1 = plan_entry - 2.0 * risk if risk > 0 else 0.0
             tp2 = plan_entry - 3.0 * risk if risk > 0 else 0.0
         else:
             local_low = (min(v(c, "l") for c in recent_after)
-                         if retest and recent_after else breakout["candle_low"])
+                         if retest and recent_after else min(breakout["candle_low"], zone_low))
+            local_low = min(local_low, zone_low)
             invalidation = local_low - 0.15 * atr1
             risk = plan_entry - invalidation
             tp1 = plan_entry + 2.0 * risk if risk > 0 else 0.0
@@ -624,6 +653,9 @@ class DankbitSignal(models.Model):
             "stop": invalidation, "invalidation": invalidation,
             "target": tp1, "target_2": tp2, "risk_reward": 2.0,
             "retest_seen": bool(retest), "confirmed": bool(confirmation),
+            "entry_missed": entry_missed,
+            "rtm_zone": rtm_entry_zone,
+            "rtm_linked": bool(rtm_entry_zone),
         })
         return breakout
 
@@ -637,7 +669,7 @@ class DankbitSignal(models.Model):
         """
         closed = list(candles or [])[:-1]
         atr = cls._atr(closed)
-        if len(closed) < 25 or not atr or not reference_levels:
+        if len(closed) < 25 or not atr:
             return []
 
         def value(row, key):
@@ -648,7 +680,7 @@ class DankbitSignal(models.Model):
         start_at = max(3, len(closed) - 70)
         # base_end leaves up to three completed candles for departure.
         for base_end in range(start_at, len(closed) - 2):
-            for base_count in (1, 2, 3):
+            for base_count in (1, 2, 3, 4, 5):
                 base_start = base_end - base_count + 1
                 if base_start < 2:
                     continue
@@ -664,6 +696,18 @@ class DankbitSignal(models.Model):
                 width = zone_high - zone_low
                 if width <= 0 or width > 1.60 * atr:
                     continue
+                # The RTM Base is one or more doji/small-body candles.  Its
+                # tradable zone is always the complete wick-to-wick envelope.
+                body_shares = [abs(value(c, "c") - value(c, "o")) /
+                               max(value(c, "h") - value(c, "l"), 1e-9) for c in base]
+                if max(body_shares) > 0.45 or sum(body_shares) / len(body_shares) > 0.32:
+                    continue
+                if base_count > 1:
+                    overlaps_base = [min(value(a, "h"), value(b, "h")) >=
+                                     max(value(a, "l"), value(b, "l"))
+                                     for a, b in zip(base, base[1:])]
+                    if sum(overlaps_base) < len(overlaps_base) - 1:
+                        continue
                 departure = closed[base_end + 1:min(base_end + 4, len(closed))]
                 if not departure:
                     continue
@@ -684,10 +728,8 @@ class DankbitSignal(models.Model):
                     continue
 
                 buffer_distance = 0.20 * atr
-                confluences = [(level, label) for level, label in reference_levels
+                confluences = [(level, label) for level, label in (reference_levels or [])
                                if zone_low - buffer_distance <= level <= zone_high + buffer_distance]
-                if not confluences:
-                    continue
 
                 after_departure = closed[min(base_end + 4, len(closed)):]
                 overlaps = [value(c, "l") <= zone_high and value(c, "h") >= zone_low
@@ -725,11 +767,12 @@ class DankbitSignal(models.Model):
                     lower = label.lower()
                     source_groups.add("liquidity" if "liquidity" in lower else "zone" if "zone" in lower else "band")
                 nested = len(source_groups) >= 2
-                departure_score = min(15.0, 7.5 * impulse / atr)
-                base_score = 10.0 if base_count <= 2 and width <= atr else 6.0
-                freshness_score = 15.0 if touches <= 1 else 5.0 if touches == 2 else 0.0
+                directional = sum(1 for b in bodies if b >= 0.50)
+                departure_score = min(25.0, 12.5 * impulse / atr) + min(5.0, 2.5 * directional)
+                base_score = 12.0 if width <= atr and max(body_shares) <= 0.35 else 7.0
+                freshness_score = 18.0 if touches == 0 else 12.0 if touches == 1 else 4.0 if touches == 2 else 0.0
                 score = (
-                    20.0 + departure_score + base_score + freshness_score
+                    12.0 + departure_score + base_score + freshness_score
                     + (15.0 if nested else 0.0)
                     + min(10.0, 10.0 * distance_r / 3.0)
                     + (10.0 if compression else 0.0)
@@ -741,8 +784,10 @@ class DankbitSignal(models.Model):
                     "structure": structure,
                     "structure_priority": 2 if structure in ("dbr", "rbd") else 1,
                     "score": min(score, 100.0), "touch_count": touches,
-                    "fresh": touches <= 1, "base_candles": base_count,
+                    "fresh": touches == 0, "base_candles": base_count,
                     "departure_score": departure_score,
+                    "departure_atr": impulse / atr,
+                    "zone_definition": "full_wick_range",
                     "compression": compression, "gap": gap, "nested": nested,
                     "distance_r": distance_r,
                     "confluences": sorted({label for _, label in confluences}),
@@ -764,7 +809,8 @@ class DankbitSignal(models.Model):
         eligible = []
         for zone in zones:
             proximal = zone["high"] if direction == "long" else zone["low"]
-            if abs(entry - proximal) <= max_distance and zone["touch_count"] >= 1:
+            correct_side = (zone["low"] <= entry if direction == "long" else zone["high"] >= entry)
+            if abs(entry - proximal) <= max_distance and correct_side and zone["touch_count"] <= 2:
                 eligible.append(zone)
         # DBR for Long and RBD for Short receive a small preference because
         # they mark the end of the 1H pullback; quality can still overrule it.
@@ -836,7 +882,15 @@ class DankbitSignal(models.Model):
                         standard_direction = "short"
                     else:
                         standard_direction = "neutral"
-                    breakout = self._breakout_retest_setup(candles_4h, candles_1h, entry)
+                    # Build the four RTM structures from closed 1H candles
+                    # before evaluating the 4H Breakout/Retest route.  Thales
+                    # confluence grades a zone later; it is no longer a hard
+                    # prerequisite for recognising a genuine price-action Base.
+                    raw_rtm_long = self._rtm_zone_candidates("long", candles_1h, [])
+                    raw_rtm_short = self._rtm_zone_candidates("short", candles_1h, [])
+                    breakout = self._breakout_retest_setup(
+                        candles_4h, candles_1h, entry, raw_rtm_long + raw_rtm_short,
+                    )
                     breakout_direction = breakout["direction"] if breakout else "neutral"
                     breakout_sign = 1.0 if breakout_direction == "long" else -1.0 if breakout_direction == "short" else 0.0
                     daily_not_opposed = bool(
@@ -1002,11 +1056,21 @@ class DankbitSignal(models.Model):
                         breakout_level = float(breakout["level"])
                         breakout_at = datetime.fromtimestamp(breakout["at_ms"] / 1000.0, tz=timezone.utc).replace(tzinfo=None) if breakout["at_ms"] else False
                         setup_path = "breakout_retest"
+                        # Preserve the RTM zone selected by the linked retest
+                        # engine in the signal record/panel.  A breakout plan
+                        # may not report RTM Score 0 while it is actually
+                        # retesting a recognised 1H Base.
+                        if breakout.get("rtm_zone"):
+                            rtm_zone = breakout["rtm_zone"]
+                            rtm_score = float(rtm_zone.get("score", 0.0))
                         setup_stage = "confirmed" if breakout["stage"] == "confirmed" else "armed" if breakout["stage"] == "armed" else "setup"
-                        plan_status = "triggered" if breakout["confirmed"] else "armed" if breakout["retest_seen"] else "watch"
+                        plan_status = ("missed" if breakout.get("entry_missed") else
+                                       "triggered" if breakout["confirmed"] else
+                                       "armed" if breakout["retest_seen"] else "watch")
                         plan_provisional = not breakout["confirmed"]
                         trigger_level = breakout_level
-                        trigger_basis = "Broken 4H structure retest"
+                        trigger_basis = ("1H RTM %s Base retest (full wick range)" % rtm_zone["structure"].upper()
+                                         if rtm_zone else "Broken 4H structure retest")
                         liquidity_swept = bool(breakout["retest_seen"])
                         entry_confirmed = bool(breakout["confirmed"])
                         opposite_direction = "short" if direction == "long" else "long"
@@ -1039,23 +1103,36 @@ class DankbitSignal(models.Model):
                         elif quality < min_quality:
                             reasons.append("Option-data quality 50-64: plan is Shadow only")
                         if not breakout["retest_seen"]:
-                            reasons.append("Waiting for price to retest the broken 4H level")
+                            reasons.append(
+                                "Waiting for price to retest the linked 1H RTM Base"
+                                if breakout.get("rtm_linked") else
+                                "Waiting for price to retest the broken 4H level"
+                            )
                         elif not breakout["confirmed"]:
                             reasons.append("1H retest rejected: waiting for a later closed 1H BOS/Engulf confirmation")
                         else:
-                            reasons.append("Closed 1H retest and micro-structure confirmation completed")
+                            reasons.append("Closed 1H RTM/Base retest and micro-structure confirmation completed")
+                        if breakout.get("rtm_linked"):
+                            reasons.append(
+                                "Breakout-Retest linked to 1H %s zone %.2f-%.2f; late chase entry is blocked"
+                                % (rtm_zone["structure"].upper(), rtm_zone["low"], rtm_zone["high"])
+                            )
+                        if breakout.get("entry_missed"):
+                            reasons.append("RTM Base entry already departed: recorded as MISSED ENTRY; no lower chase signal")
                         if not rtm_path_clear:
                             reasons.append("Opposing RTM zone blocks the Breakout-Retest path before minimum 2R")
                         if breakout_options_strongly_opposed:
                             reasons.append("Options composite strongly opposes the break: Official is blocked, Watch/Shadow remains visible")
                         breakout_official_eligible = bool(
-                            entry_confirmed and quality >= min_quality and rr >= 2.0 and rtm_path_clear
+                            entry_confirmed and not breakout.get("entry_missed")
+                            and quality >= min_quality and rr >= 2.0 and rtm_path_clear
                             and not breakout_options_strongly_opposed
                         )
                         breakout_shadow = bool(
-                            quality >= 50.0 and rtm_path_clear and not breakout_official_eligible
+                            quality >= 50.0 and rtm_path_clear and not breakout.get("entry_missed")
+                            and not breakout_official_eligible
                         )
-                        breakout_watch = bool(quality < 50.0 and rtm_path_clear)
+                        breakout_watch = bool(quality < 50.0 and rtm_path_clear and not breakout.get("entry_missed"))
 
                     official_eligible = bool(rtm_official_eligible or breakout_official_eligible)
 
@@ -1091,7 +1168,8 @@ class DankbitSignal(models.Model):
                                        else "ftb_watch" if rtm_watch else False)
                         setup_stage = "confirmed" if entry_confirmed else "armed" if thales_eligible else "setup" if direction != "neutral" else "none"
                         plan_status = "triggered" if entry_confirmed else "armed" if thales_eligible else "watch" if direction != "neutral" else False
-                    state = ("active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
+                    state = ("missed" if breakout and breakout.get("entry_missed") else
+                             "active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
                              else "armed" if thales_eligible else "rejected")
                     if official_eligible and weekly_officials >= 3:
                         reasons.append("Weekly limit of three official signals reached; stored as shadow")

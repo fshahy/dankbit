@@ -2236,7 +2236,9 @@
 						close.textContent = '×';
 						close.onclick = () => toggleSignalBotDetails();
 						title.className = direction === 'long' ? 'signal-long' : direction === 'short' ? 'signal-short' : 'signal-neutral';
-						title.textContent = isOfficial
+						title.textContent = signal.state === 'missed'
+							? 'MISSED ENTRY ' + direction.toUpperCase()
+							: isOfficial
 							? 'OFFICIAL ' + direction.toUpperCase()
 							: isShadow ? 'SHADOW ' + direction.toUpperCase()
 							: signal.setup_path === 'breakout_retest' ? 'BREAKOUT WATCH ' + direction.toUpperCase()
