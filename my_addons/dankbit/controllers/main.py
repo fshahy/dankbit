@@ -163,11 +163,17 @@ def _forecast_quality_warning(points, anchor_meta, index_price, sigma_annual, ti
 
 
 def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, timeframe="4h"):
-    """Build a continuous three-expiry path around up to three anchors.
+    """Build one continuous path with calibrated, propagating expiry anchors.
 
-    Keep the original calculated body sizes. Intermediate bodies are corrected
-    only to connect expiry anchors without a gap. Data-quality risk is reported
-    separately; it must not flatten bodies or turn displacement into wicks.
+    EA1/EA2/EA3 keep their independently revised Option-Flow bodies, but a
+    same-direction confluence of Band-High/Band-Low/Gamma, Greek Flow and
+    Smart Liquidity may calibrate (never reverse) that body.  The reliable
+    flow component of each anchor then crossfades into the candles before the
+    next anchor instead of disappearing immediately after the EA candle.
+
+    The overlay is deliberately applied before the final weekend safety pass:
+    every Saturday/Sunday body remains subject to the original 0.45/0.26 ATR
+    first/subsequent caps and the 1.45 ATR total weekend budget.
     """
     limit = max(1, min(int(count or max_count), int(max_count)))
     source = list(raw_points or [])[:limit]
@@ -182,12 +188,101 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
         if candle and expiry_index * candles_per_day < len(source)
     }
 
+    def sign(value, epsilon=1e-9):
+        value = float(value or 0.0)
+        return 1 if value > epsilon else -1 if value < -epsilon else 0
+
+    def reliability(anchor):
+        revision = float(anchor.get("revision") or 0.0)
+        maximum = max(float(anchor.get("max_revisions") or revision or 1.0), 1.0)
+        confidence = max(min(float(anchor.get("confidence") or 0.0) / 100.0, 1.0), 0.0)
+        return max(min((revision / maximum) * confidence, 1.0), 0.0)
+
+    def confluence_multiplier(anchor, raw):
+        """Confidence calibration only; it cannot create/reverse direction."""
+        anchor_direction = sign(float(anchor["close"]) - float(anchor["open"]))
+        flow_direction = sign(anchor.get("greek_flow_score")) or anchor_direction
+        raw_direction = sign(float(raw.get("close", 0.0)) - float(raw.get("open", 0.0)))
+        if (not anchor_direction or flow_direction != anchor_direction
+                or (raw_direction and raw_direction != anchor_direction)):
+            return 1.0, 0
+
+        confirmations = 0
+        # all_aligned means the independently moving upper band, lower band
+        # and Gamma path agree. Count those three components explicitly.
+        if raw.get("gb_all_aligned") and int(raw.get("gb_consensus_direction") or 0) == anchor_direction:
+            confirmations += 3
+        elif int(raw.get("gb_consensus_direction") or 0) == anchor_direction:
+            confirmations += 1
+        if sign(raw.get("impulse_greek_flow")) == anchor_direction:
+            confirmations += 1
+        if sign(raw.get("impulse_liquidity")) == anchor_direction:
+            confirmations += 1
+
+        # 0-2 agreements do not boost; 3/4/5 map to 1.03/1.07/1.20.
+        boost_by_count = {3: 1.03, 4: 1.07, 5: 1.20}
+        multiplier = boost_by_count.get(min(confirmations, 5), 1.0)
+        if anchor.get("is_weekend") or raw.get("is_weekend"):
+            multiplier = min(multiplier, 1.10)
+        # An incomplete/low-confidence revision receives only the reliable
+        # fraction of the proposed extra boost.
+        multiplier = 1.0 + (multiplier - 1.0) * reliability(anchor)
+        return multiplier, confirmations
+
+    def calibrated_anchor(anchor, raw):
+        item = dict(anchor)
+        body = float(item["close"]) - float(item["open"])
+        structural = float(item.get("structural_adjustment") or 0.0)
+        flow_component = body - structural
+        multiplier, confirmations = confluence_multiplier(item, raw)
+        calibrated_flow = flow_component * multiplier
+        item["calibrated_body"] = structural + calibrated_flow
+        flow_direction = sign(item.get("greek_flow_score")) or sign(calibrated_flow)
+        item["reliable_flow"] = (
+            calibrated_flow * reliability(item)
+            if sign(calibrated_flow) == flow_direction else 0.0
+        )
+        item["confluence_multiplier"] = multiplier
+        item["confluence_confirmations"] = confirmations
+        return item
+
+    calibrated = {
+        index: calibrated_anchor(anchor, source[index])
+        for index, anchor in anchor_by_index.items()
+    }
+
+    weekend_started = False
+    weekend_move = 0.0
+    weekend_reference_atr = 0.0
+
+    def safe_body(raw, body):
+        """Final guard: anchor overlays cannot bypass weekend ATR limits."""
+        nonlocal weekend_started, weekend_move, weekend_reference_atr
+        body = float(body)
+        if not raw.get("is_weekend"):
+            weekend_started = False
+            weekend_move = 0.0
+            weekend_reference_atr = 0.0
+            return body
+        effective_atr = max(float(raw.get("effective_atr") or 0.0), 1e-9)
+        if not weekend_started:
+            weekend_started = True
+            weekend_reference_atr = effective_atr
+            per_candle_cap = 0.45 * effective_atr
+        else:
+            per_candle_cap = 0.26 * effective_atr
+        remaining = max(1.45 * weekend_reference_atr - weekend_move, 0.0)
+        cap = min(per_candle_cap, remaining)
+        body = max(min(body, cap), -cap)
+        weekend_move += abs(body)
+        return body
+
     def geometry(raw, new_open, body=None, wick_source=None, mode=None):
         old_open = float(raw["open"])
         old_close = float(raw["close"])
         old_high = float(raw["high"])
         old_low = float(raw["low"])
-        candle_body = old_close - old_open if body is None else float(body)
+        candle_body = safe_body(raw, old_close - old_open if body is None else float(body))
         wick = wick_source or raw
         wick_open = float(wick["open"])
         wick_close = float(wick["close"])
@@ -204,37 +299,68 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
         }
 
     output = []
-    first_anchor = anchor_by_index.get(0)
+    first_anchor = calibrated.get(0)
     if first_anchor:
         output.append(geometry(
             source[0], float(source[0]["open"]),
-            body=float(first_anchor["close"]) - float(first_anchor["open"]),
+            body=float(first_anchor["calibrated_body"]),
             wick_source=first_anchor, mode="expiry_anchor_1",
         ))
     else:
         output.append(dict(source[0]))
 
     cursor = 1
-    for anchor_index in sorted(i for i in anchor_by_index if i > 0):
-        anchor = anchor_by_index[anchor_index]
+    previous_anchor_index = 0 if first_anchor else None
+    for anchor_index in sorted(i for i in calibrated if i > 0):
+        anchor = calibrated[anchor_index]
         intermediate = source[cursor:anchor_index]
-        target_open = float(source[anchor_index]["open"])
         if intermediate:
-            raw_total = sum(float(p["close"]) - float(p["open"]) for p in intermediate)
-            correction = (target_open - float(output[-1]["close"]) - raw_total) / len(intermediate)
-            for raw in intermediate:
-                adjusted_body = float(raw["close"]) - float(raw["open"]) + correction
+            left_anchor = calibrated.get(previous_anchor_index) if previous_anchor_index is not None else None
+            segment_span = anchor_index - (previous_anchor_index if previous_anchor_index is not None else cursor - 1)
+            for offset, raw in enumerate(intermediate, start=1):
+                progress = min(max(offset / max(segment_span, 1), 0.0), 1.0)
+                left_flow = float(left_anchor.get("reliable_flow", 0.0)) if left_anchor else 0.0
+                right_flow = float(anchor.get("reliable_flow", 0.0))
+                blended_flow = left_flow * (1.0 - progress) + right_flow * progress
+                # The main 18-candle engine already contains Greek Flow; only
+                # a residual share is propagated to avoid double counting.
+                overlay = 0.35 * blended_flow
+                atr_cap = 0.12 * max(float(raw.get("effective_atr") or 0.0), 0.0)
+                if atr_cap:
+                    overlay = max(min(overlay, atr_cap), -atr_cap)
+                raw_body = float(raw["close"]) - float(raw["open"])
+                # A conflicting raw candle is not force-reversed: propagation
+                # is reduced to 25%; aligned/neutral candles take full overlay.
+                if sign(raw_body) and sign(blended_flow) and sign(raw_body) != sign(blended_flow):
+                    overlay *= 0.25
+                # No absolute-price snap-back to the raw EA open: the anchor
+                # candle is body-defined and starts at the preceding close.
+                # A snap-back correction would cancel a persistent same-side
+                # flow and recreate the tiny intermediate candles this bridge
+                # is meant to fix.
+                adjusted_body = raw_body + overlay
                 output.append(geometry(raw, output[-1]["close"], body=adjusted_body))
         output.append(geometry(
             source[anchor_index], float(output[-1]["close"]),
-            body=float(anchor["close"]) - float(anchor["open"]),
+            body=float(anchor["calibrated_body"]),
             wick_source=anchor,
             mode="expiry_anchor_%s" % (anchor_index // candles_per_day + 1),
         ))
         cursor = anchor_index + 1
+        previous_anchor_index = anchor_index
 
-    for raw in source[cursor:]:
-        output.append(geometry(raw, float(output[-1]["close"])))
+    tail_anchor = calibrated.get(previous_anchor_index) if previous_anchor_index is not None else None
+    tail_length = max(len(source) - cursor, 1)
+    for offset, raw in enumerate(source[cursor:], start=1):
+        raw_body = float(raw["close"]) - float(raw["open"])
+        decay = max(1.0 - offset / (tail_length + 1.0), 0.0)
+        overlay = 0.35 * float(tail_anchor.get("reliable_flow", 0.0)) * decay if tail_anchor else 0.0
+        atr_cap = 0.12 * max(float(raw.get("effective_atr") or 0.0), 0.0)
+        if atr_cap:
+            overlay = max(min(overlay, atr_cap), -atr_cap)
+        if sign(raw_body) and sign(overlay) and sign(raw_body) != sign(overlay):
+            overlay *= 0.25
+        output.append(geometry(raw, float(output[-1]["close"]), body=raw_body + overlay))
     return output
 
 
@@ -2342,6 +2468,10 @@ class ChartController(http.Controller):
                     "open": preview["forecast_open"], "high": preview["forecast_high"],
                     "low": preview["forecast_low"], "close": preview["forecast_close"],
                     "confidence": preview["confidence"],
+                    "revision": preview["revision"], "max_revisions": preview["max_revisions"],
+                    "greek_flow_score": preview.get("greek_flow_score", 0.0),
+                    "structural_adjustment": preview.get("structural_adjustment", 0.0),
+                    "is_weekend": bool(preview.get("is_weekend")),
                 }
                 meta.update({
                     "available": True, "revision": preview["revision"],
@@ -2356,6 +2486,10 @@ class ChartController(http.Controller):
                     "open": next_row.forecast_open, "high": next_row.forecast_high,
                     "low": next_row.forecast_low, "close": next_row.forecast_close,
                     "confidence": next_row.confidence,
+                    "revision": next_row.revision, "max_revisions": next_row.max_revisions,
+                    "greek_flow_score": next_row.greek_flow_score,
+                    "structural_adjustment": next_row.structural_adjustment,
+                    "is_weekend": next_row.is_weekend,
                 }
                 meta.update({
                     "available": True, "revision": next_row.revision,

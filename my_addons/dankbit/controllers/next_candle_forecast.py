@@ -180,6 +180,24 @@ CONFIDENCE_FLOW_DISAGREEMENT_PENALTY = 5.0
 CONFIDENCE_MIN = 10.0
 CONFIDENCE_MAX = 100.0
 
+# When no compatible Prior Flow exists, Current Flow is no longer shrunk
+# toward an artificial zero. Early revisions therefore retain the observed
+# direction but remain ATR-capped: uncertainty is represented by Confidence
+# and these limits, not by biasing the signal estimate toward a doji.
+NO_PRIOR_ATR_CAP_WEEKDAY = {1: 0.18, 2: 0.30, 3: 0.45, 4: 0.60, 5: 0.75}
+NO_PRIOR_ATR_CAP_WEEKEND = {1: 0.10, 2: 0.16, 3: 0.24, 4: 0.30, 5: 0.36}
+
+
+def cap_no_prior_raw_close(raw_close, open_price, atr, revision, is_weekend, is_final, prior_flow):
+    """Return (safe_close, applied_ATR_multiplier_or_None)."""
+    if prior_flow is not None or is_final:
+        return raw_close, None
+    caps = NO_PRIOR_ATR_CAP_WEEKEND if is_weekend else NO_PRIOR_ATR_CAP_WEEKDAY
+    cap_mult = caps.get(revision, caps[max(caps)])
+    body_cap = max(atr * cap_mult, 1e-9)
+    raw_body = max(min(raw_close - open_price, body_cap), -body_cap)
+    return open_price + raw_body, cap_mult
+
 
 def current_candle_bounds(now_utc, candle_span_hours):
     """Floor `now_utc` to the `candle_span_hours` UTC grid (e.g. 1h -> every
@@ -230,19 +248,23 @@ def hourly_flow_signal(older_point, newer_point, asset):
 
 def aggregate_flow_score(f_values, prior_flow, revision, max_revisions):
     """FlowScore(k) = ObservedWeight_k * mean(F1..Fk) + PriorWeight_k * PreviousFlow
-    — the spec's exact two-stage aggregation (see module docstring).
+    — the spec's exact two-stage aggregation when a genuine prior exists.
     ObservedWeight_k = revision/max_revisions, PriorWeight_k = 1 -
     ObservedWeight_k — reproduces the spec's literal 25/50/75/100 schedule
     at max_revisions=4, generalizes cleanly to any revision count (e.g.
     1/6..6/6 for a 6-revision timeframe). `prior_flow` is the previous
     completed cycle's own final (revision==max_revisions) flow_score, or
-    0.0 on an asset/timeframe's very first run. Falls back to `prior_flow`
-    alone when there's no F_k data yet at all (e.g. this is the very first
-    revision ever logged for this asset/timeframe, so there's no prior row
-    to diff against)."""
+    None when no compatible prior exists (notably a trailing-window
+    Preview). Missing is deliberately not represented by 0.0: blending R1
+    as 25% Current + 75% artificial zero made a strong observed flow look
+    like a doji. With no valid prior, the observed mean is the unbiased flow
+    estimate while revision/confidence and the no-prior ATR cap below still
+    express its uncertainty."""
     if not f_values:
-        return prior_flow
+        return float(prior_flow) if prior_flow is not None else 0.0
     current_flow = sum(f_values) / len(f_values)
+    if prior_flow is None:
+        return current_flow
     observed_weight = revision / max_revisions
     prior_weight = 1.0 - observed_weight
     return observed_weight * current_flow + prior_weight * prior_flow
@@ -442,6 +464,14 @@ def compute_revision(asset, timeframe, now_utc, index_price, current_snapshot, p
 
     raw_close = forecast_open + forecast_move + structural_adjustment
 
+    # A Preview/first-ever chain has no valid previous final flow. Keep the
+    # full observed estimate, but constrain early revisions before Smart
+    # Liquidity/wicks so R1 cannot turn into an extreme candle. Final
+    # revisions use the engine's normal limits unchanged.
+    raw_close, no_prior_cap_mult = cap_no_prior_raw_close(
+        raw_close, forecast_open, atr, revision, is_weekend, is_final, prior_flow,
+    )
+
     closed_candles = real_candles[:-1] if len(real_candles) > 1 else []
     forecast_close, leftover_upper, leftover_lower, smart_liq_adjustment = apply_smart_liquidity_damping(
         raw_close, forecast_open, top, low, closed_candles, band_width, atr,
@@ -475,6 +505,8 @@ def compute_revision(asset, timeframe, now_utc, index_price, current_snapshot, p
         # rather than 4 separate fields, since what matters for reviewing a
         # candle after the fact is how much the move got shrunk overall.
         "flow_move_damping_mult": activity_mult * weekend_move_mult * imbalance_mult * zone_brake_mult,
+        "prior_flow_available": prior_flow is not None,
+        "no_prior_atr_cap_mult": no_prior_cap_mult,
         "activity_regime": activity.get("regime") if activity else None,
         "is_weekend": is_weekend,
         # The 4 raw values needed to compute the NEXT revision's own F_k

@@ -210,7 +210,10 @@ class ForecastNextCandle(models.Model):
 
         cfg, _horizon = Snapshot.get_forecast_cfg(asset)
 
-        prior_flow = prior_final_row.greek_flow_score if prior_final_row else 0.0
+        # None means "no compatible prior", not a real neutral flow. The
+        # pure engine then uses the observed Current Flow directly while
+        # keeping early-revision confidence/ATR safety limits active.
+        prior_flow = prior_final_row.greek_flow_score if prior_final_row else None
 
         synthetic_liq = None
         if current_dict.get("top") and current_dict.get("low"):
@@ -399,7 +402,7 @@ class ForecastNextCandle(models.Model):
             }]
         result = next_candle_forecast.compute_revision(
             asset, timeframe, now_utc, index_price, current_dict, points, real_candles,
-            0.0, activity, current_candle_start.weekday() >= 5, cfg=cfg,
+            None, activity, current_candle_start.weekday() >= 5, cfg=cfg,
         )
         result["window_hours"] = hours
         result["expiry_index"] = expiry_index
