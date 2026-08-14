@@ -2340,15 +2340,16 @@ class ChartController(http.Controller):
         nears, see _auto_window_hours' docstring in this file for the
         bucket mapping and its rationale; falls back to
         FOUR_LEG_DEFAULT_WINDOW_HOURS when Expiry=All), and the "All"
-        no-window-bound option, 00:00 UTC default (was 1d), independent
-        of the "Expiry" dropdown; this choice set has moved several
-        times across product decisions (see
+        no-window-bound option, "Auto" default (was "00:00 UTC", was 1d
+        before that), independent of the "Expiry" dropdown; this choice
+        set has moved several times across product decisions (see
         FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
         this file for the full history), most recently narrowing from
         every 1h step 1h-8h plus 12h/24h/All down to 4h/8h/12h/24h/48h/
         72h/All, then relabeling 48h/72h to 2d/3d and adding 4d-10d, then
         relabeling 24h to 1d, then adding the "00:00 UTC" option and
-        making it the default, then adding "Auto"; see
+        making it the default, then adding "Auto" and making it the
+        default in "00:00 UTC"'s place; see
         four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
