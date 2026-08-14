@@ -32,10 +32,14 @@ from . import next_candle_forecast
 # were then relabeled 2d/3d and 4d/5d/6d/7d/8d/9d/10d (96h/120h/144h/
 # 168h/192h/216h/240h) added per a still later product decision; 24h
 # was then relabeled 1d per a still later product decision. "All"
-# (`?hours=all`) is handled as a separate string sentinel in
-# four_leg_gamma_json, not a member of this tuple — it skips the
+# (`?hours=all`), "midnight" (`?hours=midnight`, since-00:00-UTC), and
+# "auto" (`?hours=auto`, dynamic time-to-expiry sizing — see
+# _auto_window_hours) are each handled as their own string sentinel in
+# four_leg_gamma_json, not members of this tuple — "all" skips the
 # trailing-hours trade filter entirely rather than mapping to a number
-# of hours.
+# of hours, "midnight" maps to options.day_window_start() instead of a
+# fixed hour count, and "auto" resolves to one of this tuple's own
+# values by calling _auto_window_hours() rather than being one itself.
 FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240)
 
 # /4l/<asset>'s own "Window" dropdown default — also the fallback used
@@ -50,6 +54,31 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192, 2
 # still later product decision, then back to 24 (24h) once more per a
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
+
+def _auto_window_hours(dte_hours):
+    """`?hours=auto` on /api/four-leg-gamma resolves to this — the
+    smallest FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers
+    `dte_hours` (hours remaining until the resolved expiry's own
+    settlement), i.e. "look back across this option's whole remaining
+    life, snapped to the nearest offered bucket." No published
+    professional-desk formula exists for this exact trailing-trade-flow
+    case (dealer-positioning tools like SpotGamma key off a full open-
+    interest snapshot instead, not a trade-flow lookback), but the
+    intuition mirrors how short-dated/0DTE desks actually behave: older
+    flow is more likely already rolled/closed as expiry nears, so a
+    shrinking lookback keeps the 4 gamma legs weighted toward genuinely
+    current positioning instead of stale history. Naturally floors at
+    this tuple's own smallest bucket (4h) for anything at/past expiry
+    and caps at its largest (240h/10d) for a Weekly/Monthly expiry with
+    weeks left, without any separate min/max clamp needed. `None` (no
+    resolvable expiration — e.g. Expiry=All, which has no single
+    instrument to key a DTE off) falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS."""
+    if dte_hours is None:
+        return FOUR_LEG_DEFAULT_WINDOW_HOURS
+    for choice in FOUR_LEG_WINDOW_HOURS_CHOICES:
+        if choice >= dte_hours:
+            return choice
+    return FOUR_LEG_WINDOW_HOURS_CHOICES[-1]
 
 def _forecast_leg_completeness(snapshot):
     """Return whether all four participant legs have any usable Greek pair.
@@ -1933,9 +1962,23 @@ class ChartController(http.Controller):
         recent UTC midnight (options.day_window_start) instead of a
         trailing-hours count — same day-boundary convention chart_png_zones/
         the /lp,lc,sp,sc single-leg routes/dankbit.bands._compute_asset's
-        default window already use; any other/missing value falls back to
+        default window already use, or the literal string "auto",
+        resolved via _auto_window_hours() to the smallest
+        FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers however
+        many hours remain until the resolved Expiry's own settlement —
+        shrinking the lookback as expiry nears, on the reasoning that
+        stale/rolled flow matters less the closer price gets to
+        settlement (see _auto_window_hours' own docstring for the
+        rationale and why there's no direct "professional practice" to
+        point to here); falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS when
+        Expiry=All (no single instrument to compute a time-to-expiry
+        against) — any other/missing `?hours=` value falls back to
         FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
-        — applies to both expiry families the same way. Computed via
+        — applies to both expiry families the same way. The resolved
+        numeric window is echoed back as the response's own
+        `window_hours` field (always an int, even when `?hours=auto`
+        resolved it, so the client can display what Auto actually
+        picked). Computed via
         options.per_leg_gamma() — a
         gamma-only slice of options.per_leg_greeks() (the single source
         of truth for the full gamma/delta/theta/vega set, also used by
@@ -1980,15 +2023,68 @@ class ChartController(http.Controller):
         if expiry_mode not in expiry_ordinals and expiry_mode not in cumulative_modes:
             expiry_mode = "nearest"
 
-        # "all" (?hours=all) skips the trailing-hours trade filter entirely,
-        # and "midnight" (?hours=midnight) restricts to trades since the
-        # most recent UTC midnight (options.day_window_start) instead of a
-        # trailing-hours window — both checked before the int() parse below
-        # so neither is mistaken for a malformed value and overwritten with
-        # the default.
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
         hours_param = request.httprequest.args.get("hours")
+
+        # Resolve which single instrument (if any) this Expiry mode
+        # isolates to — and, only when "?hours=auto" actually needs it
+        # below, that instrument's own settlement time — before touching
+        # `hours`/`window_start`, since Auto's own window size depends on
+        # this resolution. "all" isolates to no single instrument at all,
+        # so target_expiration stays None there (Auto falls back to
+        # FOUR_LEG_DEFAULT_WINDOW_HOURS, same as a missing/malformed
+        # ?hours= value — see _auto_window_hours).
+        instrument = None
+        target_expiration = None
+        bands_model = request.env["dankbit.bands"]
+        if expiry_mode in expiry_ordinals:
+            expiry_index = expiry_ordinals[expiry_mode]
+            expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
+            if len(expirations) > expiry_index:
+                target_expiration = expirations[expiry_index]
+                instrument = bands_model._format_instrument(asset, target_expiration)
+        elif expiry_mode in ("weekly", "monthly"):
+            # weekly/monthly — ISOLATED to that one configured instrument's
+            # own trades, same anchored `=ilike` domain (and active_test
+            # bypass, in case that instrument has since expired and been
+            # archived) the ordinal Nearest/Nearest+1/Nearest+2 family
+            # above uses. Previously CUMULATIVE through every active
+            # instrument up to that expiry's own date (the "all" branch
+            # below still is); changed per product decision so Weekly/
+            # Monthly line up with the ordinal family's single-instrument
+            # isolation instead.
+            if asset == "ETH":
+                expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+            else:
+                expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
+            instrument = icp.get_param(expiry_param, default="").upper() or None
+            if instrument and hours_param == "auto":
+                # A cheap single-row lookup, only run when Auto actually
+                # needs a time-to-expiry — the weekly/monthly domain
+                # itself (below) never needed this instrument's own
+                # expiration datetime before Auto existed.
+                exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                    [("name", "=ilike", f"{instrument}-%")], limit=1,
+                )
+                if exp_trade:
+                    target_expiration = exp_trade.expiration
+
+        # "all" (?hours=all) skips the trailing-hours trade filter entirely;
+        # "midnight" (?hours=midnight) restricts to trades since the most
+        # recent UTC midnight (options.day_window_start) instead of a
+        # trailing-hours window; "auto" (?hours=auto) sizes the window off
+        # how close the resolved expiry above actually is (see
+        # _auto_window_hours) — all three checked before the int() parse
+        # below so none is mistaken for a malformed value and overwritten
+        # with the default.
         if hours_param in ("all", "midnight"):
             hours = hours_param
+        elif hours_param == "auto":
+            dte_hours = (
+                (target_expiration - as_of).total_seconds() / 3600.0
+                if target_expiration is not None else None
+            )
+            hours = _auto_window_hours(dte_hours)
         else:
             try:
                 hours = int(hours_param)
@@ -1997,7 +2093,6 @@ class ChartController(http.Controller):
             if hours not in FOUR_LEG_WINDOW_HOURS_CHOICES:
                 hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
 
-        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
         if hours == "all":
             window_start = None
         elif hours == "midnight":
@@ -2005,14 +2100,8 @@ class ChartController(http.Controller):
         else:
             window_start = as_of - timedelta(hours=hours)
 
-        instrument = None
         trades = request.env["dankbit.trade"]
         if expiry_mode in expiry_ordinals:
-            expiry_index = expiry_ordinals[expiry_mode]
-            bands_model = request.env["dankbit.bands"]
-            expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
-            if len(expirations) > expiry_index:
-                instrument = bands_model._format_instrument(asset, expirations[expiry_index])
             if instrument:
                 domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
@@ -2028,20 +2117,7 @@ class ChartController(http.Controller):
                 domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
             trades = request.env["dankbit.trade"].search(domain)
         else:
-            # weekly/monthly — ISOLATED to that one configured instrument's
-            # own trades, same anchored `=ilike` domain (and active_test
-            # bypass, in case that instrument has since expired and been
-            # archived) the ordinal Nearest/Nearest+1/Nearest+2 family
-            # above uses. Previously CUMULATIVE through every active
-            # instrument up to that expiry's own date (the "all" branch
-            # above still is); changed per product decision so Weekly/
-            # Monthly line up with the ordinal family's single-instrument
-            # isolation instead.
-            if asset == "ETH":
-                expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
-            else:
-                expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
-            instrument = icp.get_param(expiry_param, default="").upper() or None
+            # weekly/monthly — instrument already resolved above.
             if instrument:
                 domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
@@ -2072,7 +2148,12 @@ class ChartController(http.Controller):
                 "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
             })
 
-        payload = {"asset": asset, "instrument": instrument, "points": points}
+        # `hours` here is either "all"/"midnight" (as requested) or a
+        # plain int — for a numeric Window selection that int is just an
+        # echo of the request, but for "?hours=auto" it's the resolved
+        # bucket _auto_window_hours() actually picked, which the client
+        # has no other way to know (it only sent the literal "auto").
+        payload = {"asset": asset, "instrument": instrument, "window_hours": hours, "points": points}
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
@@ -2120,24 +2201,29 @@ class ChartController(http.Controller):
         page (which had carried that Weekly/Monthly/All + cumulative
         behavior in the interim) was folded back into this one and
         removed. Own "Window"
-        dropdown (00:00 UTC/4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All —
-        FOUR_LEG_WINDOW_HOURS_CHOICES (raw hours 4/8/12/24/48/72/96/120/
-        144/168/192/216/240, the 1d-10d entries displayed as days rather
-        than hours — see four_leg_gamma_chart_templates.xml's
+        dropdown (00:00 UTC/Auto/4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/
+        10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES (raw hours 4/8/12/24/48/
+        72/96/120/144/168/192/216/240, the 1d-10d entries displayed as
+        days rather than hours — see four_leg_gamma_chart_templates.xml's
         windowLabel()) plus the "00:00 UTC" since-midnight option
         (?hours=midnight — trades since the most recent UTC midnight,
         options.day_window_start, same day-boundary convention
         chart_png_zones/the single-leg routes/dankbit.bands' own default
-        window use) and the "All" no-window-bound option, 00:00 UTC
-        default (was 1d), independent of the "Expiry" dropdown; this
-        choice set has moved several times across product decisions (see
+        window use), the "Auto" dynamic option (?hours=auto — shrinks the
+        trailing-hours window as the selected Expiry's own settlement
+        nears, see _auto_window_hours' docstring in this file for the
+        bucket mapping and its rationale; falls back to
+        FOUR_LEG_DEFAULT_WINDOW_HOURS when Expiry=All), and the "All"
+        no-window-bound option, 00:00 UTC default (was 1d), independent
+        of the "Expiry" dropdown; this choice set has moved several
+        times across product decisions (see
         FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
         this file for the full history), most recently narrowing from
         every 1h step 1h-8h plus 12h/24h/All down to 4h/8h/12h/24h/48h/
         72h/All, then relabeling 48h/72h to 2d/3d and adding 4d-10d, then
         relabeling 24h to 1d, then adding the "00:00 UTC" option and
-        making it the default; see four_leg_gamma_json for how each
-        option resolves). A vertical
+        making it the default, then adding "Auto"; see
+        four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
         but was removed per product decision.

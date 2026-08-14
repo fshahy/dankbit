@@ -46,20 +46,25 @@
 	     never polled that class of computation on a timer at all —
 	     Weekly/Monthly poll routinely like the ordinal family now that
 	     they're isolated too — see CUMULATIVE_EXPIRY_MODES in the
-	     template's own script. "Window" dropdown (00:00 UTC/4h/8h/12h/1d/
-	     2d/3d/4d/5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES
-	     plus the "00:00 UTC" since-midnight option and the "All"
-	     no-window-bound option, 1d (24h) default; option values are
-	     still raw hours (24-240 for the 1d-10d entries) — see
-	     windowLabel() for the hours-vs-days display split; see
-	     FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
-	     main.py for this choice set's full history) independently
+	     template's own script. "Window" dropdown (00:00 UTC/Auto/4h/8h/
+	     12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES
+	     plus the "00:00 UTC" since-midnight option, the "Auto" dynamic
+	     option, and the "All" no-window-bound option, 00:00 UTC default;
+	     option values are still raw hours (24-240 for the 1d-10d
+	     entries) — see windowLabel() for the hours-vs-days display
+	     split; see FOUR_LEG_WINDOW_HOURS_CHOICES/
+	     FOUR_LEG_DEFAULT_WINDOW_HOURS in main.py for this choice set's
+	     full history) independently
 	     picks
 	     the trailing-hours trade window via ?hours= on that same
 	     endpoint — "00:00 UTC" instead restricts to trades since the
 	     most recent UTC midnight (options.day_window_start), same
 	     day-boundary convention the Zones/single-leg pages and
-	     dankbit.bands' own default window use. -->
+	     dankbit.bands' own default window use; "Auto" (?hours=auto)
+	     instead lets the server shrink the trailing-hours window as the
+	     selected Expiry's own settlement nears — see
+	     _auto_window_hours() in main.py for the bucket mapping and its
+	     rationale. -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
 		<html>
@@ -233,6 +238,7 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="midnight" selected="selected">00:00 UTC</option>
+						<option value="auto">Auto (Time to Expiry)</option>
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
@@ -360,8 +366,20 @@
 					// product decisions; 1h/2h/3h/5h/6h/7h were then
 					// re-added per a still later product decision, filling
 					// this dropdown back out to every 1h step from 1h
-					// through 8h plus 12h/24h/All.
+					// through 8h plus 12h/24h/All. (Since relabeled to
+					// 4h/8h/12h/1d-10d/All, given a "00:00 UTC" default
+					// option, and given an "Auto (Time to Expiry)" option
+					// — see main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES/
+					// _auto_window_hours for the current full history.)
 					let WINDOW_HOURS = 'midnight';
+					// When WINDOW_HOURS === 'auto', this is the numeric hours
+					// /api/four-leg-gamma actually resolved it to (its own
+					// `window_hours` response field, via _auto_window_hours()
+					// server-side — shrinks as the selected Expiry's own
+					// settlement nears) — null until the first fetch resolves,
+					// so windowLabel() can fall back to a plain "Auto" label
+					// before that.
+					let autoResolvedHours = null;
 					// "AVG" checkbox — unchecked by default. The average
 					// itself is cheap (4 already-fetched numbers), but
 					// skipping its computation/line-draw when unchecked is
@@ -553,16 +571,29 @@
 					// four_leg_gamma_json), the string 'midnight' when the
 					// "00:00 UTC" option is selected (trades since the most
 					// recent UTC midnight instead of a trailing-hours count),
-					// or a number otherwise. Values >=24 (the 1d-10d dropdown
-					// entries — still raw hours under the hood, see the
-					// window-select options) display in days rather than
-					// hours, matching the dropdown's own labels; 12h and
-					// below stay hour-labeled.
+					// the string 'auto' when the "Auto (Time to Expiry)"
+					// option is selected (server picks the window, see
+					// autoResolvedHours above), or a number otherwise. Values
+					// >=24 (the 1d-10d dropdown entries — still raw hours
+					// under the hood, see the window-select options) display
+					// in days rather than hours, matching the dropdown's own
+					// labels; 12h and below stay hour-labeled — hoursLabel()
+					// applies that same day/hour split to autoResolvedHours
+					// too, so "Auto" reads identically to picking that same
+					// resolved value by hand.
+					function hoursLabel(hours) {
+						if (hours >= 24 && hours % 24 === 0) return (hours / 24) + 'd';
+						return hours + 'h';
+					}
 					function windowLabel() {
 						if (WINDOW_HOURS === 'all') return 'all trades';
 						if (WINDOW_HOURS === 'midnight') return 'since 00:00 UTC';
-						if (WINDOW_HOURS >= 24 && WINDOW_HOURS % 24 === 0) return (WINDOW_HOURS / 24) + 'd trailing window';
-						return WINDOW_HOURS + 'h trailing window';
+						if (WINDOW_HOURS === 'auto') {
+							return autoResolvedHours !== null
+								? 'Auto → ' + hoursLabel(autoResolvedHours) + ' trailing window'
+								: 'Auto trailing window';
+						}
+						return hoursLabel(WINDOW_HOURS) + ' trailing window';
 					}
 
 					function statusText() {
@@ -708,7 +739,8 @@
 					}
 
 					async function setWindow(hours) {
-						WINDOW_HOURS = (hours === 'all' || hours === 'midnight') ? hours : parseInt(hours, 10);
+						WINDOW_HOURS = (hours === 'all' || hours === 'midnight' || hours === 'auto') ? hours : parseInt(hours, 10);
+						autoResolvedHours = null;
 						await refreshFourLegGamma();
 						setStatus(statusText());
 					}
@@ -761,6 +793,12 @@
 							const data = await (await fetch(fourLegGammaUrl())).json();
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
+
+							// Server-resolved window in hours (always present,
+							// even with zero points) — only meaningful for
+							// display while WINDOW_HOURS === 'auto', see
+							// windowLabel()/hoursLabel() above.
+							autoResolvedHours = typeof data.window_hours === 'number' ? data.window_hours : null;
 
 							// 0 (not null) once resolved with no trades at all in
 							// the current Window/Expiry — null only ever means
