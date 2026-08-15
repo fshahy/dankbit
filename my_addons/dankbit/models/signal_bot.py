@@ -811,10 +811,19 @@ class DankbitSignal(models.Model):
             proximal = zone["high"] if direction == "long" else zone["low"]
             correct_side = (zone["low"] <= entry if direction == "long" else zone["high"] >= entry)
             if abs(entry - proximal) <= max_distance and correct_side and zone["touch_count"] <= 2:
-                eligible.append(zone)
+                item = dict(zone)
+                item["distance_to_market"] = abs(entry - proximal)
+                eligible.append(item)
         # DBR for Long and RBD for Short receive a small preference because
-        # they mark the end of the 1H pullback; quality can still overrule it.
-        return max(eligible, key=lambda z: (z["score"] + 5.0 * (z["structure_priority"] - 1), z["formed_at"]), default=None)
+        # they mark the end of the 1H pullback. Distance is penalised so an
+        # excellent but remote Base cannot displace the nearest credible
+        # entry zone and turn its proximal line into a mere stop reference.
+        distance_unit = max(atr_4h, 0.003 * entry, 1e-9)
+        return max(eligible, key=lambda z: (
+            z["score"] + 5.0 * (z["structure_priority"] - 1)
+            - 18.0 * z["distance_to_market"] / distance_unit,
+            z["formed_at"],
+        ), default=None)
 
     @staticmethod
     def _apply_rtm_opposing_zone(direction, entry, stop, target, zones):
@@ -860,6 +869,7 @@ class DankbitSignal(models.Model):
                     snapshots = self._latest_snapshots(asset, now_naive)
                     Trade = self.env["dankbit.trade"]
                     entry = float(Trade.get_index_price(asset) or 0.0)
+                    market_price = entry
                     candles_daily = Trade.get_candles(asset, interval="1d", limit=320) or []
                     candles_4h = Trade.get_candles(asset, interval="4h", limit=260) or []
                     candles_1h = Trade.get_candles(asset, interval="1h", limit=260) or []
@@ -960,16 +970,11 @@ class DankbitSignal(models.Model):
                     # strongly opposing *forward* 1H projection delays entry.
                     if standard_direction != "neutral" and direction_sign * score1 < -35.0:
                         reasons.append("Waiting for the 1H Forecast to turn out of the pullback")
-                    if standard_direction != "neutral" and not swing_level:
-                        reasons.append("No confirmed 4H swing available for structural stop")
-                    if standard_direction != "neutral" and rr < 2.0:
-                        reasons.append("No structure-backed target with R:R >= 2.0 after 4H swing stop")
                     # Price structure owns setup visibility. Forecast/Greeks
                     # and option-data quality gate Official, but cannot hide a
                     # valid RTM Watch/Armed plan from the chart.
                     thales_eligible = bool(
-                        standard_direction != "neutral" and entry > 0
-                        and swing_level and stop and target and rr >= 2.0
+                        standard_direction != "neutral" and market_price > 0
                     )
                     thales_official_filters = bool(
                         thales_eligible and coverage4 >= 3 and coverage1 >= 3
@@ -983,41 +988,71 @@ class DankbitSignal(models.Model):
                     if thales_eligible:
                         reference_levels = self._entry_reference_levels(asset, direction, snapshots)
                         if not reference_levels:
-                            reasons.append("Setup detected, but no confirmed Zone/Band or Smart Liquidity entry level is available")
+                            reasons.append("No confirmed Thales reference overlaps the RTM Base; zone remains price-action only")
+
+                        # Four-pattern 1H RTM recognition is independent from
+                        # Thales references. References grade/nest the zone;
+                        # they never hide a valid RBD/DBD/DBR/RBR Base.
+                        rtm_zones = self._rtm_zone_candidates(direction, candles_1h, reference_levels or [])
+                        rtm_zone = self._select_rtm_zone(direction, market_price, rtm_zones, atr_4h)
+                        if not rtm_zone:
+                            reasons.append("Thales setup armed: waiting for a credible 1H RTM zone")
                         else:
+                            rtm_score = float(rtm_zone["score"])
+                            entry_zone_low = float(rtm_zone["low"])
+                            entry_zone_high = float(rtm_zone["high"])
+                            zone_width = max(entry_zone_high - entry_zone_low, 1e-9)
+                            atr_1h = self._atr(list(candles_1h or [])[:-1])
+                            proximal = entry_zone_high if direction == "long" else entry_zone_low
+                            distal = entry_zone_low if direction == "long" else entry_zone_high
+                            entry = proximal
+                            stop_buffer = max(0.10 * atr_1h, 0.15 * zone_width, 0.0005 * entry)
+                            if direction == "short":
+                                invalidation_level = max(distal, swing_level or distal) + stop_buffer
+                            else:
+                                invalidation_level = min(distal, swing_level or distal) - stop_buffer
+                            stop = invalidation_level
+                            stop, target, rr = self._levels(direction, entry, stop, snapshots, rows4)
+                            if not target or rr < 2.0:
+                                reasons.append("RTM Entry/Distal Stop found, but no structure-backed target offers minimum 2R")
+
+                            trigger_label = "1H RTM %s %s proximal" % (
+                                rtm_zone["structure"].upper(), rtm_zone["type"].title(),
+                            )
+                            entry_confirmed, trigger_level, trigger_basis, liquidity_swept, trigger_atr_1h = self._entry_trigger(
+                                direction, market_price, candles_1h, [(proximal, trigger_label)], atr_4h,
+                            )
+                            atr_1h = trigger_atr_1h or atr_1h
+                            chase_distance = (max(entry_zone_low - market_price, 0.0) if direction == "short"
+                                              else max(market_price - entry_zone_high, 0.0))
+                            chase_limit = max(0.35 * atr_1h, 0.50 * zone_width)
+                            if chase_distance > chase_limit and not liquidity_swept:
+                                entry_confirmed = False
+                                reasons.append("CHASED ENTRY blocked: waiting for price to return to the 1H RTM Base")
+
                             opposite_direction = "short" if direction == "long" else "long"
                             opposing_references = self._entry_reference_levels(asset, opposite_direction, snapshots)
                             opposing_zones = self._rtm_zone_candidates(
-                                opposite_direction, candles_1h, opposing_references,
-                            ) if opposing_references else []
+                                opposite_direction, candles_1h, opposing_references or [],
+                            )
                             target, rr, rtm_opposing_zone, rtm_path_clear = self._apply_rtm_opposing_zone(
                                 direction, entry, stop, target, opposing_zones,
                             )
                             if not rtm_path_clear:
                                 reasons.append("Opposing RTM zone blocks the path before minimum 2R")
-                            rtm_zones = self._rtm_zone_candidates(direction, candles_1h, reference_levels)
-                            rtm_zone = self._select_rtm_zone(direction, entry, rtm_zones, atr_4h)
-                            if not rtm_zone:
-                                reasons.append("Thales setup armed: waiting for a confluent 1H RTM zone return")
-                            else:
-                                rtm_score = float(rtm_zone["score"])
-                                proximal = rtm_zone["high"] if direction == "long" else rtm_zone["low"]
-                                trigger_label = "RTM %s FTB" % rtm_zone["type"].title()
-                                entry_confirmed, trigger_level, trigger_basis, liquidity_swept, atr_1h = self._entry_trigger(
-                                    direction, entry, candles_1h, [(proximal, trigger_label)], atr_4h,
-                                )
-                                if rtm_score < 65.0:
-                                    reasons.append("RTM Zone Score %.1f is below 65" % rtm_score)
-                                if rtm_zone["touch_count"] > 1:
-                                    reasons.append("RTM zone is no longer FTB; later-touch setup is Shadow only")
-                                if not liquidity_swept:
-                                    reasons.append("RTM zone armed: waiting for closed 1H sweep and reclaim")
-                                elif not entry_confirmed:
-                                    reasons.append("FTB reclaimed: waiting for closed 1H body Engulf/BOS")
+                            if rtm_score < 65.0:
+                                reasons.append("RTM Zone Score %.1f is below 65" % rtm_score)
+                            if rtm_zone["touch_count"] > 1:
+                                reasons.append("RTM zone is no longer FTB; later-touch setup is Shadow only")
+                            if not liquidity_swept:
+                                reasons.append("RTM zone armed: waiting for closed 1H sweep and reclaim")
+                            elif not entry_confirmed:
+                                reasons.append("FTB reclaimed: waiting for closed 1H body Engulf/BOS")
 
                     rtm_official_eligible = bool(
                         thales_official_filters and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and entry_confirmed
+                        and stop and target and rr >= 2.0
                     )
                     reclaim_shadow = bool(
                         thales_eligible and rtm_zone and rtm_score >= 65.0
@@ -1166,8 +1201,8 @@ class DankbitSignal(models.Model):
                                        else "ftb_reclaim_shadow" if reclaim_shadow
                                        else "later_touch_shadow" if later_touch_shadow
                                        else "ftb_watch" if rtm_watch else False)
-                        setup_stage = "confirmed" if entry_confirmed else "armed" if thales_eligible else "setup" if direction != "neutral" else "none"
-                        plan_status = "triggered" if entry_confirmed else "armed" if thales_eligible else "watch" if direction != "neutral" else False
+                        setup_stage = "confirmed" if entry_confirmed else "armed" if rtm_zone else "setup" if direction != "neutral" else "none"
+                        plan_status = "triggered" if entry_confirmed else "armed" if rtm_zone else "watch" if direction != "neutral" else False
                     state = ("missed" if breakout and breakout.get("entry_missed") else
                              "active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
                              else "armed" if thales_eligible else "rejected")
@@ -1212,6 +1247,10 @@ class DankbitSignal(models.Model):
                             "entry_confirmed": entry_confirmed, "atr_1h": atr_1h,
                         },
                         "rtm": dict(rtm_zone, entry_model=entry_model) if rtm_zone else None,
+                        "rtm_candidates_1h": sorted(
+                            raw_rtm_long + raw_rtm_short,
+                            key=lambda zone: (zone["score"], zone["formed_at"]), reverse=True,
+                        )[:12],
                         "rtm_opposing_zone": rtm_opposing_zone,
                         "breakout": breakout,
                     }
@@ -1270,7 +1309,9 @@ class DankbitSignal(models.Model):
                         "risk_reward": rr if visible_plan else 0.0,
                         "swing_level": swing_level,
                         "atr_4h": atr_4h,
-                        "stop_basis": ("1H Retest Swing High + 0.15 ATR buffer" if setup_path == "breakout_retest" and direction == "short"
+                        "stop_basis": (("1H RTM %s distal + max(0.10 ATR1H, 0.15 zone width); Entry = proximal"
+                                        % rtm_zone["structure"].upper()) if rtm_zone
+                                       else "1H Retest Swing High + 0.15 ATR buffer" if setup_path == "breakout_retest" and direction == "short"
                                        else "1H Retest Swing Low - 0.15 ATR buffer" if setup_path == "breakout_retest" and direction == "long"
                                        else "4H Swing High + ATR buffer" if direction == "short"
                                        else "4H Swing Low - ATR buffer" if direction == "long" else ""),

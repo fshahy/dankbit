@@ -412,6 +412,7 @@
 							<input type="checkbox" id="smart-liquidity-toggle" onchange="onToggleSmartLiquidity()"/>
 							Smart Liquidity
 						</label>
+						<span id="smart-liquidity-status" style="display:none;color:#ff9800;font:600 11px monospace;white-space:nowrap"/>
 						<label class="toggle-label" id="forecast-toggle-wrap" style="display:none">
 							<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
 							Thales Forecast
@@ -558,7 +559,10 @@
 					// Smart Liquidity is kept as a separate optional layer. It can still
 					// feed forecast logic on the backend, but it no longer replaces,
 					// averages, or compresses the displayed Green/Red Bands.
-					let SHOW_SMART_LIQUIDITY = false;
+					const SMART_LIQ_VISIBILITY_STORAGE_KEY = 'dankbit_show_smart_liquidity';
+					let SHOW_SMART_LIQUIDITY = localStorage.getItem(SMART_LIQ_VISIBILITY_STORAGE_KEY) === 'true';
+					const smartLiquidityToggle = document.getElementById('smart-liquidity-toggle');
+					if (smartLiquidityToggle) smartLiquidityToggle.checked = SHOW_SMART_LIQUIDITY;
 					// Trade window used by the yellow/teal zones boxes (Delta Chart
 					// only, "Zones from" dropdown next to "Bands") — 'midnight' is the
 					// original since-00:00-UTC-through-now default; '2'/'4' select
@@ -1326,6 +1330,13 @@
 						return ranges.length ? ranges.reduce((a, b) => a + b, 0) / ranges.length : 0;
 					}
 
+					function recentBandTrend(atr) {
+						if (!atr || realCandles.length < 8) return 0;
+						const sample = realCandles.slice(-8);
+						const move = Number(sample[sample.length - 1].close) - Number(sample[0].close);
+						return move > 0.35 * atr ? 1 : move < -0.35 * atr ? -1 : 0;
+					}
+
 					function adaptiveBandBuffers(rawUpper, rawLower) {
 						if (!realCandles.length || rawUpper.length < 2 || rawLower.length < 2) return { upper: 0, lower: 0 };
 						const newest = realCandles[realCandles.length - 1].time;
@@ -1368,30 +1379,68 @@
 						return dense;
 					}
 
-					function buildAdaptiveBands(rows) {
-						const anchors = rows.filter(r => Number(r.high_resistance) > 0 && Number(r.low_support) > 0)
+					function isRenderableBandRow(r) {
+						const upper = Number(r && r.high_resistance);
+						const lower = Number(r && r.low_support);
+						return Number.isFinite(upper) && Number.isFinite(lower) && upper > 0 && lower > 0 && upper > lower;
+					}
+
+					function buildAdaptiveBands(rows, stateScope, startAnchor) {
+						const anchors = rows.filter(isRenderableBandRow)
 							.map(r => ({
 								time: Math.floor(r.t / 1000) + tzOffset,
 								rawUpper: Number(r.high_resistance), rawLower: Number(r.low_support),
+								expiryIndex: r.expiry_index == null ? null : Number(r.expiry_index),
+								qualityStatus: r.quality_status || 'valid',
 							})).sort((a, b) => a.time - b.time);
 						if (!bandAdaptiveSmoothing || !anchors.length) return {
 							upper: anchors.map(p => ({ time: p.time, value: p.rawUpper })),
 							lower: anchors.map(p => ({ time: p.time, value: p.rawLower })),
 						};
 
-						const timeframeState = bandSmoothingState[INTERVAL] || {};
-						bandSmoothingState[INTERVAL] = timeframeState;
+						// Confirmed and provisional paths must not update the same
+						// smoothing memory.  The bridge contains the final confirmed
+						// point and otherwise caused that anchor to be smoothed twice.
+						// v3 intentionally retires the older, over-wide width memory.
+						const stateKey = 'v3:' + INTERVAL + ':' + (stateScope || 'confirmed');
+						const timeframeState = bandSmoothingState[stateKey] || {};
+						bandSmoothingState[stateKey] = timeframeState;
 						const rawUpper = anchors.map(p => ({ time: p.time, value: p.rawUpper }));
 						const rawLower = anchors.map(p => ({ time: p.time, value: p.rawLower }));
 						const buffers = adaptiveBandBuffers(rawUpper, rawLower);
 						const atr = recentAtr();
+						const trend = recentBandTrend(atr);
+						const latestPrice = realCandles.length ? Number(realCandles[realCandles.length - 1].close) : 0;
+						const expiryWeights = { 0: 0.50, 1: 0.30, 2: 0.20 };
+						const termAnchors = anchors.filter(p => p.expiryIndex !== null);
+						const weightedQuality = termAnchors.reduce((sum, p) => sum + (expiryWeights[p.expiryIndex] || 0) * (p.qualityStatus === 'low' ? 0.25 : 1.0), 0);
+						const presentWeight = termAnchors.reduce((sum, p) => sum + (expiryWeights[p.expiryIndex] || 0), 0);
+						const qualityCoverage = presentWeight > 0 ? weightedQuality / presentWeight : 1.0;
+						// Preserve raw intersections. Only the extra overshoot expansion
+						// is reduced by 25-35%, depending on T1/T2/T3 data quality.
+						const expansionScale = 0.65 + 0.10 * qualityCoverage;
+						const targetUpperBuffer = buffers.upper * expansionScale;
+						const targetLowerBuffer = buffers.lower * expansionScale;
+						const strongAnchorCount = termAnchors.filter(p => p.qualityStatus !== 'low').length;
 						const liveKeys = new Set();
 
-						anchors.forEach(p => {
+						anchors.forEach((p, anchorIndex) => {
 							const key = String(p.time - tzOffset);
 							liveKeys.add(key);
 							const rawCenter = (p.rawUpper + p.rawLower) / 2;
 							const rawHalfWidth = Math.max(0, (p.rawUpper - p.rawLower) / 2);
+							if (anchorIndex === 0 && startAnchor && Number(startAnchor.time) === Number(p.time)) {
+								// The dashed route must start at the exact rendered end of
+								// the confirmed route. Do not smooth/buffer this bridge twice.
+								p.upper = Number(startAnchor.upper);
+								p.lower = Number(startAnchor.lower);
+								timeframeState[key] = {
+									center: (p.upper + p.lower) / 2,
+									halfWidth: (p.upper - p.lower) / 2,
+									upperBuffer: 0, lowerBuffer: 0, rawCenter, updatedAt: Date.now(),
+								};
+								return;
+							}
 							const prev = timeframeState[key];
 							let alphaCenter = 0.30, alphaWidth = 0.20;
 							if (prev && atr > 0) {
@@ -1399,17 +1448,43 @@
 								if (activity < 0.20) { alphaCenter = 0.20; alphaWidth = 0.12; }
 								else if (activity > 0.75) { alphaCenter = 0.45; alphaWidth = 0.30; }
 							}
+							// Width contracts faster than it expands. This removes the long
+							// memory of an obsolete opposite band without changing Center.
+							if (prev && rawHalfWidth < Number(prev.halfWidth)) alphaWidth = Math.max(alphaWidth, 0.34);
 							let center = prev ? Number(prev.center) + alphaCenter * (rawCenter - Number(prev.center)) : rawCenter;
 							let halfWidth = prev ? Number(prev.halfWidth) + alphaWidth * (rawHalfWidth - Number(prev.halfWidth)) : rawHalfWidth;
-							let upperBuffer = prev ? Number(prev.upperBuffer || 0) + alphaWidth * (buffers.upper - Number(prev.upperBuffer || 0)) : buffers.upper;
-							let lowerBuffer = prev ? Number(prev.lowerBuffer || 0) + alphaWidth * (buffers.lower - Number(prev.lowerBuffer || 0)) : buffers.lower;
+							let upperBuffer = prev ? Number(prev.upperBuffer || 0) + alphaWidth * (targetUpperBuffer - Number(prev.upperBuffer || 0)) : targetUpperBuffer;
+							let lowerBuffer = prev ? Number(prev.lowerBuffer || 0) + alphaWidth * (targetLowerBuffer - Number(prev.lowerBuffer || 0)) : targetLowerBuffer;
 							if (prev && atr > 0) {
-								const centerCap = 0.30 * atr, widthCap = 0.15 * atr;
+								const centerCap = 0.30 * atr;
+								const widthCap = rawHalfWidth < Number(prev.halfWidth) ? 0.30 * atr : 0.15 * atr;
 								center = Math.max(Number(prev.center) - centerCap, Math.min(Number(prev.center) + centerCap, center));
 								halfWidth = Math.max(Number(prev.halfWidth) - widthCap, Math.min(Number(prev.halfWidth) + widthCap, halfWidth));
 							}
+							// A low-quality T3 may shape direction, but cannot hold the whole
+							// channel open by itself.
+							if (stateScope === 'provisional' && p.expiryIndex === 2 && p.qualityStatus === 'low' && termAnchors.length) {
+								const weightedHalfWidth = termAnchors.reduce((sum, a) => {
+									const weight = (expiryWeights[a.expiryIndex] || 0) * (a.qualityStatus === 'low' ? 0.25 : 1.0);
+									return sum + weight * Math.max((a.rawUpper - a.rawLower) / 2, 0);
+								}, 0) / Math.max(weightedQuality, 1e-9);
+								halfWidth = Math.min(halfWidth, Math.max(0.25 * atr, 1.10 * weightedHalfWidth));
+							}
 							p.upper = center + halfWidth + upperBuffer;
 							p.lower = center - halfWidth - lowerBuffer;
+							// Asymmetric regime control: retain the trend-side band and bring
+							// only the stale opposite band closer. More than 4 ATR requires
+							// at least two sound expiry anchors.
+							if (stateScope === 'provisional' && atr > 0 && latestPrice > 0) {
+								const opposingAtrCap = (strongAnchorCount >= 2 ? 4.25 : 3.50) * atr;
+								if (trend < 0) p.upper = Math.min(p.upper, latestPrice + opposingAtrCap);
+								else if (trend > 0) p.lower = Math.max(p.lower, latestPrice - opposingAtrCap);
+								if (p.upper <= p.lower) {
+									const minimumHalfWidth = Math.max(0.25 * atr, rawHalfWidth * 0.50);
+									p.upper = center + minimumHalfWidth;
+									p.lower = center - minimumHalfWidth;
+								}
+							}
 							timeframeState[key] = { center, halfWidth, upperBuffer, lowerBuffer, rawCenter, updatedAt: Date.now() };
 						});
 						Object.keys(timeframeState).forEach(key => {
@@ -1421,7 +1496,10 @@
 
 					async function refreshBands() {
 						if (MINIMAL_CHART || (!SHOW_BANDS && !SHOW_SMART_LIQUIDITY)) return;
-						const data = await (await fetch(withOptionFlowWindow(BANDS_URL))).json();
+						const response = await fetch(withOptionFlowWindow(BANDS_URL));
+						if (!response.ok) throw new Error('Bands HTTP ' + response.status);
+						const data = await response.json();
+						if (data.error) throw new Error('Bands: ' + data.error);
 						if (!SHOW_BANDS && !SHOW_SMART_LIQUIDITY) return;
 						const rows = data.bands || [];
 
@@ -1429,18 +1507,30 @@
 							const confirmedRows = rows.filter(r => r.confirmation_status !== 'provisional');
 							const provisionalRows = rows.filter(r => r.confirmation_status === 'provisional')
 								.sort((a, b) => Number(a.t) - Number(b.t));
-							gammaBandSeries.setData(confirmedRows.map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: r.gamma_band })));
-							const confirmedBands = buildAdaptiveBands(confirmedRows);
+							gammaBandSeries.setData(rows.filter(r => Number(r.gamma_band) > 0).map(r => ({ time: Math.floor(r.t / 1000) + tzOffset, value: Number(r.gamma_band) })));
+							const confirmedValidRows = confirmedRows.filter(isRenderableBandRow);
+							const confirmedBands = buildAdaptiveBands(confirmedValidRows, 'confirmed');
 							bandUpperSeries.setData(confirmedBands.upper);
 							bandLowerSeries.setData(confirmedBands.lower);
 
 							// Begin the dashed route at the final confirmed anchor so the
 							// transition is continuous, then continue through provisional E1-E3.
-							const confirmedSorted = confirmedRows.slice().sort((a, b) => Number(a.t) - Number(b.t));
+							const confirmedSorted = confirmedValidRows.slice().sort((a, b) => Number(a.t) - Number(b.t));
 							const bridge = provisionalRows.length && confirmedSorted.length
 								? [confirmedSorted[confirmedSorted.length - 1]].concat(provisionalRows)
 								: provisionalRows;
-							const provisionalBands = buildAdaptiveBands(bridge);
+							const confirmedEnd = confirmedBands.upper.length && confirmedBands.lower.length ? {
+								time: confirmedBands.upper[confirmedBands.upper.length - 1].time,
+								upper: confirmedBands.upper[confirmedBands.upper.length - 1].value,
+								lower: confirmedBands.lower[confirmedBands.lower.length - 1].value,
+							} : null;
+							const provisionalBands = buildAdaptiveBands(bridge, 'provisional', confirmedEnd);
+							// Defensive seam invariant: even if future filtering or smoothing
+							// changes, the first dashed pixel shares the rendered solid endpoint.
+							if (confirmedEnd && provisionalBands.upper.length && provisionalBands.lower.length) {
+								provisionalBands.upper[0] = { time: confirmedEnd.time, value: confirmedEnd.upper };
+								provisionalBands.lower[0] = { time: confirmedEnd.time, value: confirmedEnd.lower };
+							}
 							bandUpperProvisionalSeries.setData(provisionalBands.upper);
 							bandLowerProvisionalSeries.setData(provisionalBands.lower);
 
@@ -1462,9 +1552,13 @@
 								size: 1,
 								text: r.low_support_positive ? '+' : '-',
 							})));
-							// Dashed, slightly transparent lines are the only provisional
-							// cue. No labels/markers: they could be confused with Forecast E anchors.
-							bandUpperProvisionalSeries.setMarkers([]);
+							// Low-confidence values are never hidden. Dashed paths plus a
+							// warning marker distinguish them from confirmed structure.
+							bandUpperProvisionalSeries.setMarkers(provisionalRows.filter(r => r.quality_status === 'low').map(r => ({
+								time: Math.floor(r.t / 1000) + tzOffset,
+								position: 'aboveBar', color: '#ffb300', shape: 'circle', size: 1,
+								text: '! ' + (r.quality_reason || 'LOW DATA'),
+							})));
 							bandLowerProvisionalSeries.setMarkers([]);
 						} else {
 							clearBandOnlyLines();
@@ -1476,10 +1570,10 @@
 						// second, independently-computed data source for the same lines,
 						// which is what was producing two visibly different dotted routes.
 						// This function no longer touches Smart Liquidity data at all; it
-						// only clears the lines when the checkbox is off or while in the
-						// 2h/4h option-flow preview (refreshLiveBandDots has no equivalent
-						// for that window, so there is nothing to draw there either).
-						if (!SHOW_SMART_LIQUIDITY || selectedOptionFlowHours() !== null) {
+						// only clears the lines when the checkbox is off. The active renderer
+						// supports midnight as well as the 2h/4h option-flow previews; clearing
+						// here during a preview caused a race that could erase a valid layer.
+						if (!SHOW_SMART_LIQUIDITY) {
 							clearSmartLiquidityLines();
 						}
 					}
@@ -1740,9 +1834,20 @@
 						return smartLiqMarkerLayer;
 					}
 
+					function setSmartLiquidityStatus(missingTerms) {
+						const status = document.getElementById('smart-liquidity-status');
+						if (!status) return;
+						const missing = missingTerms || [];
+						status.textContent = missing.length ? '⚠ LOW LIQ DATA: ' + missing.join('/') : '';
+						status.title = missing.length
+							? 'Smart Liquidity is still displayed from every valid expiry; listed expiries are missing or collapsed.'
+							: '';
+						status.style.display = missing.length ? 'inline-block' : 'none';
+					}
+
 					function positionSmartLiqTermMarkers() {
 						const layer = ensureSmartLiqMarkerLayer();
-						if (!layer || !SHOW_SMART_LIQUIDITY || smartLiqTermState.length !== 3) {
+						if (!layer || !SHOW_SMART_LIQUIDITY || !smartLiqTermState.length) {
 							if (layer) layer.replaceChildren();
 							return;
 						}
@@ -1756,7 +1861,9 @@
 						// Step once per completed UTC hourly scan, rather than drifting
 						// continuously between scans when the chart is resized or panned.
 						const utcDayProgress = Math.floor(secondsIntoUtcDay / 3600) / 24;
-						const defaultSpan = smartLiqTermState[1].time - smartLiqTermState[0].time || 86400;
+						const defaultSpan = smartLiqTermState.length > 1
+							? (smartLiqTermState[1].time - smartLiqTermState[0].time || 86400)
+							: 86400;
 						smartLiqTermState.forEach((term, idx) => {
 							const start = idx === 0
 								? Object.assign({}, term, { time: term.time - defaultSpan })
@@ -1780,12 +1887,12 @@
 								boxShadow: '0 0 0 1px rgba(255,255,255,0.9)', pointerEvents: 'auto',
 							});
 							const label = document.createElement('span');
-							label.textContent = 'EA' + (idx + 1);
+							label.textContent = 'EA' + (term.idx + 1);
 							Object.assign(label.style, {
 								position: 'absolute', left: '-3px', top: '-18px', color,
 								font: '600 11px monospace', whiteSpace: 'nowrap',
 							});
-							marker.title = `E${idx + 1} · ${state === 'neutral' ? '50/50' : state + ' dominant'} · U ${Math.round(term.upperShare * 100)}% / L ${Math.round(term.lowerShare * 100)}% · scan ${term.scanTimeText}`;
+							marker.title = `E${term.idx + 1} · ${state === 'neutral' ? '50/50' : state + ' dominant'} · U ${Math.round(term.upperShare * 100)}% / L ${Math.round(term.lowerShare * 100)}% · scan ${term.scanTimeText}`;
 							marker.appendChild(label);
 							layer.appendChild(marker);
 						});
@@ -1826,13 +1933,14 @@
 
 						const gridSeconds = INTERVAL_SECONDS[INTERVAL] || 3600;
 						const terms = [];
+						const missingTerms = [];
 						for (let idx = 0; idx < 3; idx++) {
 							const history = (byExpiry.get(idx) || []).slice().sort((a, b) => Number(a.t) - Number(b.t));
 							const row = history.length ? history[history.length - 1] : null;
-							if (!row) continue;
+							if (!row) { missingTerms.push('E' + (idx + 1)); continue; }
 							const upper = Number(row.smart_liq_upper || 0);
 							const lower = Number(row.smart_liq_lower || 0);
-							if (!(upper > lower && lower > 0)) continue;
+							if (!(upper > lower && lower > 0)) { missingTerms.push('E' + (idx + 1)); continue; }
 							const u = Math.max(0, Number(row.smart_liq_upper_strength || 0));
 							const l = Math.max(0, Number(row.smart_liq_lower_strength || 0));
 							const upperShare = u + l > 0 ? u / (u + l) : 0.5;
@@ -1847,12 +1955,13 @@
 							});
 						}
 						terms.sort((a, b) => a.idx - b.idx);
-						if (terms.length !== 3) {
+						setSmartLiquidityStatus(missingTerms);
+						if (!terms.length) {
 							clearSmartLiquidityLines();
 							return;
 						}
 
-						const firstSpan = terms[1].time - terms[0].time || 86400;
+						const firstSpan = terms.length > 1 ? (terms[1].time - terms[0].time || 86400) : 86400;
 						const start = {
 							time: terms[0].time - firstSpan,
 							upper: terms[0].upper, lower: terms[0].lower,
@@ -2004,9 +2113,11 @@
 
 					function onToggleSmartLiquidity() {
 						SHOW_SMART_LIQUIDITY = document.getElementById('smart-liquidity-toggle').checked;
+						localStorage.setItem(SMART_LIQ_VISIBILITY_STORAGE_KEY, String(SHOW_SMART_LIQUIDITY));
 						if (SHOW_SMART_LIQUIDITY) {
 							refreshBands().then(refreshLiveBandDots);
 						} else {
+							setSmartLiquidityStatus([]);
 							clearSmartLiquidityLines();
 						}
 					}
@@ -2065,9 +2176,12 @@
 						if (!SHOW_FORECAST || !['1h', '4h', '1d'].includes(INTERVAL) || !realCandles.length) { clearForecastLines(); return; }
 						const requestedTf = INTERVAL;
 						const requestedCount = forecastCandleCounts[requestedTf];
-						const data = await (await fetch(withOptionFlowWindow(
+						const response = await fetch(withOptionFlowWindow(
 							FORECAST_URL + '?timeframe=' + requestedTf + '&count=' + requestedCount
-						))).json();
+						));
+						if (!response.ok) throw new Error('Forecast HTTP ' + response.status);
+						const data = await response.json();
+						if (data.error) throw new Error('Forecast: ' + data.error);
 						// Re-check: "Thales Forecast" may have been switched off (or the
 						// timeframe changed away from 4h) while this fetch was in
 						// flight — onToggleForecast() already cleared the series
@@ -2113,31 +2227,40 @@
 						forecastSeries.setData(renderedForecast);
 						const perDay = { '1h': 24, '4h': 6, '1d': 1 }[requestedTf];
 						const anchors = data.anchors || [];
-						// E1/E2/E3 identify the three expiry locations in the path, not
-						// merely whether a persisted Greek-Flow revision is available.
-						// Always label their deterministic slots; availability continues
-						// to affect the candle engine/status text, never marker visibility.
+						// A marker represents a real Greek-Flow anchor.  Missing anchors
+						// remain visible in the status text, never as a fake EA candle.
 						const anchorSlots = [0, 1, 2].map(expiryIndex =>
-							anchors.find(a => Number(a.expiry_index) === expiryIndex) || { expiry_index: expiryIndex, available: false }
+							anchors.find(a => Number(a.expiry_index) === expiryIndex) || { expiry_index: expiryIndex, available: false, quality_tier: 'fallback', quality_weight: 0, unavailable_reason: 'not-generated-yet' }
 						);
 						forecastSeries.setMarkers(anchorSlots.filter(a => a.expiry_index * perDay < points.length).map(a => ({
 							time: firstTime + Number(a.expiry_index) * perDay * intervalSec,
-							position: 'aboveBar', shape: 'circle', color: chartColors.gammaBand,
-							text: 'EA' + (Number(a.expiry_index) + 1),
+							position: 'aboveBar', shape: 'circle',
+							color: a.quality_tier === 'valid' ? chartColors.gammaBand : (a.quality_tier === 'partial' ? '#ffb300' : (a.quality_tier === 'stale' ? '#ff7043' : '#9e9e9e')),
+							text: 'EA' + (Number(a.expiry_index) + 1) + (a.quality_tier === 'valid' ? '' : '!'),
 						})));
 						const label = document.getElementById('forecast-status-label');
 						if (label) {
 							const availableAnchors = anchors.filter(a => a.available);
+							const anchorReason = reason => {
+								if (!reason || reason === 'not-generated-yet') return 'not generated';
+								if (reason === 'stale-expiry-row') return 'stale expiry';
+								if (reason === 'stale-target-row') return 'stale target';
+								if (reason.indexOf('missing-critical-leg:') === 0) return 'missing ' + reason.split(':')[1];
+								return reason;
+							};
+							const missingAnchors = anchorSlots.filter(a => !a.available)
+								.map(a => 'EA' + (Number(a.expiry_index) + 1) + ' ' + anchorReason(a.unavailable_reason));
 							const baseStatus = !availableAnchors.length
-								? requestedTf.toUpperCase() + ' Forecast · ' + points.length + ' candle' + (points.length === 1 ? '' : 's')
+								? requestedTf.toUpperCase() + ' Forecast · Anchors 0/3 · ' + missingAnchors.join(' · ') + ' · ' + points.length + ' candle' + (points.length === 1 ? '' : 's')
 								: requestedTf.toUpperCase() + ' Forecast · Anchors ' + availableAnchors.length + '/3 · '
-									+ availableAnchors.map(a => 'EA' + (a.expiry_index + 1) + (a.expiry_instrument ? ' ' + a.expiry_instrument : '') + ' R' + a.revision + '/' + a.max_revisions + ' C' + Math.round(a.confidence) + '%').join(' · ')
+									+ availableAnchors.map(a => 'EA' + (a.expiry_index + 1) + ' ' + String(a.quality_tier || 'valid').toUpperCase() + (a.expiry_instrument ? ' ' + a.expiry_instrument : '') + ' R' + a.revision + '/' + a.max_revisions + ' C' + Math.round(a.confidence) + '% W' + Math.round(Number(a.quality_weight == null ? 1 : a.quality_weight) * 100) + '%').join(' · ')
+									+ (missingAnchors.length ? ' · ' + missingAnchors.join(' · ') : '')
 									+ (availableAnchors[0].is_preview ? ' · ' + availableAnchors[0].window_hours + 'h Preview' : '')
 									+ ' · ' + points.length + ' candle' + (points.length === 1 ? '' : 's');
 							const risk = data.forecast_warning || {};
 							label.classList.toggle('forecast-risk-warning', Boolean(risk.active));
 							label.textContent = risk.active
-								? '⚠ LOW OPTION DATA / EXTREME FORECAST · Q' + Number(risk.quality_score || 0).toFixed(0) + '% · ' + baseStatus
+								? '⚠ LOW OPTION DATA' + (risk.extreme ? ' / EXTREME FORECAST' : '') + ' · Q' + Number(risk.quality_score || 0).toFixed(0) + '% · ' + baseStatus
 								: baseStatus;
 							if (risk.active) {
 								label.title = (risk.message_fa || risk.message || '') + ' Body ' + Number(risk.max_body_sigma || 0).toFixed(2) + 'σ / Path ' + Number(risk.max_path_sigma || 0).toFixed(2) + 'σ';
@@ -2270,6 +2393,8 @@
 						signalMetric(grid, 'Trigger Source', signal.trigger_basis || '—');
 						signalMetric(grid, 'Liquidity Sweep', signal.liquidity_swept ? 'YES' : 'WAITING');
 						signalMetric(grid, 'Entry Model', String(signal.entry_model || 'WAITING').replaceAll('_', ' ').toUpperCase());
+						signalMetric(grid, 'Entry Source', signal.entry_source || '—');
+						signalMetric(grid, 'Stop Source', signal.stop_source || signal.stop_basis || '—');
 						signalMetric(grid, 'RTM Score', Number(signal.rtm_score || 0).toFixed(1) + ' / 100');
 						signalMetric(grid, 'RTM Zone', signal.rtm_zone_type ? String(signal.rtm_zone_type).toUpperCase() + ' ' + signalPrice(signal.rtm_zone_low) + '–' + signalPrice(signal.rtm_zone_high) : '—');
 						signalMetric(grid, 'RTM Structure', String(signal.rtm_structure || '—').toUpperCase());
@@ -2277,6 +2402,8 @@
 						signalMetric(grid, 'Path to 2R', signal.rtm_path_clear ? 'CLEAR' : 'BLOCKED');
 						signalMetric(grid, 'RTM Touch', Number(signal.rtm_touch_count || 0) === 1 ? 'FTB' : Number(signal.rtm_touch_count || 0) > 1 ? Number(signal.rtm_touch_count) + 'TB' : 'WAITING');
 						signalMetric(grid, 'RTM Quality', [signal.rtm_fresh ? 'FRESH' : '', signal.rtm_nested ? 'NESTED' : '', signal.rtm_compression ? 'CP' : '', signal.rtm_gap ? 'GAP' : ''].filter(Boolean).join(' · ') || '—');
+						const detectedRtm = Array.isArray(signal.rtm_candidates_1h) ? signal.rtm_candidates_1h : [];
+						signalMetric(grid, '1H RTM Detected', detectedRtm.length ? detectedRtm.slice(0, 6).map(z => String(z.structure || '?').toUpperCase() + ' ' + signalPrice(z.low) + '–' + signalPrice(z.high) + ' S' + Number(z.score || 0).toFixed(0)).join(' | ') : 'NONE');
 						signalMetric(grid, 'Trend D-Macro / D-Tactical', [signal.trend_daily, signal.trend_daily_tactical].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
 						signalMetric(grid, 'Trend 4H / 1H', [signal.trend_4h, signal.trend_1h].map(v => String(v || 'neutral').toUpperCase()).join(' / '));
 						signalMetric(grid, 'Gamma Direction', Number(signal.gamma_direction_score || 0).toFixed(1));
@@ -2319,7 +2446,7 @@
 							// Potential plans are deliberately visible before the official
 							// trigger. Dashed lines mean WATCH/SHADOW; a triggered official
 							// plan switches to solid lines.
-							const hasPlan = Number(signal.entry || 0) > 0 && Number(signal.stop_loss || 0) > 0 && Number(signal.target || 0) > 0;
+							const hasPlan = Number(signal.entry || 0) > 0 && Number(signal.stop_loss || 0) > 0;
 							if (!hasPlan) return;
 							const officialTriggered = signal.kind === 'official' && signal.plan_status === 'triggered';
 							const prefix = officialTriggered ? 'BOT' : 'PLAN';
@@ -2562,9 +2689,30 @@
 						}
 					});
 
+					async function safeRefresh(name, fn) {
+						try { return await fn(); }
+						catch (e) { console.error(name + ' refresh failed', e); setStatus(name + ': ' + e.message); return null; }
+					}
+
 					async function init() {
-						try { await loadCandles(); await refreshDeltaZero(); await refreshMonthlyDeltaZero(); await refreshAllDeltaZero(); await refreshTomorrowDeltaZero(); await refreshDayAfterTomorrowDeltaZero(); await refreshBands(); await refreshLiveBandDots(); await refreshZonesBoxes(); await refreshNearestExpiry(); await refreshLastTrade(); await updateForecastVisibility(); await refreshSignalBot(); }
-						catch (e) { setStatus('Error: ' + e.message); }
+						await safeRefresh('Candles', loadCandles);
+						// Every overlay owns its failure boundary. A low-data/failed Bands
+						// request can never prevent Forecast, Zones, Gamma or Liquidity
+						// from reaching the chart.
+						await Promise.allSettled([
+							safeRefresh('Delta', refreshDeltaZero),
+							safeRefresh('Monthly Delta', refreshMonthlyDeltaZero),
+							safeRefresh('All Delta', refreshAllDeltaZero),
+							safeRefresh('Tomorrow Delta', refreshTomorrowDeltaZero),
+							safeRefresh('Day-after Delta', refreshDayAfterTomorrowDeltaZero),
+							safeRefresh('Bands', refreshBands),
+							safeRefresh('Smart Liquidity', refreshLiveBandDots),
+							safeRefresh('Zones', refreshZonesBoxes),
+							safeRefresh('Nearest Expiry', refreshNearestExpiry),
+							safeRefresh('Last Trade', refreshLastTrade),
+							safeRefresh('Forecast', updateForecastVisibility),
+							safeRefresh('Signal Bot', refreshSignalBot),
+						]);
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
@@ -2588,10 +2736,10 @@
 					// to avoid both firing a fetch in the same tick; the two no longer
 					// share any data — refreshLiveBandDots() reads only
 					// dankbit.live.band, refreshBands() only dankbit.bands.
-					setInterval(() => { refreshBands().then(refreshLiveBandDots); }, ZONES_BOX_REFRESH);
-					setInterval(refreshZonesBoxes, ZONES_BOX_REFRESH);
-					setInterval(refreshForecast, REFRESH);
-					setInterval(refreshSignalBot, REFRESH);
+					setInterval(() => { safeRefresh('Bands', refreshBands); safeRefresh('Smart Liquidity', refreshLiveBandDots); }, ZONES_BOX_REFRESH);
+					setInterval(() => safeRefresh('Zones', refreshZonesBoxes), ZONES_BOX_REFRESH);
+					setInterval(() => safeRefresh('Forecast', refreshForecast), REFRESH);
+					setInterval(() => safeRefresh('Signal Bot', refreshSignalBot), REFRESH);
 				//]]></script>
 			</body>
 		</html>

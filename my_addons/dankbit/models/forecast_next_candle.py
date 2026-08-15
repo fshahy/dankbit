@@ -334,9 +334,15 @@ class ForecastNextCandle(models.Model):
         """The single latest (highest generated_at) row for `asset`'s
         currently-open target candle at `timeframe` — for the Delta
         Chart's small status pill (see /api/next-candle-forecast/<asset>)."""
+        cfg_tf = next_candle_forecast.TIMEFRAME_CONFIG[timeframe]
+        _current_start, target_time, _elapsed = next_candle_forecast.current_candle_bounds(
+            datetime.now(timezone.utc), cfg_tf["candle_span_hours"],
+        )
+        expected_target = (target_time + timedelta(hours=24 * expiry_index)).replace(tzinfo=None)
         return self.sudo().search([
             ("asset", "=", asset), ("timeframe", "=", timeframe),
             ("expiry_index", "=", expiry_index),
+            ("target_time", "=", expected_target),
         ], order="generated_at desc", limit=1)
 
     def preview_for_dashboard(self, asset, timeframe="4h", hours=2, expiry_index=0):

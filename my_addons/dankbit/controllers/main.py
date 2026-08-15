@@ -118,9 +118,13 @@ def _forecast_quality_warning(points, anchor_meta, index_price, sigma_annual, ti
     implied-volatility move for the selected candle width/horizon.
     """
     available = [a for a in (anchor_meta or []) if a.get("available")]
-    coverage = len(available) / 3.0
-    confidences = [float(a.get("confidence") or 0.0) for a in available]
-    mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+    coverage = sum(float(a.get("quality_weight", 1.0)) for a in available) / 3.0
+    total_anchor_weight = sum(float(a.get("quality_weight", 1.0)) for a in available)
+    mean_confidence = (
+        sum(float(a.get("confidence") or 0.0) * float(a.get("quality_weight", 1.0)) for a in available)
+        / total_anchor_weight
+        if total_anchor_weight > 0.0 else 0.0
+    )
     quality_score = max(min(coverage * 60.0 + mean_confidence * 0.40, 100.0), 0.0)
     low_quality = quality_score < 65.0
 
@@ -141,21 +145,23 @@ def _forecast_quality_warning(points, anchor_meta, index_price, sigma_annual, ti
 
     extremity = float(max(max_body_sigma, max_path_sigma))
     extreme = bool(extremity >= 2.25)
-    active = bool(low_quality and extreme)
+    active = bool(low_quality)
     missing_reasons = [
         a.get("unavailable_reason") for a in (anchor_meta or [])
-        if not a.get("available") and a.get("unavailable_reason")
+        if a.get("unavailable_reason")
     ]
     return {
         "active": active,
-        "code": "LOW_OPTION_DATA_EXTREME_FORECAST" if active else None,
+        "code": ("LOW_OPTION_DATA_EXTREME_FORECAST" if extreme else "LOW_OPTION_DATA") if active else None,
         "severity": "high" if active and extremity >= 3.5 else ("warning" if active else "none"),
         "quality_score": round(quality_score, 1),
         "quality_level": "low" if low_quality else ("medium" if quality_score < 80.0 else "good"),
         "anchor_coverage": len(available),
+        "weighted_anchor_coverage": round(coverage, 3),
         "mean_anchor_confidence": round(mean_confidence, 1),
         "max_body_sigma": round(max_body_sigma, 2),
         "max_path_sigma": round(max_path_sigma, 2),
+        "extreme": extreme,
         "missing_reasons": missing_reasons,
         "message": "Low option-data quality: the Forecast path may be exaggerated." if active else None,
         "message_fa": "کیفیت داده آپشن پایین است؛ حرکت کندل‌های فورکست ممکن است افراطی باشد." if active else None,
@@ -196,7 +202,8 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
         revision = float(anchor.get("revision") or 0.0)
         maximum = max(float(anchor.get("max_revisions") or revision or 1.0), 1.0)
         confidence = max(min(float(anchor.get("confidence") or 0.0) / 100.0, 1.0), 0.0)
-        return max(min((revision / maximum) * confidence, 1.0), 0.0)
+        quality_weight = max(min(float(anchor.get("quality_weight", 1.0)), 1.0), 0.0)
+        return max(min((revision / maximum) * confidence * quality_weight, 1.0), 0.0)
 
     def confluence_multiplier(anchor, raw):
         """Confidence calibration only; it cannot create/reverse direction."""
@@ -236,7 +243,12 @@ def _compose_unified_forecast(raw_points, anchors=None, count=18, max_count=18, 
         flow_component = body - structural
         multiplier, confirmations = confluence_multiplier(item, raw)
         calibrated_flow = flow_component * multiplier
-        item["calibrated_body"] = structural + calibrated_flow
+        proposed_body = structural + calibrated_flow
+        raw_body = float(raw["close"]) - float(raw["open"])
+        quality_weight = max(min(float(item.get("quality_weight", 1.0)), 1.0), 0.0)
+        # Keep Partial/Stale anchors and their real Prior Flow, but let them
+        # bend the base Forecast only in proportion to data quality.
+        item["calibrated_body"] = raw_body + quality_weight * (proposed_body - raw_body)
         flow_direction = sign(item.get("greek_flow_score")) or sign(calibrated_flow)
         item["reliable_flow"] = (
             calibrated_flow * reliability(item)
@@ -1758,6 +1770,13 @@ class ChartController(http.Controller):
             for expiry_index, expiration in enumerate(expirations)
         }
         by_instrument = {row["instrument"]: row for row in series}
+        provisional_rejections = []
+        current_index_price = float(request.env["dankbit.trade"].get_index_price(asset) or 0.0)
+        valid_history = [
+            row for row in sorted(series, key=lambda item: item["t"])
+            if float(row.get("high_resistance") or 0.0) > float(row.get("low_support") or 0.0) > 0.0
+        ]
+        last_valid_band = valid_history[-1] if valid_history else None
         for instrument, (expiry_index, expiration) in active_instruments.items():
             confirmed = by_instrument.get(instrument)
             if confirmed is not None:
@@ -1766,7 +1785,40 @@ class ChartController(http.Controller):
             live = bands_model._compute_asset(
                 asset, expiry_index=expiry_index, future_days_only=True,
             )
-            if not live or not live.get("high_resistance") or not live.get("low_support"):
+            band_ok, band_reason = bands_model._band_quality_gate(live) if live else (False, "no-live-option-data")
+            raw_high = float((live or {}).get("high_resistance") or 0.0)
+            raw_low = float((live or {}).get("low_support") or 0.0)
+            index_price = float((live or {}).get("index_price") or current_index_price)
+
+            # Quality Gate classifies; it never removes a chart component.
+            # A collapsed/missing point inherits the last valid structural
+            # width around its own raw centre (or current index), and remains
+            # dashed with an explicit warning. Raw values stay in the API.
+            display_high, display_low = raw_high, raw_low
+            if not band_ok and (raw_high <= raw_low or raw_low <= 0.0):
+                if last_valid_band:
+                    fallback_width = max(
+                        float(last_valid_band["high_resistance"]) - float(last_valid_band["low_support"]),
+                        1.0,
+                    )
+                    fallback_center = (
+                        (raw_high + raw_low) / 2.0 if raw_high > 0.0 and raw_low > 0.0
+                        else index_price or (float(last_valid_band["high_resistance"]) + float(last_valid_band["low_support"])) / 2.0
+                    )
+                    display_high = fallback_center + fallback_width / 2.0
+                    display_low = fallback_center - fallback_width / 2.0
+                elif index_price > 0.0:
+                    fallback_width = index_price * 0.015
+                    display_high = index_price + fallback_width / 2.0
+                    display_low = index_price - fallback_width / 2.0
+            if display_high <= display_low or display_low <= 0.0:
+                # No defensible absolute value exists yet. Keep the expiry in
+                # diagnostics; historical lines and every other chart layer
+                # still render independently.
+                provisional_rejections.append({
+                    "instrument": instrument, "expiry_index": expiry_index,
+                    "reason": band_reason,
+                })
                 continue
             exp_ts = expiration if expiration.tzinfo else expiration.replace(tzinfo=timezone.utc)
             provisional = {
@@ -1774,20 +1826,31 @@ class ChartController(http.Controller):
                 "t": int(exp_ts.timestamp() * 1000),
                 "confirmation_status": "provisional",
                 "expiry_index": expiry_index,
-                "index_price": float(live.get("index_price") or 0.0),
-                "high_resistance": float(live.get("high_resistance") or 0.0),
-                "low_support": float(live.get("low_support") or 0.0),
-                "high_resistance_positive": bool(live.get("high_resistance_positive")),
-                "low_support_positive": bool(live.get("low_support_positive")),
-                "gamma_band": float(live.get("gamma_band") or 0.0),
-                "delta_band": float(live.get("delta_band") or 0.0),
-                "smart_liq_upper_price": float(live.get("smart_liq_upper_price") or 0.0),
-                "smart_liq_lower_price": float(live.get("smart_liq_lower_price") or 0.0),
-                "smart_liq_upper_strength": float(live.get("smart_liq_upper_strength") or 0.0),
-                "smart_liq_lower_strength": float(live.get("smart_liq_lower_strength") or 0.0),
+                "index_price": index_price,
+                "high_resistance": display_high,
+                "low_support": display_low,
+                "raw_high_resistance": raw_high,
+                "raw_low_support": raw_low,
+                "quality_status": "valid" if band_ok else "low",
+                "quality_reason": None if band_ok else band_reason,
+                "high_resistance_positive": bool((live or {}).get("high_resistance_positive")),
+                "low_support_positive": bool((live or {}).get("low_support_positive")),
+                "gamma_band": float((live or {}).get("gamma_band") or (last_valid_band or {}).get("gamma_band") or 0.0),
+                "delta_band": float((live or {}).get("delta_band") or 0.0),
+                "smart_liq_upper_price": float((live or {}).get("smart_liq_upper_price") or 0.0),
+                "smart_liq_lower_price": float((live or {}).get("smart_liq_lower_price") or 0.0),
+                "smart_liq_upper_strength": float((live or {}).get("smart_liq_upper_strength") or 0.0),
+                "smart_liq_lower_strength": float((live or {}).get("smart_liq_lower_strength") or 0.0),
             }
+            if not band_ok:
+                provisional_rejections.append({
+                    "instrument": instrument, "expiry_index": expiry_index,
+                    "reason": band_reason,
+                })
             series.append(provisional)
             by_instrument[instrument] = provisional
+            if band_ok:
+                last_valid_band = provisional
 
         # In trailing-window preview mode the structural Green/Red Bands
         # remain the persisted session-confirmed values, while Gamma and
@@ -1829,6 +1892,7 @@ class ChartController(http.Controller):
         payload = {
             "asset": asset,
             "bands": series,
+            "provisional_rejections": provisional_rejections,
             "window_hours": hours,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -2038,6 +2102,16 @@ class ChartController(http.Controller):
         own "Expiry" dropdown — an optional `?expiry=` query param, one
         of two families:
 
+        - An explicit `?instrument=` query param (e.g. "BTC-25JUL26")
+          takes priority over `?expiry=` entirely and ISOLATES trades to
+          that one instrument directly, same anchored `=ilike` domain as
+          the ordinal family below — used by `/<instrument>/4l`
+          (instrument_four_leg_gamma_chart), whose page has no "Expiry"
+          dropdown at all since the instrument is already fixed in the
+          URL. `/4l/<asset>` itself never sends this param, so its own
+          `?expiry=`-driven resolution is completely unaffected by this
+          branch.
+
         - "nearest" (default — the currently soonest-expiring active
           instrument), "nearest_plus_1", or "nearest_plus_2" (the
           1st/2nd active expiry after the nearest one), mapped to an
@@ -2163,7 +2237,22 @@ class ChartController(http.Controller):
         instrument = None
         target_expiration = None
         bands_model = request.env["dankbit.bands"]
-        if expiry_mode in expiry_ordinals:
+        # `/<instrument>/4l` (instrument_four_leg_gamma_chart) passes its
+        # own URL instrument directly via `?instrument=`, bypassing the
+        # Expiry dropdown's mode resolution entirely — ISOLATED to that
+        # one instrument's own trades, same domain the ordinal Nearest/
+        # Nearest+1/Nearest+2 family below uses. `/4l/<asset>` itself
+        # never sends this param, so it's inert there.
+        instrument_override = (request.httprequest.args.get("instrument") or "").upper() or None
+        if instrument_override:
+            instrument = instrument_override
+            if hours_param == "auto":
+                exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                    [("name", "=ilike", f"{instrument}-%")], limit=1,
+                )
+                if exp_trade:
+                    target_expiration = exp_trade.expiration
+        elif expiry_mode in expiry_ordinals:
             expiry_index = expiry_ordinals[expiry_mode]
             expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
             if len(expirations) > expiry_index:
@@ -2227,7 +2316,13 @@ class ChartController(http.Controller):
             window_start = as_of - timedelta(hours=hours)
 
         trades = request.env["dankbit.trade"]
-        if expiry_mode in expiry_ordinals:
+        if instrument_override:
+            if instrument:
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+                if window_start is not None:
+                    domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+                trades = trades.with_context(active_test=False).search(domain)
+        elif expiry_mode in expiry_ordinals:
             if instrument:
                 domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
@@ -2369,7 +2464,49 @@ class ChartController(http.Controller):
 
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        # `instrument: False` (not omitted) so the shared template's
+        # `t-att-data-instrument`/`t-if="not instrument"` checks always
+        # find the key defined — QWeb drops a falsy t-att value, so this
+        # renders identically to before `/<instrument>/4l` existed (see
+        # instrument_four_leg_gamma_chart, which is the only caller that
+        # ever passes a real instrument here).
+        ctx = {"asset": asset, "instrument": False, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/<string:instrument>/4l", type="http", auth="user", website=True)
+    def instrument_four_leg_gamma_chart(self, instrument):
+        """Same standalone Four Leg Gamma page as /4l/<asset>
+        (four_leg_gamma_chart) — same template, same candle source, same
+        4 gamma-price lines, same "Timeframe"/"Window"/"AVG"/Theme/Ruler/
+        Settings controls — scoped to one specific instrument via the
+        URL (e.g. /BTC-25JUL26/4l) instead of via the page's own
+        "Expiry" dropdown, which this variant omits entirely since the
+        instrument is already fixed. Renders the identical
+        dankbit_four_leg_gamma_chart template with `instrument` set in
+        context (see four_leg_gamma_chart's own `instrument: False`
+        default, and the template's `t-if="not instrument"`/
+        `t-att-data-instrument` — both branch purely on this one context
+        var, so /4l/<asset> itself renders byte-for-byte the same as
+        before this route existed). Client-side, the page reads
+        `cfg.instrument` and builds its /api/four-leg-gamma/<asset>
+        fetch with `?instrument=<instrument>` instead of `?expiry=<mode>`
+        (see four_leg_gamma_json's own `?instrument=` override) —
+        ISOLATED to that one instrument's own trades, same as the
+        ordinal Nearest family. `asset` is derived from the instrument's
+        own BTC/ETH prefix, same convention chart_png_zones/the
+        /lp,lc,sp,sc single-leg routes use, rather than taken from a
+        separate URL segment."""
+        instrument = instrument.upper()
+        if instrument.startswith("BTC"):
+            asset = "BTC"
+        elif instrument.startswith("ETH"):
+            asset = "ETH"
+        else:
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "instrument": instrument, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
@@ -2442,6 +2579,7 @@ class ChartController(http.Controller):
             next_row = ForecastNext.latest_for_dashboard(
                 asset, timeframe=timeframe, expiry_index=expiry_index,
             ) if hours is None else None
+            latest_any = None
             meta = {
                 "expiry_index": expiry_index, "available": False,
                 "expiry_instrument": (
@@ -2450,54 +2588,94 @@ class ChartController(http.Controller):
                 ),
                 "revision": None, "max_revisions": None, "confidence": None,
                 "is_preview": False, "window_hours": None,
+                "quality_tier": "fallback", "quality_weight": 0.0,
                 "unavailable_reason": "not-generated-yet",
             }
+            if hours is None and not next_row:
+                latest_any = ForecastNext.sudo().search([
+                    ("asset", "=", asset), ("timeframe", "=", timeframe),
+                    ("expiry_index", "=", expiry_index),
+                ], order="generated_at desc", limit=1)
+                if latest_any:
+                    meta["unavailable_reason"] = (
+                        "stale-expiry-row"
+                        if meta["expiry_instrument"] and latest_any.expiry_instrument != meta["expiry_instrument"]
+                        else "stale-target-row"
+                    )
             if next_row and meta["expiry_instrument"] and next_row.expiry_instrument != meta["expiry_instrument"]:
                 # Never leak today's stale ordinal row into tomorrow's E1.
                 next_row = None
                 meta["unavailable_reason"] = "stale-expiry-row"
-            if preview and not preview.get("data_complete", True):
-                meta["unavailable_reason"] = "missing-critical-leg:" + ",".join(preview.get("missing_legs") or [])
-                preview = None
-            if next_row and not preview:
-                complete, missing_legs = _forecast_leg_completeness(next_row.snapshot_id) if next_row.snapshot_id else (False, ["SNAPSHOT"])
-                if not complete:
-                    next_row = None
-                    meta["unavailable_reason"] = "missing-critical-leg:" + ",".join(missing_legs)
+            source = None
+            source_is_preview = False
+            missing_legs = []
+            quality_tier = "fallback"
+            quality_weight = 0.0
+            quality_reason = meta["unavailable_reason"]
+
             if preview:
+                source = preview
+                source_is_preview = True
+                missing_legs = list(preview.get("missing_legs") or [])
+                quality_tier = "valid" if not missing_legs else "partial"
+                quality_weight = 1.0 if not missing_legs else max(0.20, 1.0 - 0.25 * len(missing_legs))
+                quality_reason = None if not missing_legs else "missing-critical-leg:" + ",".join(missing_legs)
                 anchors[expiry_index] = {
-                    "open": preview["forecast_open"], "high": preview["forecast_high"],
-                    "low": preview["forecast_low"], "close": preview["forecast_close"],
-                    "confidence": preview["confidence"],
-                    "revision": preview["revision"], "max_revisions": preview["max_revisions"],
-                    "greek_flow_score": preview.get("greek_flow_score", 0.0),
-                    "structural_adjustment": preview.get("structural_adjustment", 0.0),
-                    "is_weekend": bool(preview.get("is_weekend")),
+                    "open": source["forecast_open"], "high": source["forecast_high"],
+                    "low": source["forecast_low"], "close": source["forecast_close"],
+                    "confidence": source["confidence"],
+                    "revision": source["revision"], "max_revisions": source["max_revisions"],
+                    "greek_flow_score": source.get("greek_flow_score", 0.0),
+                    "structural_adjustment": source.get("structural_adjustment", 0.0),
+                    "is_weekend": bool(source.get("is_weekend")),
+                    "quality_weight": quality_weight, "quality_tier": quality_tier,
                 }
-                meta.update({
-                    "available": True, "revision": preview["revision"],
-                    "expiry_instrument": preview.get("expiry_instrument"),
-                    "max_revisions": preview["max_revisions"],
-                    "confidence": preview["confidence"], "is_preview": True,
-                    "window_hours": preview["window_hours"],
-                    "unavailable_reason": None,
-                })
             elif next_row:
+                source = next_row
+                complete, missing_legs = _forecast_leg_completeness(next_row.snapshot_id) if next_row.snapshot_id else (False, ["SNAPSHOT"])
+                quality_tier = "valid" if complete else "partial"
+                quality_weight = 1.0 if complete else max(0.20, 1.0 - 0.25 * len(missing_legs))
+                quality_reason = None if complete else "missing-critical-leg:" + ",".join(missing_legs)
                 anchors[expiry_index] = {
-                    "open": next_row.forecast_open, "high": next_row.forecast_high,
-                    "low": next_row.forecast_low, "close": next_row.forecast_close,
-                    "confidence": next_row.confidence,
-                    "revision": next_row.revision, "max_revisions": next_row.max_revisions,
-                    "greek_flow_score": next_row.greek_flow_score,
-                    "structural_adjustment": next_row.structural_adjustment,
-                    "is_weekend": next_row.is_weekend,
+                    "open": source.forecast_open, "high": source.forecast_high,
+                    "low": source.forecast_low, "close": source.forecast_close,
+                    "confidence": source.confidence,
+                    "revision": source.revision, "max_revisions": source.max_revisions,
+                    "greek_flow_score": source.greek_flow_score,
+                    "structural_adjustment": source.structural_adjustment,
+                    "is_weekend": source.is_weekend,
+                    "quality_weight": quality_weight, "quality_tier": quality_tier,
                 }
+            elif latest_any and meta["expiry_instrument"] and latest_any.expiry_instrument == meta["expiry_instrument"]:
+                # Same-expiry stale target is informative, but capped at 20%.
+                # Prior Flow remains the real stored value; no synthetic flow.
+                source = latest_any
+                quality_tier = "stale"
+                quality_weight = 0.20
+                quality_reason = "stale-target-row"
+                anchors[expiry_index] = {
+                    "open": source.forecast_open, "high": source.forecast_high,
+                    "low": source.forecast_low, "close": source.forecast_close,
+                    "confidence": source.confidence,
+                    "revision": source.revision, "max_revisions": source.max_revisions,
+                    "greek_flow_score": source.greek_flow_score,
+                    "structural_adjustment": source.structural_adjustment,
+                    "is_weekend": source.is_weekend,
+                    "quality_weight": quality_weight, "quality_tier": quality_tier,
+                }
+
+            if source:
                 meta.update({
-                    "available": True, "revision": next_row.revision,
-                    "expiry_instrument": next_row.expiry_instrument,
-                    "max_revisions": next_row.max_revisions,
-                    "confidence": next_row.confidence,
-                    "unavailable_reason": None,
+                    "available": True,
+                    "revision": source["revision"] if source_is_preview else source.revision,
+                    "expiry_instrument": source.get("expiry_instrument") if source_is_preview else source.expiry_instrument,
+                    "max_revisions": source["max_revisions"] if source_is_preview else source.max_revisions,
+                    "confidence": source["confidence"] if source_is_preview else source.confidence,
+                    "is_preview": source_is_preview,
+                    "window_hours": source.get("window_hours") if source_is_preview else None,
+                    "quality_tier": quality_tier,
+                    "quality_weight": quality_weight,
+                    "unavailable_reason": quality_reason,
                 })
             anchor_meta.append(meta)
 
@@ -2676,6 +2854,10 @@ class ChartController(http.Controller):
                    "weekly_signal_count": weekly_count, "weekly_signal_limit": 3,
                    "signal": None}
         if row:
+            try:
+                audit_snapshot = json.loads(row.snapshot_json or "{}")
+            except (TypeError, ValueError):
+                audit_snapshot = {}
             payload["signal"] = {
                 "id": row.id,
                 "kind": row.kind,
@@ -2730,6 +2912,12 @@ class ChartController(http.Controller):
                 "rtm_gap": row.rtm_gap,
                 "rtm_nested": row.rtm_nested,
                 "entry_model": row.entry_model or "",
+                "entry_source": (
+                    "1H %s proximal" % (row.rtm_structure or "RTM").upper()
+                    if row.rtm_zone_type else "Current-price/base engine"
+                ),
+                "stop_source": row.stop_basis or "",
+                "rtm_candidates_1h": audit_snapshot.get("rtm_candidates_1h", []),
                 "quality_score": row.quality_score,
                 "final_score": row.final_score,
                 "result_r": row.result_r,

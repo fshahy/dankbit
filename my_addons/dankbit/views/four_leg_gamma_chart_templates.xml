@@ -65,14 +65,23 @@
 	     instead lets the server shrink the trailing-hours window as the
 	     selected Expiry's own settlement nears — see
 	     _auto_window_hours() in main.py for the bucket mapping and its
-	     rationale. -->
+	     rationale.
+
+	     Also rendered, unchanged, by /<instrument>/4l
+	     (instrument_four_leg_gamma_chart in main.py) — the same page
+	     scoped to one specific instrument via the URL instead of the
+	     "Expiry" dropdown, which that variant omits entirely (the
+	     dropdown's markup and every EXPIRY_MODE-driven code path below
+	     are gated behind `t-if="not instrument"`/`if (INSTRUMENT)`, so
+	     /4l/<asset> itself is unaffected either way — see
+	     instrument_four_leg_gamma_chart's own docstring). -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — Four Leg Gamma</title>
+				<title><t t-esc="instrument or asset"/> — Four Leg Gamma</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -214,7 +223,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div t-att-data-asset="asset" t-att-data-instrument="instrument" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
@@ -227,15 +236,17 @@
 						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
-					<span class="tf-label">Expiry:</span>
-					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-						<option value="nearest" selected="selected">Nearest</option>
-						<option value="nearest_plus_1">Nearest+1</option>
-						<option value="nearest_plus_2">Nearest+2</option>
-						<option value="weekly">Weekly</option>
-						<option value="monthly">Monthly</option>
-						<option value="all">All</option>
-					</select>
+					<t t-if="not instrument">
+						<span class="tf-label">Expiry:</span>
+						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
+							<option value="nearest" selected="selected">Nearest</option>
+							<option value="nearest_plus_1">Nearest+1</option>
+							<option value="nearest_plus_2">Nearest+2</option>
+							<option value="weekly">Weekly</option>
+							<option value="monthly">Monthly</option>
+							<option value="all">All</option>
+						</select>
+					</t>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="midnight">00:00 UTC</option>
@@ -294,6 +305,15 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					// Set only by /<instrument>/4l (instrument_four_leg_gamma_chart)
+					// — /4l/<asset> itself renders `instrument: False`, which QWeb's
+					// t-att-* drops entirely, so cfg.instrument is undefined there
+					// and INSTRUMENT stays null, same as before this route existed.
+					// When set, this page has no "Expiry" dropdown at all (see
+					// EXPIRY_MODE below and the template's own t-if="not instrument")
+					// and fourLegGammaUrl() below isolates directly to this one
+					// instrument via ?instrument= instead of ?expiry=.
+					const INSTRUMENT = cfg.instrument || null;
 					// "Timeframe" dropdown, 4h default — same options and
 					// default as the Delta/Gamma/Strike Gamma charts' own
 					// dropdown; was 15m by default until changed to 4h per
@@ -390,8 +410,11 @@
 					// this stays off until explicitly requested rather than
 					// always drawn.
 					let SHOW_AVG = false;
+					// INSTRUMENT (only set on /<instrument>/4l) takes priority over
+					// EXPIRY_MODE entirely — same precedence four_leg_gamma_json's
+					// own ?instrument= override applies server-side.
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
+						'/api/four-leg-gamma/' + ASSET + (INSTRUMENT ? '?instrument=' + INSTRUMENT : '?expiry=' + EXPIRY_MODE) + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -600,7 +623,7 @@
 					}
 
 					function statusText() {
-						return ASSET + ' · Four Leg Gamma (' + windowLabel() + ', live)' + lastTradeSuffix() + tradeCountSuffix();
+						return (INSTRUMENT || ASSET) + ' · Four Leg Gamma (' + windowLabel() + ', live)' + lastTradeSuffix() + tradeCountSuffix();
 					}
 
 					async function refreshLastTrade() {
