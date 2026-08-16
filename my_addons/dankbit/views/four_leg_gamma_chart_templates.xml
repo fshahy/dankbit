@@ -22,7 +22,7 @@
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms), plus
 	     a 5th light-violet dashed AVG line, gated behind its own "AVG"
-	     checkbox (unchecked by default — see SHOW_AVG in the template's
+	     checkbox (checked by default — see SHOW_AVG in the template's
 	     own script) — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
 	     prices (no server field of its own), only while checked; removed
@@ -267,7 +267,7 @@
 						<option value="all" selected="selected">All</option>
 					</select>
 					<label class="toggle-label">
-						<input type="checkbox" id="avg-toggle" onchange="onToggleAvg()"/>
+						<input type="checkbox" id="avg-toggle" checked="checked" onchange="onToggleAvg()"/>
 						AVG
 					</label>
 					<span class="tf-label">Theme:</span>
@@ -403,13 +403,9 @@
 					// so windowLabel() can fall back to a plain "Auto" label
 					// before that.
 					let autoResolvedHours = null;
-					// "AVG" checkbox — unchecked by default. The average
-					// itself is cheap (4 already-fetched numbers), but
-					// skipping its computation/line-draw when unchecked is
-					// still one less price line to maintain per poll, so
-					// this stays off until explicitly requested rather than
-					// always drawn.
-					let SHOW_AVG = false;
+					// "AVG" checkbox — checked by default (see the
+					// checkbox's own checked="checked" markup above).
+					let SHOW_AVG = true;
 					// INSTRUMENT (only set on /<instrument>/4l) takes priority over
 					// EXPIRY_MODE entirely — same precedence four_leg_gamma_json's
 					// own ?instrument= override applies server-side.
@@ -785,7 +781,7 @@
 						setStatus(statusText());
 					}
 
-					// "AVG" checkbox — unchecked by default (see SHOW_AVG
+					// "AVG" checkbox — checked by default (see SHOW_AVG
 					// above). Unchecking removes the already-drawn line
 					// immediately rather than waiting for the next poll;
 					// checking re-fetches right away so it appears without
