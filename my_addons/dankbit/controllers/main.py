@@ -2404,10 +2404,12 @@ class ChartController(http.Controller):
         supports it too, and was originally also this page's own default
         until it was changed to 4h per product decision, matching the
         Delta/Gamma/Strike Gamma charts' own default),
-        own "Expiry" dropdown — Nearest/Nearest+1/Nearest+2 (Nearest
-        default, same nearest+1/nearest+2 ordinal notion /gt/<asset>'s
-        own 2nd/3rd price lines used before that page was removed;
-        trades ISOLATED to that one resolved instrument), PLUS
+        own "Expiry" dropdown — Nearest/Nearest+1 on the dropdown itself
+        (Nearest default, same nearest+1 ordinal notion /gt/<asset>'s own
+        2nd price line used before that page was removed; trades
+        ISOLATED to that one resolved instrument; Nearest+2 stays a
+        valid `?expiry=nearest_plus_2` value four_leg_gamma_json accepts
+        but has no dropdown entry of its own), PLUS
         Weekly/Monthly/All (the configured weekly_expiry/monthly_expiry
         instrument for `asset`; "All" considers every one of the
         asset's own non-expired instruments, trades CUMULATIVE across
@@ -2508,6 +2510,117 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "instrument": instrument, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/api/average-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def average_gamma_json(self, asset):
+        """Computed fresh on every request — no model/table behind this
+        route: a single averaged gamma-price level per expiry, for the
+        nearest active expiry and the one right after it
+        ("nearest"/"nearest_plus_1"), each resolved via
+        dankbit.bands._distinct_expirations()/_format_instrument() — the
+        same ordinal lookup four_leg_gamma_json uses for its own
+        Nearest/Nearest+1 Expiry options. Trades are ISOLATED to that one
+        resolved instrument via the same anchored `=ilike` domain used
+        throughout this file, but with no trailing-hours/since-midnight
+        window at all — ALL of that instrument's own trades (its entire
+        retained history), same as four_leg_gamma_json's own "All" Window
+        option (`?hours=all`) applied to a single isolated instrument.
+        The averaged value is computed exactly like /4l/<asset>'s own AVG
+        line: options.per_leg_gamma() finds each of the 4 legs' own
+        gamma-price extrema (BCG/BPG/SCG/SPG) over those trades, then
+        averages whichever of the 4 are actually present, not a fixed /4
+        (same present-leg-only average four_leg_gamma_chart_templates.xml's
+        own client-side `gammaLegs`/AVG line and dankbit.bands' own
+        gamma_band field both use — see models/bands.py's
+        _avg_present()). Feeds /aa/<asset>'s 2 horizontal reference
+        lines. `nearest`/`nearest_plus_1` are each `None` when that
+        ordinal position has no active expiry at all, else {instrument,
+        trade_count, avg_gamma_price, avg_gamma_value} — `avg_gamma_value`
+        is the same present-leg-only average applied to the 4 legs' own
+        gamma VALUES rather than prices (paired with avg_gamma_price so
+        both are averaged over the identical present-leg set, same
+        pairing four_leg_gamma_chart_templates.xml's own AVG line uses).
+        Both are `0.0` (not absent) when the instrument exists but has no
+        matching trades at all or no leg ever reaches a gamma extremum,
+        same "0.0 = absent" convention every other averaged-price field
+        in this addon uses."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            step = float(icp.get_param("dankbit.steps", default=100))
+        else:
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            step = float(icp.get_param("dankbit.eth_steps", default=50))
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+
+        bands_model = request.env["dankbit.bands"]
+        expirations = bands_model._distinct_expirations(asset, as_of, 2)
+
+        def _avg_gamma(expiration):
+            if expiration is None:
+                return None
+            instrument = bands_model._format_instrument(asset, expiration)
+            # No trailing-hours/since-midnight filter — every trade ever
+            # recorded for this instrument, same as four_leg_gamma_json's
+            # own "All" Window option applied to one isolated instrument.
+            domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+            trades = request.env["dankbit.trade"].search(domain)
+            avg_price, avg_value = 0.0, 0.0
+            if trades:
+                legs = options.per_leg_gamma(STs, trades)
+                present = [
+                    (legs[leg]["gamma_price"], legs[leg]["gamma_value"])
+                    for leg in ("long_call", "long_put", "short_call", "short_put")
+                    if legs[leg]["gamma_price"]
+                ]
+                if present:
+                    avg_price = sum(p for p, v in present) / len(present)
+                    avg_value = sum(v for p, v in present) / len(present)
+            return {
+                "instrument": instrument, "trade_count": len(trades),
+                "avg_gamma_price": avg_price, "avg_gamma_value": avg_value,
+            }
+
+        payload = {
+            "asset": asset,
+            "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
+            "nearest": _avg_gamma(expirations[0] if len(expirations) > 0 else None),
+            "nearest_plus_1": _avg_gamma(expirations[1] if len(expirations) > 1 else None),
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/aa/<string:asset>", type="http", auth="user", website=True)
+    def average_gamma_chart(self, asset):
+        """Standalone TradingView page — 2 horizontal reference lines,
+        the average gamma-price level (see average_gamma_json) for the
+        nearest active expiry and the one right after it, drawn over
+        real Deribit perpetual-futures candles (same
+        /api/klines-futures/<asset> proxy /4l/<asset> uses). Recomputed
+        live on every poll (dankbit.refresh_interval) — no model/table
+        behind this page. Renders its own standalone template
+        (dankbit_average_gamma_chart)."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_average_gamma_chart", ctx)
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def forecast_json(self, asset, **kw):

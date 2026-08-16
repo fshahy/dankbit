@@ -24,6 +24,7 @@
         "views/http_log_views.xml",
         "views/dankbit_templates.xml",
         "views/four_leg_gamma_chart_templates.xml",
+        "views/average_gamma_chart_templates.xml",
         "wizard/plot_wizard_view.xml",
         "wizard/zones_wizard_view.xml",
     ],

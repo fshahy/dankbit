@@ -21,25 +21,27 @@
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms), plus
-	     a 5th light-violet dashed AVG line, gated behind its own "AVG"
-	     checkbox (checked by default — see SHOW_AVG in the template's
-	     own script) — the average of whichever of those 4 are actually
+	     a 5th light-violet dashed AVG line, always drawn alongside the
+	     other 4 — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
-	     prices (no server field of its own), only while checked; removed
-	     per an earlier product decision alongside a heavier "ALL AVG"
-	     all-expiries variant, then restored on its own (ALL AVG stays
-	     removed) per a further product decision, then put behind this
-	     opt-in checkbox per a still later product decision.
-	     "Expiry" dropdown (Nearest/Nearest+1/Nearest+2 and Weekly/Monthly,
+	     prices (no server field of its own); removed per an earlier
+	     product decision alongside a heavier "ALL AVG" all-expiries
+	     variant, then restored on its own (ALL AVG stays removed) per a
+	     further product decision, then put behind an opt-in checkbox per
+	     a still later product decision, then made unconditional again
+	     (checkbox removed) per a final product decision.
+	     "Expiry" dropdown (Nearest, Nearest+1, and Weekly/Monthly,
 	     Nearest default — all ISOLATED to that one resolved instrument's
 	     own trades — PLUS All, CUMULATIVE across every non-expired
 	     instrument at once, same domain the since-removed standalone
 	     /mwa/<asset> page's own mwa_gamma_json used before that page was
 	     folded into this one and removed; Weekly/Monthly used to be
 	     CUMULATIVE through the selected expiry too, changed to
-	     single-instrument isolation per product decision; see
-	     four_leg_gamma_json for the full option-family history and
-	     resolution) picks that
+	     single-instrument isolation per product decision; Nearest+1 was
+	     added to the dropdown once four_leg_gamma_json's own
+	     already-existing "nearest_plus_1" ordinal option (see that
+	     route's own docstring) needed a UI entry; see four_leg_gamma_json
+	     for the full option-family history and resolution) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. The routine
 	     poll (dankbit.refresh_interval) is skipped client-side only while
 	     the cumulative All expiry is selected — same reason /mwa/<asset>
@@ -124,17 +126,6 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
-					/* "AVG" checkbox — same toggle-label shape the Delta
-					   Chart's own S/D, Zones, etc. checkboxes use
-					   (dankbit_templates.xml), copied rather than shared
-					   since this page's CSS is otherwise self-contained. */
-					.toggle-label {
-						font-family: monospace; font-size: 11pt;
-						color: #555; background: rgba(255,255,255,0.88);
-						padding: 2px 10px; border-radius: 4px;
-						cursor: pointer; border: 1px solid #ccc;
-						display: flex; align-items: center; gap: 4px;
-					}
 
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
@@ -196,7 +187,6 @@
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
-					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
@@ -241,7 +231,6 @@
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 							<option value="nearest" selected="selected">Nearest</option>
 							<option value="nearest_plus_1">Nearest+1</option>
-							<option value="nearest_plus_2">Nearest+2</option>
 							<option value="weekly">Weekly</option>
 							<option value="monthly">Monthly</option>
 							<option value="all">All</option>
@@ -250,26 +239,13 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="midnight">00:00 UTC</option>
-						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="auto" selected="selected">Auto (Time to Expiry)</option>
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
-						<option value="24">1d</option>
-						<option value="48">2d</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
-						<option value="144">6d</option>
-						<option value="168">7d</option>
-						<option value="192">8d</option>
-						<option value="216">9d</option>
-						<option value="240">10d</option>
-						<option value="all" selected="selected">All</option>
+						<option value="24">24h</option>
+						<option value="all">All</option>
 					</select>
-					<label class="toggle-label">
-						<input type="checkbox" id="avg-toggle" checked="checked" onchange="onToggleAvg()"/>
-						AVG
-					</label>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
 						<option value="light">Light</option>
@@ -328,10 +304,8 @@
 					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which expiry's trades feed the 4
-					// gamma legs, "nearest" default. Two families:
-					// "nearest"/"nearest_plus_1"/"nearest_plus_2" (the
-					// nearest active expiry and the 1st/2nd one after it)
-					// and "weekly"/"monthly" (the configured
+					// gamma legs, "nearest" default. "nearest" (the nearest
+					// active expiry) and "weekly"/"monthly" (the configured
 					// weekly_expiry/monthly_expiry instrument) all ISOLATE
 					// trades to that one resolved instrument's own trades;
 					// only "all" instead considers every non-expired
@@ -391,10 +365,12 @@
 					// 4h/8h/12h/1d-10d/All, given a "00:00 UTC" default
 					// option, then given an "Auto (Time to Expiry)" option
 					// which itself later became the default in place of
-					// "00:00 UTC" per a still later product decision — see
-					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES/
-					// _auto_window_hours for the current full history.)
-					let WINDOW_HOURS = 'all';
+					// "00:00 UTC", then "All" became the default in "Auto"'s
+					// place, then "Auto" was made the default again per a
+					// still later product decision — see main.py's own
+					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
+					// the current full history.)
+					let WINDOW_HOURS = 'auto';
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
@@ -403,9 +379,6 @@
 					// so windowLabel() can fall back to a plain "Auto" label
 					// before that.
 					let autoResolvedHours = null;
-					// "AVG" checkbox — checked by default (see the
-					// checkbox's own checked="checked" markup above).
-					let SHOW_AVG = true;
 					// INSTRUMENT (only set on /<instrument>/4l) takes priority over
 					// EXPIRY_MODE entirely — same precedence four_leg_gamma_json's
 					// own ?instrument= override applies server-side.
@@ -493,20 +466,6 @@
 					// picker above (that modal only covers the 4 raw
 					// BCG/BPG/SCG/SPG lines).
 					const AVG_GAMMA_COLOR = '#c9a0dc';
-					// Second AVG line drawn alongside the one above, also
-					// gated on the "AVG" checkbox — always the Nearest+1
-					// expiry's own 4-leg gamma average, computed over its
-					// FULL trade history (?hours=all) rather than the
-					// page's own currently-selected Expiry/Window, so it
-					// stays visible as a fixed forward-looking reference
-					// regardless of what the dropdowns are set to. Not
-					// drawn on /<instrument>/4l (INSTRUMENT set) — that
-					// page has no "Nearest+1" concept, since its Expiry
-					// dropdown is replaced entirely by the URL's own fixed
-					// instrument. Darker violet + a dotted style (vs. the
-					// primary AVG line's dashed light violet) so the two
-					// stay visually distinguishable when both are shown.
-					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -585,7 +544,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -781,53 +740,6 @@
 						setStatus(statusText());
 					}
 
-					// "AVG" checkbox — checked by default (see SHOW_AVG
-					// above). Unchecking removes the already-drawn line
-					// immediately rather than waiting for the next poll;
-					// checking re-fetches right away so it appears without
-					// delay, same "on-demand only" pattern this page's other
-					// dropdowns already use.
-					async function onToggleAvg() {
-						SHOW_AVG = document.getElementById('avg-toggle').checked;
-						if (!SHOW_AVG) {
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
-							if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
-						} else {
-							await refreshFourLegGamma();
-						}
-					}
-
-					// Nearest+1 expiry's own 4-leg gamma average, over its
-					// full trade history — see AVG_GAMMA_N1_COLOR above.
-					// Independent fetch from the page's own
-					// fourLegGammaUrl()/EXPIRY_MODE/WINDOW_HOURS, always
-					// isolated to expiry=nearest_plus_1&amp;hours=all. Removes
-					// its own previous line first so a failed/empty fetch
-					// (or the INSTRUMENT guard) leaves nothing stale drawn.
-					async function refreshAvgGammaN1() {
-						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
-						if (INSTRUMENT) return;
-						const data = await (await fetch('/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all')).json();
-						const points = data.points || [];
-						const latest = points.length ? points[points.length - 1] : null;
-						if (!latest) return;
-						const legs = [
-							{ price: latest.bcg_price, value: latest.bcg_value },
-							{ price: latest.bpg_price, value: latest.bpg_value },
-							{ price: latest.scg_price, value: latest.scg_value },
-							{ price: latest.spg_price, value: latest.spg_value },
-						].filter(leg => leg.price);
-						if (!legs.length) return;
-						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
-						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
-						avgGammaN1PriceLine = series.createPriceLine({
-							price: avgPrice, color: AVG_GAMMA_N1_COLOR, lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.Dotted,
-							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_N1_COLOR,
-							title: 'AVG N+1 ' + formatAbbreviated(avgValue),
-						});
-					}
-
 					// Rounds and abbreviates large raw dollar-gamma values
 					// (hundreds of millions to billions is typical here) —
 					// thousands as K, millions as M, sign preserved (long
@@ -879,8 +791,6 @@
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
-							if (SHOW_AVG) { await refreshAvgGammaN1(); }
-							else if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
 							if (!latest) {
 								putFillSeries.setData([]);
 								callFillSeries.setData([]);
@@ -914,20 +824,30 @@
 									title: 'LP ' + formatAbbreviated(latest.bpg_value),
 								});
 							}
+							// Smart Liquidity — |LC value| + |SC value| (resp. |LP| +
+							// |SP| for puts), a combined call-side/put-side gamma
+							// magnitude appended to the SC/SP label after a "|",
+							// purely a client-side display derivation off the same
+							// 4 values these lines already carry (no server field
+							// of its own, no relation to this addon's other,
+							// differently-defined "Smart Liquidity" — see
+							// forecast.smart_synthetic_liquidity()).
 							if (latest.scg_price) {
+								const smartLiqCall = Math.abs(latest.bcg_value) + Math.abs(latest.scg_value);
 								scgPriceLine = series.createPriceLine({
 									price: latest.scg_price, color: chartColors.scg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: chartColors.scg,
-									title: 'SC ' + formatAbbreviated(latest.scg_value),
+									title: 'SC ' + formatAbbreviated(latest.scg_value) + ' | ' + formatAbbreviated(smartLiqCall),
 								});
 							}
 							if (latest.spg_price) {
+								const smartLiqPut = Math.abs(latest.bpg_value) + Math.abs(latest.spg_value);
 								spgPriceLine = series.createPriceLine({
 									price: latest.spg_price, color: chartColors.spg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: chartColors.spg,
-									title: 'SP ' + formatAbbreviated(latest.spg_value),
+									title: 'SP ' + formatAbbreviated(latest.spg_value) + ' | ' + formatAbbreviated(smartLiqPut),
 								});
 							}
 							// Average of the legs' own gamma PRICE levels (not their
@@ -936,15 +856,12 @@
 							// above), not a fixed /4, since dividing a partial sum
 							// by 4 would silently skew the average toward 0 for
 							// every missing leg. Skipped entirely when none of the
-							// 4 are present, or when the "AVG" checkbox (unchecked
-							// by default) is off — one less price line to compute/
-							// maintain per poll while it's not wanted. The label
-							// additionally shows the average of those same legs'
-							// own gamma VALUES (paired with price so both are
-							// averaged over the identical present-leg set), same
-							// formatAbbreviated() the other 4 lines already use
-							// for their own value.
-							const gammaLegs = !SHOW_AVG ? [] : [
+							// 4 are present. The label additionally shows the
+							// average of those same legs' own gamma VALUES (paired
+							// with price so both are averaged over the identical
+							// present-leg set), same formatAbbreviated() the other
+							// 4 lines already use for their own value.
+							const gammaLegs = [
 								{ price: latest.bcg_price, value: latest.bcg_value },
 								{ price: latest.bpg_price, value: latest.bpg_value },
 								{ price: latest.scg_price, value: latest.scg_value },
