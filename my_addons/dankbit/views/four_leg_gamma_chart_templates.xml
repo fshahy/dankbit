@@ -250,7 +250,7 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="midnight">00:00 UTC</option>
-						<option value="auto" selected="selected">Auto (Time to Expiry)</option>
+						<option value="auto">Auto (Time to Expiry)</option>
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
@@ -264,7 +264,7 @@
 						<option value="192">8d</option>
 						<option value="216">9d</option>
 						<option value="240">10d</option>
-						<option value="all">All</option>
+						<option value="all" selected="selected">All</option>
 					</select>
 					<label class="toggle-label">
 						<input type="checkbox" id="avg-toggle" onchange="onToggleAvg()"/>
@@ -394,7 +394,7 @@
 					// "00:00 UTC" per a still later product decision — see
 					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES/
 					// _auto_window_hours for the current full history.)
-					let WINDOW_HOURS = 'auto';
+					let WINDOW_HOURS = 'all';
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
@@ -497,6 +497,20 @@
 					// picker above (that modal only covers the 4 raw
 					// BCG/BPG/SCG/SPG lines).
 					const AVG_GAMMA_COLOR = '#c9a0dc';
+					// Second AVG line drawn alongside the one above, also
+					// gated on the "AVG" checkbox — always the Nearest+1
+					// expiry's own 4-leg gamma average, computed over its
+					// FULL trade history (?hours=all) rather than the
+					// page's own currently-selected Expiry/Window, so it
+					// stays visible as a fixed forward-looking reference
+					// regardless of what the dropdowns are set to. Not
+					// drawn on /<instrument>/4l (INSTRUMENT set) — that
+					// page has no "Nearest+1" concept, since its Expiry
+					// dropdown is replaced entirely by the URL's own fixed
+					// instrument. Darker violet + a dotted style (vs. the
+					// primary AVG line's dashed light violet) so the two
+					// stay visually distinguishable when both are shown.
+					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -575,7 +589,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -779,12 +793,43 @@
 					// dropdowns already use.
 					async function onToggleAvg() {
 						SHOW_AVG = document.getElementById('avg-toggle').checked;
-						if (!SHOW_AVG && avgGammaPriceLine) {
-							series.removePriceLine(avgGammaPriceLine);
-							avgGammaPriceLine = null;
-						} else if (SHOW_AVG) {
+						if (!SHOW_AVG) {
+							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+							if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
+						} else {
 							await refreshFourLegGamma();
 						}
+					}
+
+					// Nearest+1 expiry's own 4-leg gamma average, over its
+					// full trade history — see AVG_GAMMA_N1_COLOR above.
+					// Independent fetch from the page's own
+					// fourLegGammaUrl()/EXPIRY_MODE/WINDOW_HOURS, always
+					// isolated to expiry=nearest_plus_1&amp;hours=all. Removes
+					// its own previous line first so a failed/empty fetch
+					// (or the INSTRUMENT guard) leaves nothing stale drawn.
+					async function refreshAvgGammaN1() {
+						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
+						if (INSTRUMENT) return;
+						const data = await (await fetch('/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all')).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						avgGammaN1PriceLine = series.createPriceLine({
+							price: avgPrice, color: AVG_GAMMA_N1_COLOR, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dotted,
+							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_N1_COLOR,
+							title: 'AVG N+1 ' + formatAbbreviated(avgValue),
+						});
 					}
 
 					// Rounds and abbreviates large raw dollar-gamma values
@@ -838,6 +883,8 @@
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+							if (SHOW_AVG) { await refreshAvgGammaN1(); }
+							else if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
 							if (!latest) {
 								putFillSeries.setData([]);
 								callFillSeries.setData([]);
