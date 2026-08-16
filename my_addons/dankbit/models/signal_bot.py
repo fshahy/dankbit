@@ -664,8 +664,8 @@ class DankbitSignal(models.Model):
         """Detect auditable 1H RTM bases after the Thales setup exists.
 
         This detector is intentionally local to Signal Bot. It does not alter
-        or replace Thales Zones: a price-action base is retained only when it
-        overlaps a confirmed Band/Zone/Smart-Liquidity reference.
+        or replace Thales Zones. Price action owns recognition; confirmed
+        Band/Zone/Smart-Liquidity references only grade/nest a detected Base.
         """
         closed = list(candles or [])[:-1]
         atr = cls._atr(closed)
@@ -680,7 +680,7 @@ class DankbitSignal(models.Model):
         start_at = max(3, len(closed) - 70)
         # base_end leaves up to three completed candles for departure.
         for base_end in range(start_at, len(closed) - 2):
-            for base_count in (1, 2, 3, 4, 5):
+            for base_count in (1, 2, 3, 4, 5, 6):
                 base_start = base_end - base_count + 1
                 if base_start < 2:
                     continue
@@ -700,7 +700,9 @@ class DankbitSignal(models.Model):
                 # tradable zone is always the complete wick-to-wick envelope.
                 body_shares = [abs(value(c, "c") - value(c, "o")) /
                                max(value(c, "h") - value(c, "l"), 1e-9) for c in base]
-                if max(body_shares) > 0.45 or sum(body_shares) / len(body_shares) > 0.32:
+                # Real RTM bases are commonly doji clusters, but one modest
+                # transition candle must not erase an otherwise valid origin.
+                if max(body_shares) > 0.55 or sum(body_shares) / len(body_shares) > 0.38:
                     continue
                 if base_count > 1:
                     overlaps_base = [min(value(a, "h"), value(b, "h")) >=
@@ -708,7 +710,10 @@ class DankbitSignal(models.Model):
                                      for a, b in zip(base, base[1:])]
                     if sum(overlaps_base) < len(overlaps_base) - 1:
                         continue
-                departure = closed[base_end + 1:min(base_end + 4, len(closed))]
+                # Allow up to five closed candles for a displacement/BOS leg.
+                # The old three-candle window missed legitimate gradual
+                # departures, especially in quiet/weekend sessions.
+                departure = closed[base_end + 1:min(base_end + 6, len(closed))]
                 if not departure:
                     continue
                 if direction == "long":
@@ -724,14 +729,23 @@ class DankbitSignal(models.Model):
                     gap = value(departure[0], "h") < zone_low
                     structure = "dbd" if incoming_move < 0 else "rbd"
                 best_body = max(bodies)
-                if impulse < 0.35 * atr or best_body < 0.50:
+                prior_structure_low = min(value(c, "l") for c in incoming[-3:])
+                prior_structure_high = max(value(c, "h") for c in incoming[-3:])
+                if direction == "long":
+                    caused_bos = max(value(c, "c") for c in departure) > prior_structure_high + 0.05 * atr
+                else:
+                    caused_bos = min(value(c, "c") for c in departure) < prior_structure_low - 0.05 * atr
+                # A clean BOS may depart progressively; without BOS retain the
+                # stricter displacement requirement to control false bases.
+                minimum_impulse = 0.30 * atr if caused_bos else 0.55 * atr
+                if impulse < minimum_impulse or best_body < 0.42:
                     continue
 
                 buffer_distance = 0.20 * atr
                 confluences = [(level, label) for level, label in (reference_levels or [])
                                if zone_low - buffer_distance <= level <= zone_high + buffer_distance]
 
-                after_departure = closed[min(base_end + 4, len(closed)):]
+                after_departure = closed[min(base_end + 6, len(closed)):]
                 overlaps = [value(c, "l") <= zone_high and value(c, "h") >= zone_low
                             for c in after_departure]
                 touches = 0
@@ -751,8 +765,8 @@ class DankbitSignal(models.Model):
 
                 compression = False
                 if touch_positions:
-                    absolute_touch = min(base_end + 4 + touch_positions[-1], len(closed) - 1)
-                    approach = closed[max(base_end + 4, absolute_touch - 5):absolute_touch]
+                    absolute_touch = min(base_end + 6 + touch_positions[-1], len(closed) - 1)
+                    approach = closed[max(base_end + 6, absolute_touch - 5):absolute_touch]
                     if len(approach) >= 3:
                         ranges = [value(c, "h") - value(c, "l") for c in approach]
                         contracting = sum(b <= a for a, b in zip(ranges, ranges[1:])) >= len(ranges) - 2
@@ -771,10 +785,11 @@ class DankbitSignal(models.Model):
                 departure_score = min(25.0, 12.5 * impulse / atr) + min(5.0, 2.5 * directional)
                 base_score = 12.0 if width <= atr and max(body_shares) <= 0.35 else 7.0
                 freshness_score = 18.0 if touches == 0 else 12.0 if touches == 1 else 4.0 if touches == 2 else 0.0
+                origin_score = min(12.0, 4.0 * distance_r) + (12.0 if caused_bos else 0.0)
                 score = (
                     12.0 + departure_score + base_score + freshness_score
                     + (15.0 if nested else 0.0)
-                    + min(10.0, 10.0 * distance_r / 3.0)
+                    + origin_score
                     + (10.0 if compression else 0.0)
                     + (5.0 if gap else 0.0)
                 )
@@ -787,25 +802,34 @@ class DankbitSignal(models.Model):
                     "fresh": touches == 0, "base_candles": base_count,
                     "departure_score": departure_score,
                     "departure_atr": impulse / atr,
+                    "caused_bos": caused_bos, "origin_score": origin_score,
                     "zone_definition": "full_wick_range",
                     "compression": compression, "gap": gap, "nested": nested,
                     "distance_r": distance_r,
                     "confluences": sorted({label for _, label in confluences}),
                     "formed_at": int(closed[base_end].get("t", 0) or 0),
                 })
-        # Prefer quality, then the newest formation. Deduplicate overlapping
-        # bases produced by the 1/2/3-candle search.
-        candidates.sort(key=lambda z: (z["score"] + 5.0 * (z["structure_priority"] - 1), z["formed_at"]), reverse=True)
+        # Prefer true origins/BOS, then quality and recency. Only near-identical
+        # envelopes are duplicates; a nested micro-base and its parent origin
+        # are both retained for the selector to audit.
+        candidates.sort(key=lambda z: (
+            bool(z["caused_bos"]), z["origin_score"],
+            z["score"] + 5.0 * (z["structure_priority"] - 1), z["formed_at"],
+        ), reverse=True)
         unique = []
         for zone in candidates:
-            if any(max(zone["low"], old["low"]) <= min(zone["high"], old["high"]) for old in unique):
+            def near_duplicate(old):
+                overlap = max(0.0, min(zone["high"], old["high"]) - max(zone["low"], old["low"]))
+                union = max(zone["high"], old["high"]) - min(zone["low"], old["low"])
+                return union > 0 and overlap / union >= 0.75
+            if any(near_duplicate(old) for old in unique):
                 continue
             unique.append(zone)
         return unique
 
     @staticmethod
     def _select_rtm_zone(direction, entry, zones, atr_4h):
-        max_distance = max(1.25 * atr_4h, 0.006 * entry)
+        max_distance = max(2.00 * atr_4h, 0.012 * entry)
         eligible = []
         for zone in zones:
             proximal = zone["high"] if direction == "long" else zone["low"]
@@ -814,16 +838,32 @@ class DankbitSignal(models.Model):
                 item = dict(zone)
                 item["distance_to_market"] = abs(entry - proximal)
                 eligible.append(item)
-        # DBR for Long and RBD for Short receive a small preference because
-        # they mark the end of the 1H pullback. Distance is penalised so an
-        # excellent but remote Base cannot displace the nearest credible
-        # entry zone and turn its proximal line into a mere stop reference.
+        # Origin quality/BOS must dominate proximity. Distance remains a mild
+        # tie-breaker so a nearby micro-base cannot displace the RBD/DBR origin
+        # that actually caused the structural move.
         distance_unit = max(atr_4h, 0.003 * entry, 1e-9)
         return max(eligible, key=lambda z: (
             z["score"] + 5.0 * (z["structure_priority"] - 1)
-            - 18.0 * z["distance_to_market"] / distance_unit,
+            + (14.0 if z.get("caused_bos") else 0.0)
+            + 0.75 * z.get("origin_score", 0.0)
+            - 5.0 * z["distance_to_market"] / distance_unit,
             z["formed_at"],
         ), default=None)
+
+    @staticmethod
+    def _forecast_pullback_gate(direction, market_price, zone, score_1h, gamma_score, score_4h):
+        """Delay, never reverse, an RTM entry when forward pressure points
+        from market toward a still-fresh origin Base."""
+        if direction not in ("long", "short") or not zone or not zone.get("fresh"):
+            return False, 0.0
+        direction_sign = 1.0 if direction == "long" else -1.0
+        composite = 0.55 * score_1h + 0.25 * gamma_score + 0.20 * score_4h
+        pressure = -(direction_sign * composite)
+        zone_ahead = (
+            market_price < float(zone["low"]) if direction == "short"
+            else market_price > float(zone["high"])
+        )
+        return bool(zone_ahead and pressure >= 10.0), pressure
 
     @staticmethod
     def _apply_rtm_opposing_zone(direction, entry, stop, target, zones):
@@ -934,6 +974,8 @@ class DankbitSignal(models.Model):
                     trigger_level = atr_1h = 0.0
                     trigger_basis = ""
                     liquidity_swept = entry_confirmed = False
+                    wait_for_pullback = False
+                    pullback_pressure = 0.0
                     rtm_zone = None
                     rtm_opposing_zone = None
                     rtm_path_clear = True
@@ -1023,6 +1065,23 @@ class DankbitSignal(models.Model):
                                 direction, market_price, candles_1h, [(proximal, trigger_label)], atr_4h,
                             )
                             atr_1h = trigger_atr_1h or atr_1h
+
+                            # Entry timing is allowed to use forward information
+                            # without changing the Daily/4H-owned trade direction.
+                            # If Forecast/Gamma/Bands project a counter-directional
+                            # pullback toward a still-fresh RTM origin, keep the
+                            # proximal entry parked at that Base instead of chasing
+                            # a micro retest near market.
+                            wait_for_pullback, pullback_pressure = self._forecast_pullback_gate(
+                                direction, market_price, rtm_zone, score1, gamma_score, score4,
+                            )
+                            if wait_for_pullback:
+                                entry_confirmed = False
+                                liquidity_swept = False
+                                reasons.append(
+                                    "WAIT FOR PULLBACK: forward 1H/Gamma/Bands pressure %.1f points toward fresh %s %.2f-%.2f"
+                                    % (pullback_pressure, rtm_zone["structure"].upper(), entry_zone_low, entry_zone_high)
+                                )
                             chase_distance = (max(entry_zone_low - market_price, 0.0) if direction == "short"
                                               else max(market_price - entry_zone_high, 0.0))
                             chase_limit = max(0.35 * atr_1h, 0.50 * zone_width)
@@ -1052,22 +1111,29 @@ class DankbitSignal(models.Model):
                     rtm_official_eligible = bool(
                         thales_official_filters and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and entry_confirmed
+                        and not wait_for_pullback
                         and stop and target and rr >= 2.0
                     )
                     reclaim_shadow = bool(
                         thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and liquidity_swept and not entry_confirmed
+                        and not wait_for_pullback
                     )
                     later_touch_shadow = bool(
                         thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] >= 2 and entry_confirmed
+                        and not wait_for_pullback
                     )
-                    rtm_watch = bool(thales_eligible and rtm_zone and rtm_path_clear)
+                    rtm_watch = bool(thales_eligible and rtm_zone and rtm_score >= 50.0 and rtm_path_clear)
 
                     breakout_official_eligible = False
                     breakout_shadow = False
                     breakout_watch = False
-                    if not rtm_official_eligible and not reclaim_shadow and not later_touch_shadow and breakout_candidate:
+                    # Breakout/Retest is a true fallback only. It must never
+                    # overwrite a credible RTM Base merely because that Base is
+                    # correctly waiting for its first touch/confirmation.
+                    if (not rtm_official_eligible and not reclaim_shadow and not later_touch_shadow
+                            and not rtm_watch and breakout_candidate):
                         direction = breakout["direction"]
                         direction_sign = 1.0 if direction == "long" else -1.0
                         directional_option_strength = max(
