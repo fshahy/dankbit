@@ -2515,35 +2515,36 @@ class ChartController(http.Controller):
     def average_gamma_json(self, asset):
         """Computed fresh on every request — no model/table behind this
         route: a single averaged gamma-price level per expiry, for the
-        nearest active expiry and the one right after it
-        ("nearest"/"nearest_plus_1"), each resolved via
+        nearest active expiry and the 1st/2nd ones after it
+        ("nearest"/"nearest_plus_1"/"nearest_plus_2"), each resolved via
         dankbit.bands._distinct_expirations()/_format_instrument() — the
         same ordinal lookup four_leg_gamma_json uses for its own
-        Nearest/Nearest+1 Expiry options. Trades are ISOLATED to that one
-        resolved instrument via the same anchored `=ilike` domain used
-        throughout this file, but with no trailing-hours/since-midnight
-        window at all — ALL of that instrument's own trades (its entire
-        retained history), same as four_leg_gamma_json's own "All" Window
-        option (`?hours=all`) applied to a single isolated instrument.
-        The averaged value is computed exactly like /4l/<asset>'s own AVG
-        line: options.per_leg_gamma() finds each of the 4 legs' own
-        gamma-price extrema (BCG/BPG/SCG/SPG) over those trades, then
-        averages whichever of the 4 are actually present, not a fixed /4
-        (same present-leg-only average four_leg_gamma_chart_templates.xml's
-        own client-side `gammaLegs`/AVG line and dankbit.bands' own
+        Nearest/Nearest+1/Nearest+2 Expiry options. Trades are ISOLATED
+        to that one resolved instrument via the same anchored `=ilike`
+        domain used throughout this file, but with no trailing-hours/
+        since-midnight window at all — ALL of that instrument's own
+        trades (its entire retained history), same as
+        four_leg_gamma_json's own "All" Window option (`?hours=all`)
+        applied to a single isolated instrument. The averaged value is
+        computed exactly like /4l/<asset>'s own AVG line:
+        options.per_leg_gamma() finds each of the 4 legs' own gamma-price
+        extrema (BCG/BPG/SCG/SPG) over those trades, then averages
+        whichever of the 4 are actually present, not a fixed /4 (same
+        present-leg-only average four_leg_gamma_chart_templates.xml's own
+        client-side `gammaLegs`/AVG line and dankbit.bands' own
         gamma_band field both use — see models/bands.py's
-        _avg_present()). Feeds /aa/<asset>'s 2 horizontal reference
-        lines. `nearest`/`nearest_plus_1` are each `None` when that
-        ordinal position has no active expiry at all, else {instrument,
-        trade_count, avg_gamma_price, avg_gamma_value} — `avg_gamma_value`
-        is the same present-leg-only average applied to the 4 legs' own
-        gamma VALUES rather than prices (paired with avg_gamma_price so
-        both are averaged over the identical present-leg set, same
-        pairing four_leg_gamma_chart_templates.xml's own AVG line uses).
-        Both are `0.0` (not absent) when the instrument exists but has no
-        matching trades at all or no leg ever reaches a gamma extremum,
-        same "0.0 = absent" convention every other averaged-price field
-        in this addon uses."""
+        _avg_present()). Feeds /aa/<asset>'s 3 horizontal reference
+        lines. `nearest`/`nearest_plus_1`/`nearest_plus_2` are each
+        `None` when that ordinal position has no active expiry at all,
+        else {instrument, trade_count, avg_gamma_price, avg_gamma_value}
+        — `avg_gamma_value` is the same present-leg-only average applied
+        to the 4 legs' own gamma VALUES rather than prices (paired with
+        avg_gamma_price so both are averaged over the identical
+        present-leg set, same pairing four_leg_gamma_chart_templates.xml's
+        own AVG line uses). Both are `0.0` (not absent) when the
+        instrument exists but has no matching trades at all or no leg
+        ever reaches a gamma extremum, same "0.0 = absent" convention
+        every other averaged-price field in this addon uses."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -2565,7 +2566,7 @@ class ChartController(http.Controller):
         STs = np.arange(from_price, to_price, step, dtype=np.float64)
 
         bands_model = request.env["dankbit.bands"]
-        expirations = bands_model._distinct_expirations(asset, as_of, 2)
+        expirations = bands_model._distinct_expirations(asset, as_of, 3)
 
         def _avg_gamma(expiration):
             if expiration is None:
@@ -2597,6 +2598,7 @@ class ChartController(http.Controller):
             "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
             "nearest": _avg_gamma(expirations[0] if len(expirations) > 0 else None),
             "nearest_plus_1": _avg_gamma(expirations[1] if len(expirations) > 1 else None),
+            "nearest_plus_2": _avg_gamma(expirations[2] if len(expirations) > 2 else None),
         }
         return request.make_response(
             json.dumps(payload),
@@ -2605,9 +2607,9 @@ class ChartController(http.Controller):
 
     @http.route("/aa/<string:asset>", type="http", auth="user", website=True)
     def average_gamma_chart(self, asset):
-        """Standalone TradingView page — 2 horizontal reference lines,
+        """Standalone TradingView page — 3 horizontal reference lines,
         the average gamma-price level (see average_gamma_json) for the
-        nearest active expiry and the one right after it, drawn over
+        nearest active expiry and the 1st/2nd ones after it, drawn over
         real Deribit perpetual-futures candles (same
         /api/klines-futures/<asset> proxy /4l/<asset> uses). Recomputed
         live on every poll (dankbit.refresh_interval) — no model/table

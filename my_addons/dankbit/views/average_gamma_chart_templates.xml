@@ -4,14 +4,14 @@
 	     (/4l/<asset>): same Deribit perpetual-futures candle source (via
 	     /api/klines-futures/<asset>, dankbit.trade.get_candles_deribit_perpetual()),
 	     same Timeframe/Theme/Ruler/Settings controls, same right-click "Reset
-	     chart view" context menu — but drawing only 2 horizontal reference
-	     lines instead of 4, and with no Expiry/Window dropdown at all: the 2
+	     chart view" context menu — but drawing only 3 horizontal reference
+	     lines instead of 4, and with no Expiry/Window dropdown at all: the 3
 	     lines are always the average gamma-price level (see
 	     average_gamma_json in main.py — the present-leg-only average of
 	     that expiry's own BCG/BPG/SCG/SPG extrema, same average /4l's own
 	     AVG line and dankbit.bands' own gamma_band field compute) for the
-	     nearest active expiry and the one right after it
-	     ("Nearest"/"Nearest+1"), each computed over ALL of that
+	     nearest active expiry and the 1st/2nd ones after it
+	     ("Nearest"/"Nearest+1"/"Nearest+2"), each computed over ALL of that
 	     instrument's own trades (its entire retained history, no
 	     trailing-hours/since-midnight window). Recomputed live on every
 	     poll (dankbit.refresh_interval) — no model/table behind this
@@ -183,6 +183,7 @@
 							<div class="modal-section-title">Average Gamma Lines</div>
 							<label class="color-row">Nearest <input type="color" id="color-nearest"/></label>
 							<label class="color-row">Nearest+1 <input type="color" id="color-nearestPlus1"/></label>
+							<label class="color-row">Nearest+2 <input type="color" id="color-nearestPlus2"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -243,7 +244,7 @@
 					// the Delta Chart's ('dankbit_chart_colors') and /4l's own
 					// ('dankbit_4l_chart_colors') color settings.
 					const COLOR_STORAGE_KEY = 'dankbit_aa_chart_colors';
-					const DEFAULT_COLORS = { nearest: '#9400d3', nearestPlus1: '#e0b0ff' };
+					const DEFAULT_COLORS = { nearest: '#9400d3', nearestPlus1: '#e0b0ff', nearestPlus2: '#dda0dd' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -298,7 +299,7 @@
 					// connected historical time series. Redrawn fresh on
 					// every poll (REFRESH), each replacing its own previous
 					// line rather than accumulating one per hour.
-					let nearestGammaLine = null, nearestPlus1GammaLine = null;
+					let nearestGammaLine = null, nearestPlus1GammaLine = null, nearestPlus2GammaLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -441,6 +442,7 @@
 
 							if (nearestGammaLine) { series.removePriceLine(nearestGammaLine); nearestGammaLine = null; }
 							if (nearestPlus1GammaLine) { series.removePriceLine(nearestPlus1GammaLine); nearestPlus1GammaLine = null; }
+							if (nearestPlus2GammaLine) { series.removePriceLine(nearestPlus2GammaLine); nearestPlus2GammaLine = null; }
 
 							// avg_gamma_price 0.0 means absent (no trades in the
 							// window, or no leg ever reached a gamma extremum) —
@@ -463,6 +465,15 @@
 									lineStyle: LightweightCharts.LineStyle.Dashed,
 									axisLabelVisible: true, axisLabelColor: chartColors.nearestPlus1,
 									title: nearestPlus1.instrument + ' ' + formatAbbreviated(nearestPlus1.avg_gamma_value),
+								});
+							}
+							const nearestPlus2 = data.nearest_plus_2;
+							if (nearestPlus2 && nearestPlus2.avg_gamma_price) {
+								nearestPlus2GammaLine = series.createPriceLine({
+									price: nearestPlus2.avg_gamma_price, color: chartColors.nearestPlus2, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible: true, axisLabelColor: chartColors.nearestPlus2,
+									title: nearestPlus2.instrument + ' ' + formatAbbreviated(nearestPlus2.avg_gamma_value),
 								});
 							}
 						} finally {

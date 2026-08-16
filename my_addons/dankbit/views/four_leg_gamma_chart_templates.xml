@@ -30,17 +30,18 @@
 	     further product decision, then put behind an opt-in checkbox per
 	     a still later product decision, then made unconditional again
 	     (checkbox removed) per a final product decision.
-	     "Expiry" dropdown (Nearest, Nearest+1, and Weekly/Monthly,
-	     Nearest default — all ISOLATED to that one resolved instrument's
-	     own trades — PLUS All, CUMULATIVE across every non-expired
-	     instrument at once, same domain the since-removed standalone
-	     /mwa/<asset> page's own mwa_gamma_json used before that page was
-	     folded into this one and removed; Weekly/Monthly used to be
-	     CUMULATIVE through the selected expiry too, changed to
-	     single-instrument isolation per product decision; Nearest+1 was
-	     added to the dropdown once four_leg_gamma_json's own
-	     already-existing "nearest_plus_1" ordinal option (see that
-	     route's own docstring) needed a UI entry; see four_leg_gamma_json
+	     "Expiry" dropdown (Nearest, Nearest+1, Nearest+2, and
+	     Weekly/Monthly, Nearest default — all ISOLATED to that one
+	     resolved instrument's own trades — PLUS All, CUMULATIVE across
+	     every non-expired instrument at once, same domain the
+	     since-removed standalone /mwa/<asset> page's own mwa_gamma_json
+	     used before that page was folded into this one and removed;
+	     Weekly/Monthly used to be CUMULATIVE through the selected expiry
+	     too, changed to single-instrument isolation per product decision;
+	     Nearest+1 and Nearest+2 were added to the dropdown once
+	     four_leg_gamma_json's own already-existing "nearest_plus_1"/
+	     "nearest_plus_2" ordinal options (see that route's own
+	     docstring) needed a UI entry; see four_leg_gamma_json
 	     for the full option-family history and resolution) picks that
 	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. The routine
 	     poll (dankbit.refresh_interval) is skipped client-side only while
@@ -231,6 +232,7 @@
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 							<option value="nearest" selected="selected">Nearest</option>
 							<option value="nearest_plus_1">Nearest+1</option>
+							<option value="nearest_plus_2">Nearest+2</option>
 							<option value="weekly">Weekly</option>
 							<option value="monthly">Monthly</option>
 							<option value="all">All</option>
