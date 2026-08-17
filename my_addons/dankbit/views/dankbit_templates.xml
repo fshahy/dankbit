@@ -477,10 +477,10 @@
 						<div class="modal-section">
 							<div class="modal-section-title" id="forecast-settings-title">Forecast Candles (4H)</div>
 							<label class="color-row"><span id="forecast-count-label">Candle Count (1–18)</span> <input type="number" id="forecast-candle-count" min="1" max="18" step="1"/></label>
-							<label class="color-row">Up Body <input type="color" id="color-forecastUp"/></label>
-							<label class="color-row">Down Body <input type="color" id="color-forecastDown"/></label>
-							<label class="color-row">Up Wick <input type="color" id="color-forecastWickUp"/></label>
-							<label class="color-row">Down Wick <input type="color" id="color-forecastWickDown"/></label>
+							<label class="color-row" title="Body color of bullish forecast candles">Bullish Body <input type="color" id="color-forecastUp"/></label>
+							<label class="color-row" title="Body color of bearish forecast candles">Bearish Body <input type="color" id="color-forecastDown"/></label>
+							<label class="color-row" title="Wick color of bullish forecast candles">Bullish Wick <input type="color" id="color-forecastWickUp"/></label>
+							<label class="color-row" title="Wick color of bearish forecast candles">Bearish Wick <input type="color" id="color-forecastWickDown"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -2653,6 +2653,7 @@
 						smartLiqLowerSeries.applyOptions({ color: c.smartLiqLower, lineStyle: lineStyleFromName(s.smartLiqLower) });
 						forecastSeries.applyOptions({
 							upColor: c.forecastUp, downColor: c.forecastDown,
+							borderUpColor: c.forecastUp, borderDownColor: c.forecastDown,
 							wickUpColor: c.forecastWickUp, wickDownColor: c.forecastWickDown,
 						});
 

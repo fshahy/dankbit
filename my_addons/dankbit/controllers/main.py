@@ -2591,11 +2591,16 @@ class ChartController(http.Controller):
         ("nearest"/"nearest_plus_1"/"nearest_plus_2"), each resolved via
         dankbit.bands._distinct_expirations()/_format_instrument() — the
         same ordinal lookup four_leg_gamma_json uses for its own
-        Nearest/Nearest+1/Nearest+2 Expiry options. Trades are ISOLATED
-        to that one resolved instrument via the same anchored `=ilike`
-        domain used throughout this file, but with no trailing-hours/
-        since-midnight window at all — ALL of that instrument's own
-        trades (its entire retained history), same as
+        Nearest/Nearest+1/Nearest+2 Expiry options — PLUS the configured
+        weekly_expiry/monthly_expiry instrument for `asset`
+        ("weekly"/"monthly", `eth_`-prefixed param keys for ETH, same
+        convention four_leg_gamma_json's own Weekly/Monthly resolution
+        uses, including its `active_test=False` bypass in case that
+        configured instrument has since expired and been archived).
+        Trades are ISOLATED to that one resolved instrument via the same
+        anchored `=ilike` domain used throughout this file, but with no
+        trailing-hours/since-midnight window at all — ALL of that
+        instrument's own trades (its entire retained history), same as
         four_leg_gamma_json's own "All" Window option (`?hours=all`)
         applied to a single isolated instrument. The averaged value is
         computed exactly like /4l/<asset>'s own AVG line:
@@ -2605,10 +2610,12 @@ class ChartController(http.Controller):
         present-leg-only average four_leg_gamma_chart_templates.xml's own
         client-side `gammaLegs`/AVG line and dankbit.bands' own
         gamma_band field both use — see models/bands.py's
-        _avg_present()). Feeds /aa/<asset>'s 3 horizontal reference
+        _avg_present()). Feeds /aa/<asset>'s 5 horizontal reference
         lines. `nearest`/`nearest_plus_1`/`nearest_plus_2` are each
-        `None` when that ordinal position has no active expiry at all,
-        else {instrument, trade_count, avg_gamma_price, avg_gamma_value}
+        `None` when that ordinal position has no active expiry at all;
+        `weekly`/`monthly` are each `None` when that setting is
+        unconfigured (empty string); else
+        {instrument, trade_count, avg_gamma_price, avg_gamma_value}
         — `avg_gamma_value` is the same present-leg-only average applied
         to the 4 legs' own gamma VALUES rather than prices (paired with
         avg_gamma_price so both are averaged over the identical
@@ -2640,15 +2647,7 @@ class ChartController(http.Controller):
         bands_model = request.env["dankbit.bands"]
         expirations = bands_model._distinct_expirations(asset, as_of, 3)
 
-        def _avg_gamma(expiration):
-            if expiration is None:
-                return None
-            instrument = bands_model._format_instrument(asset, expiration)
-            # No trailing-hours/since-midnight filter — every trade ever
-            # recorded for this instrument, same as four_leg_gamma_json's
-            # own "All" Window option applied to one isolated instrument.
-            domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
-            trades = request.env["dankbit.trade"].search(domain)
+        def _avg_gamma_trades(instrument, trades):
             avg_price, avg_value = 0.0, 0.0
             if trades:
                 legs = options.per_leg_gamma(STs, trades)
@@ -2665,12 +2664,39 @@ class ChartController(http.Controller):
                 "avg_gamma_price": avg_price, "avg_gamma_value": avg_value,
             }
 
+        def _avg_gamma(expiration):
+            if expiration is None:
+                return None
+            instrument = bands_model._format_instrument(asset, expiration)
+            # No trailing-hours/since-midnight filter — every trade ever
+            # recorded for this instrument, same as four_leg_gamma_json's
+            # own "All" Window option applied to one isolated instrument.
+            domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+            trades = request.env["dankbit.trade"].search(domain)
+            return _avg_gamma_trades(instrument, trades)
+
+        def _avg_gamma_configured(param_key):
+            instrument = icp.get_param(param_key, default="").upper() or None
+            if not instrument:
+                return None
+            # active_test=False bypass — same as four_leg_gamma_json's own
+            # Weekly/Monthly resolution — in case the configured instrument
+            # has since expired and been archived.
+            domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+            trades = request.env["dankbit.trade"].with_context(active_test=False).search(domain)
+            return _avg_gamma_trades(instrument, trades)
+
+        weekly_param = "dankbit.eth_weekly_expiry" if asset == "ETH" else "dankbit.weekly_expiry"
+        monthly_param = "dankbit.eth_monthly_expiry" if asset == "ETH" else "dankbit.monthly_expiry"
+
         payload = {
             "asset": asset,
             "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
             "nearest": _avg_gamma(expirations[0] if len(expirations) > 0 else None),
             "nearest_plus_1": _avg_gamma(expirations[1] if len(expirations) > 1 else None),
             "nearest_plus_2": _avg_gamma(expirations[2] if len(expirations) > 2 else None),
+            "weekly": _avg_gamma_configured(weekly_param),
+            "monthly": _avg_gamma_configured(monthly_param),
         }
         return request.make_response(
             json.dumps(payload),
@@ -2679,10 +2705,11 @@ class ChartController(http.Controller):
 
     @http.route("/aa/<string:asset>", type="http", auth="user", website=True)
     def average_gamma_chart(self, asset):
-        """Standalone TradingView page — 3 horizontal reference lines,
+        """Standalone TradingView page — 5 horizontal reference lines,
         the average gamma-price level (see average_gamma_json) for the
-        nearest active expiry and the 1st/2nd ones after it, drawn over
-        real Deribit perpetual-futures candles (same
+        nearest active expiry and the 1st/2nd ones after it, PLUS the
+        configured weekly_expiry/monthly_expiry instrument for `asset`,
+        drawn over real Deribit perpetual-futures candles (same
         /api/klines-futures/<asset> proxy /4l/<asset> uses). Recomputed
         live on every poll (dankbit.refresh_interval) — no model/table
         behind this page. Renders its own standalone template

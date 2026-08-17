@@ -4,18 +4,20 @@
 	     (/4l/<asset>): same Deribit perpetual-futures candle source (via
 	     /api/klines-futures/<asset>, dankbit.trade.get_candles_deribit_perpetual()),
 	     same Timeframe/Theme/Ruler/Settings controls, same right-click "Reset
-	     chart view" context menu — but drawing only 3 horizontal reference
-	     lines instead of 4, and with no Expiry/Window dropdown at all: the 3
+	     chart view" context menu — but drawing 5 horizontal reference
+	     lines instead of 4, and with no Expiry/Window dropdown at all: the 5
 	     lines are always the average gamma-price level (see
 	     average_gamma_json in main.py — the present-leg-only average of
 	     that expiry's own BCG/BPG/SCG/SPG extrema, same average /4l's own
 	     AVG line and dankbit.bands' own gamma_band field compute) for the
 	     nearest active expiry and the 1st/2nd ones after it
-	     ("Nearest"/"Nearest+1"/"Nearest+2"), each computed over ALL of that
-	     instrument's own trades (its entire retained history, no
-	     trailing-hours/since-midnight window). Recomputed live on every
-	     poll (dankbit.refresh_interval) — no model/table behind this
-	     page. -->
+	     ("Nearest"/"Nearest+1"/"Nearest+2"), PLUS the configured
+	     weekly_expiry/monthly_expiry instrument for `asset` ("Weekly"/
+	     "Monthly", `None` when that setting is unconfigured), each
+	     computed over ALL of that instrument's own trades (its entire
+	     retained history, no trailing-hours/since-midnight window).
+	     Recomputed live on every poll (dankbit.refresh_interval) — no
+	     model/table behind this page. -->
 
 	<template id="dankbit_average_gamma_chart" name="Dankbit Average Gamma Chart">
 		<html>
@@ -46,6 +48,25 @@
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
+					/* Color legend for the 5 average-gamma reference lines —
+					   see renderColorLegend() below. Swatch colors are read
+					   live from chartColors, so a user-recolored line (via
+					   the "Settings" modal) always shows the matching swatch
+					   rather than a hardcoded default. */
+					#color-legend {
+						/* right: 80px, not 12px — matches #exchange-label's
+						   own offset (below it, in the same right-hand
+						   column). 12px sat underneath the chart's own
+						   right price scale, so its swatches/labels were
+						   getting covered by the price-axis labels. */
+						position: fixed; top: 36px; right: 80px;
+						font-family: monospace; font-size: 10pt;
+						color: #333; background: rgba(255,255,255,0.88);
+						padding: 4px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none;
+					}
+					.legend-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+					.legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 					.tf-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; padding: 0 2px;
@@ -83,7 +104,7 @@
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
 					/* "Settings" button/dialog — color pickers for this
-					   page's own 2 average-gamma lines, persisted to
+					   page's own 5 average-gamma lines, persisted to
 					   localStorage under a key completely independent of
 					   both the Delta Chart's and /4l's own color settings. */
 					.modal-overlay {
@@ -120,6 +141,7 @@
 					body.dark .tf-label { color: #ccc; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark #color-legend { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
@@ -131,7 +153,7 @@
 					body.dark .modal-close:hover { color: #f66; }
 
 					/* Shown while refreshAverageGamma() is fetching/computing
-					   the 2 average-gamma lines (a fresh options.per_leg_gamma()
+					   the 5 average-gamma lines (a fresh options.per_leg_gamma()
 					   call server-side each time — no persisted history behind
 					   this page). Hidden as soon as that fetch resolves,
 					   success or error. Same #spinner pattern /4l uses. */
@@ -153,6 +175,13 @@
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
+				<div id="color-legend">
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearest"/><span>Nearest</span></div>
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearestPlus1"/><span>Nearest+1</span></div>
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearestPlus2"/><span>Nearest+2</span></div>
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-weekly"/><span>Weekly</span></div>
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-monthly"/><span>Monthly</span></div>
+				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -184,6 +213,8 @@
 							<label class="color-row">Nearest <input type="color" id="color-nearest"/></label>
 							<label class="color-row">Nearest+1 <input type="color" id="color-nearestPlus1"/></label>
 							<label class="color-row">Nearest+2 <input type="color" id="color-nearestPlus2"/></label>
+							<label class="color-row">Weekly <input type="color" id="color-weekly"/></label>
+							<label class="color-row">Monthly <input type="color" id="color-monthly"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -239,12 +270,20 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 2 average-gamma lines, persisted per-browser
+					// page's own 5 average-gamma lines, persisted per-browser
 					// to localStorage under its own key, independent of both
 					// the Delta Chart's ('dankbit_chart_colors') and /4l's own
-					// ('dankbit_4l_chart_colors') color settings.
+					// ('dankbit_4l_chart_colors') color settings. Weekly/
+					// Monthly default to green/orange — distinct from the
+					// Nearest/Nearest+1/Nearest+2 violet family, and matching
+					// the on-page color legend (#color-legend, see
+					// renderColorLegend() below): dark violet = Nearest,
+					// green = Weekly, orange = Monthly.
 					const COLOR_STORAGE_KEY = 'dankbit_aa_chart_colors';
-					const DEFAULT_COLORS = { nearest: '#9400d3', nearestPlus1: '#e0b0ff', nearestPlus2: '#dda0dd' };
+					const DEFAULT_COLORS = {
+						nearest: '#9400d3', nearestPlus1: '#e0b0ff', nearestPlus2: '#dda0dd',
+						weekly: '#2e7d32', monthly: '#ef6c00',
+					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -252,6 +291,19 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
+
+					// #color-legend (see CSS above) — one swatch row per
+					// line (all 5 of DEFAULT_COLORS' own keys), read live
+					// from chartColors so a user-recolored line (Settings →
+					// Save/Reset) is always reflected here too, not just a
+					// hardcoded default.
+					function renderColorLegend() {
+						Object.keys(DEFAULT_COLORS).forEach(key => {
+							const swatch = document.getElementById('legend-swatch-' + key);
+							if (swatch) swatch.style.background = chartColors[key];
+						});
+					}
+					renderColorLegend();
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -294,12 +346,13 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The 2 average-gamma "lines" are horizontal reference
+					// The 5 average-gamma "lines" are horizontal reference
 					// lines at the CURRENT (latest) value only — not a
 					// connected historical time series. Redrawn fresh on
 					// every poll (REFRESH), each replacing its own previous
 					// line rather than accumulating one per hour.
 					let nearestGammaLine = null, nearestPlus1GammaLine = null, nearestPlus2GammaLine = null;
+					let weeklyGammaLine = null, monthlyGammaLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -443,6 +496,8 @@
 							if (nearestGammaLine) { series.removePriceLine(nearestGammaLine); nearestGammaLine = null; }
 							if (nearestPlus1GammaLine) { series.removePriceLine(nearestPlus1GammaLine); nearestPlus1GammaLine = null; }
 							if (nearestPlus2GammaLine) { series.removePriceLine(nearestPlus2GammaLine); nearestPlus2GammaLine = null; }
+							if (weeklyGammaLine) { series.removePriceLine(weeklyGammaLine); weeklyGammaLine = null; }
+							if (monthlyGammaLine) { series.removePriceLine(monthlyGammaLine); monthlyGammaLine = null; }
 
 							// avg_gamma_price 0.0 means absent (no trades in the
 							// window, or no leg ever reached a gamma extremum) —
@@ -476,6 +531,28 @@
 									title: nearestPlus2.instrument + ' ' + formatAbbreviated(nearestPlus2.avg_gamma_value),
 								});
 							}
+							// weekly/monthly are `null` (not just a 0.0 price)
+							// when that setting is unconfigured — same falsy
+							// check covers both that and the 0.0-means-absent
+							// convention the ordinal 3 lines above already use.
+							const weekly = data.weekly;
+							if (weekly && weekly.avg_gamma_price) {
+								weeklyGammaLine = series.createPriceLine({
+									price: weekly.avg_gamma_price, color: chartColors.weekly, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible: true, axisLabelColor: chartColors.weekly,
+									title: weekly.instrument + ' ' + formatAbbreviated(weekly.avg_gamma_value),
+								});
+							}
+							const monthly = data.monthly;
+							if (monthly && monthly.avg_gamma_price) {
+								monthlyGammaLine = series.createPriceLine({
+									price: monthly.avg_gamma_price, color: chartColors.monthly, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible: true, axisLabelColor: chartColors.monthly,
+									title: monthly.instrument + ' ' + formatAbbreviated(monthly.avg_gamma_value),
+								});
+							}
 						} finally {
 							hideSpinner();
 						}
@@ -500,7 +577,7 @@
 					}
 
 					// "Settings" modal — see COLOR_STORAGE_KEY/DEFAULT_COLORS/
-					// chartColors above. This page's 2 lines are plain
+					// chartColors above. This page's 5 lines are plain
 					// createPriceLine()s recreated fresh on every
 					// refreshAverageGamma() call — there's no series object to
 					// restyle in place, so Save/Reset just trigger an
@@ -523,6 +600,7 @@
 							if (input) chartColors[key] = input.value;
 						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
+						renderColorLegend();
 						refreshAverageGamma();
 						closeSettingsModal();
 					}
@@ -534,6 +612,7 @@
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
 						});
+						renderColorLegend();
 						refreshAverageGamma();
 					}
 
