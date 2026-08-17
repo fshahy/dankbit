@@ -2112,6 +2112,27 @@ class ChartController(http.Controller):
           `?expiry=`-driven resolution is completely unaffected by this
           branch.
 
+        - An explicit `?after_instrument=` query param (e.g.
+          "BTC-25JUL26") takes priority over `?expiry=` the same way
+          `?instrument=` does, but resolves to a DIFFERENT instrument —
+          the one whose own expiration is the soonest strictly AFTER the
+          given instrument's. Looks up the given instrument's own
+          expiration (a single-row lookup, same as `?instrument=`'s own
+          `?hours=auto` lookup above), then the next distinct expiration
+          via `dankbit.bands._distinct_expirations()`/`_format_instrument()`
+          — same helpers the ordinal family below uses. Trades are then
+          ISOLATED to that resolved NEXT instrument (which the response's
+          own `instrument` field reflects, not the one passed in). Used
+          by `/<instrument>/4l`'s own "AVG N+1"-style forward-looking
+          line: that page has no "Expiry" dropdown/"nearest" concept at
+          all (its own instrument is fixed by the URL), so it can't ask
+          for "the expiry after this one" via `?expiry=nearest_plus_1`
+          the way `/4l/<asset>` does — this param exists so the DB can
+          resolve that relative to an arbitrary instrument instead of
+          relative to "now". No points at all if the given instrument
+          has no trades, or if it's already the last active expiry (no
+          expiration strictly after it).
+
         - "nearest" (default — the currently soonest-expiring active
           instrument), "nearest_plus_1", or "nearest_plus_2" (the
           1st/2nd active expiry after the nearest one), mapped to an
@@ -2244,6 +2265,23 @@ class ChartController(http.Controller):
         # Nearest+1/Nearest+2 family below uses. `/4l/<asset>` itself
         # never sends this param, so it's inert there.
         instrument_override = (request.httprequest.args.get("instrument") or "").upper() or None
+        # `?after_instrument=` — resolves to the expiry immediately AFTER
+        # the given instrument's own expiration, rather than an instrument
+        # directly. Used by /<instrument>/4l's own "AVG N+1"-style line
+        # (instrument_four_leg_gamma_chart, whose page has no "Expiry"
+        # dropdown/"nearest" concept at all, so it can't use
+        # ?expiry=nearest_plus_1 the way /4l/<asset> does — only the DB
+        # knows which expiry comes next after an arbitrary instrument).
+        # Looks up that instrument's own expiration (same single-row
+        # lookup ?hours=auto already does above for instrument_override),
+        # then the single soonest distinct expiration strictly after it
+        # (the +1 second nudge turns _distinct_expirations' own `>=`
+        # lower bound into an effectively `>` one, since expirations are
+        # exact timestamps) via the same _distinct_expirations/
+        # _format_instrument helpers every other branch here uses.
+        # `instrument` ends up holding that NEXT instrument, not the one
+        # passed in — same as `payload["instrument"]` below.
+        after_instrument_param = (request.httprequest.args.get("after_instrument") or "").upper() or None
         if instrument_override:
             instrument = instrument_override
             if hours_param == "auto":
@@ -2252,6 +2290,17 @@ class ChartController(http.Controller):
                 )
                 if exp_trade:
                     target_expiration = exp_trade.expiration
+        elif after_instrument_param:
+            exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                [("name", "=ilike", f"{after_instrument_param}-%")], limit=1,
+            )
+            if exp_trade:
+                next_expirations = bands_model._distinct_expirations(
+                    asset, exp_trade.expiration + timedelta(seconds=1), 1,
+                )
+                if next_expirations:
+                    target_expiration = next_expirations[0]
+                    instrument = bands_model._format_instrument(asset, target_expiration)
         elif expiry_mode in expiry_ordinals:
             expiry_index = expiry_ordinals[expiry_mode]
             expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
@@ -2316,7 +2365,7 @@ class ChartController(http.Controller):
             window_start = as_of - timedelta(hours=hours)
 
         trades = request.env["dankbit.trade"]
-        if instrument_override:
+        if instrument_override or after_instrument_param:
             if instrument:
                 domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
                 if window_start is not None:
@@ -2459,7 +2508,18 @@ class ChartController(http.Controller):
         skipped client-side (same reasoning the since-removed
         /mwa/<asset> page never polled this class of computation on a
         timer at all — see four_leg_gamma_json's own docstring); the
-        candle series' own 5s auto-refresh is unaffected either way."""
+        candle series' own 5s auto-refresh is unaffected either way. A
+        7th line, teal large-dashed "AVG WEEKLY"
+        (refreshAvgGammaWeekly() in the template's own script), is
+        drawn on this route only (not /<instrument>/4l, which has no
+        "Weekly" concept) and, like "AVG N+1", only while the
+        "Expiry" dropdown is on "Nearest" — the configured
+        weekly_expiry/eth_weekly_expiry instrument's own 4-leg gamma
+        average, computed over its ENTIRE trade history
+        (?expiry=weekly&hours=all on the same /api/four-leg-gamma
+        endpoint the "Weekly" Expiry dropdown option itself resolves
+        against), independent of the page's own Window selection, as
+        a second forward-looking reference alongside Nearest+1's."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
@@ -2497,7 +2557,19 @@ class ChartController(http.Controller):
         ordinal Nearest family. `asset` is derived from the instrument's
         own BTC/ETH prefix, same convention chart_png_zones/the
         /lp,lc,sp,sc single-leg routes use, rather than taken from a
-        separate URL segment."""
+        separate URL segment.
+
+        One control differs from /4l/<asset>: the darker-violet dotted
+        "AVG N+1"-style forward-looking line (refreshAvgGammaN1() in the
+        template's own script) is drawn unconditionally here (labeled
+        "AVG NEXT" instead of "AVG N+1"), rather than only while an
+        "Expiry" dropdown is on "Nearest" — this page has no such
+        dropdown at all. It resolves the expiry immediately after THIS
+        page's own fixed `instrument` via `?after_instrument=<instrument>`
+        on /api/four-leg-gamma/<asset> (see that route's own docstring),
+        since only the DB can answer "what comes after this instrument"
+        for an instrument that isn't necessarily the currently-nearest
+        one."""
         instrument = instrument.upper()
         if instrument.startswith("BTC"):
             asset = "BTC"

@@ -29,7 +29,27 @@
 	     variant, then restored on its own (ALL AVG stays removed) per a
 	     further product decision, then put behind an opt-in checkbox per
 	     a still later product decision, then made unconditional again
-	     (checkbox removed) per a final product decision.
+	     (checkbox removed) per a final product decision. A 6th line,
+	     darker-violet dotted "AVG N+1" (refreshAvgGammaN1() in the
+	     template's own script), is a forward-looking reference for the
+	     expiry right after whichever one this page is currently
+	     showing — its own 4-leg gamma average, over that expiry's FULL
+	     trade history (?hours=all) regardless of the page's own Window
+	     selection. On /4l/<asset> it's drawn ONLY while the "Expiry"
+	     dropdown is on "Nearest" (resolving Nearest+1 via
+	     ?expiry=nearest_plus_1, cleared whenever a different Expiry is
+	     selected); on /<instrument>/4l (see below) it's drawn
+	     unconditionally instead, resolving the expiry immediately after
+	     the URL's own fixed instrument via ?after_instrument= (labeled
+	     "AVG NEXT" there instead of "AVG N+1"). A 7th line, teal
+	     large-dashed "AVG WEEKLY" (refreshAvgGammaWeekly()), is drawn
+	     only on /4l/<asset> (not /<instrument>/4l, which has no
+	     "Weekly" concept of its own) and, like "AVG N+1", only while
+	     the "Expiry" dropdown is on "Nearest" — the configured
+	     weekly_expiry instrument's own 4-leg gamma average, over its
+	     FULL trade history (?expiry=weekly&hours=all), independent of
+	     the page's own Window selection, as a second forward-looking
+	     reference alongside Nearest+1's.
 	     "Expiry" dropdown (Nearest, Nearest+1, Nearest+2, and
 	     Weekly/Monthly, Nearest default — all ISOLATED to that one
 	     resolved instrument's own trades — PLUS All, CUMULATIVE across
@@ -70,14 +90,18 @@
 	     _auto_window_hours() in main.py for the bucket mapping and its
 	     rationale.
 
-	     Also rendered, unchanged, by /<instrument>/4l
+	     Also rendered, mostly unchanged, by /<instrument>/4l
 	     (instrument_four_leg_gamma_chart in main.py) — the same page
 	     scoped to one specific instrument via the URL instead of the
 	     "Expiry" dropdown, which that variant omits entirely (the
 	     dropdown's markup and every EXPIRY_MODE-driven code path below
 	     are gated behind `t-if="not instrument"`/`if (INSTRUMENT)`, so
 	     /4l/<asset> itself is unaffected either way — see
-	     instrument_four_leg_gamma_chart's own docstring). -->
+	     instrument_four_leg_gamma_chart's own docstring). The one
+	     exception is the "AVG N+1"/"AVG NEXT" line above, which behaves
+	     differently (but is still drawn by the exact same
+	     refreshAvgGammaN1() function) depending on whether INSTRUMENT is
+	     set. -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
 		<html>
@@ -468,6 +492,32 @@
 					// picker above (that modal only covers the 4 raw
 					// BCG/BPG/SCG/SPG lines).
 					const AVG_GAMMA_COLOR = '#c9a0dc';
+					// Nearest+1 expiry's own 4-leg gamma average — drawn
+					// ONLY while the "Expiry" dropdown is on "Nearest", as
+					// a forward-looking reference for what's coming up
+					// right after the currently-selected expiry (see
+					// refreshAvgGammaN1() below). Computed over Nearest+1's
+					// FULL trade history (?hours=all), independent of the
+					// page's own Window selection, so it stays a stable
+					// reference rather than thinning out/disappearing along
+					// with a short trailing window. Darker violet + a
+					// dotted style (vs. the primary AVG line's dashed light
+					// violet) so the two stay visually distinguishable when
+					// both are shown at once.
+					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
+					// The configured weekly_expiry/eth_weekly_expiry instrument's
+					// own 4-leg gamma average, over its FULL trade history
+					// (?expiry=weekly&amp;hours=all — same endpoint/params the
+					// "Weekly" Expiry dropdown option already resolves, just
+					// fetched independently rather than swapping the primary
+					// EXPIRY_MODE). Drawn ONLY while the "Expiry" dropdown is
+					// on "Nearest" — same gating as AVG_GAMMA_N1_COLOR's own
+					// line, a forward reference alongside Nearest+1's rather
+					// than shown for every Expiry selection. Only drawn on
+					// /4l/&lt;asset&gt; (INSTRUMENT unset) — see
+					// refreshAvgGammaWeekly() below. Teal, distinct from the
+					// AVG/AVG N+1 lines' violet family.
+					const AVG_GAMMA_WEEKLY_COLOR = '#00897b';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -546,7 +596,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null, avgGammaWeeklyPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -733,6 +783,8 @@
 					async function setExpiry(mode) {
 						EXPIRY_MODE = mode;
 						await refreshFourLegGamma();
+						await refreshAvgGammaN1();
+						await refreshAvgGammaWeekly();
 					}
 
 					async function setWindow(hours) {
@@ -910,6 +962,101 @@
 						}
 					}
 
+					// Forward-looking reference for the expiry right after
+					// whichever one this page is currently showing — see
+					// AVG_GAMMA_N1_COLOR above. Always drawn over that
+					// resolved expiry's FULL trade history (&amp;hours=all),
+					// independent of this page's own Window selection, so
+					// it stays a stable reference rather than
+					// thinning out/disappearing along with a short
+					// trailing window. Two different resolutions depending
+					// on page mode:
+					//  - /4l/&lt;asset&gt; (INSTRUMENT unset): only drawn while
+					//    the "Expiry" dropdown is on "Nearest", resolving
+					//    Nearest+1 the same way the dropdown's own
+					//    "Nearest+1" option would (?expiry=nearest_plus_1).
+					//  - /&lt;instrument&gt;/4l (INSTRUMENT set, no "Expiry"
+					//    dropdown/"Nearest" concept at all — the
+					//    instrument is fixed by the URL): drawn
+					//    unconditionally, resolving the expiry immediately
+					//    after INSTRUMENT's own expiration instead
+					//    (?after_instrument=&lt;INSTRUMENT&gt;) — server-side,
+					//    since only the DB knows which expiry comes next
+					//    after an arbitrary instrument (see
+					//    four_leg_gamma_json's own docstring).
+					// Removes its own previous line first, so switching
+					// Expiry away from "Nearest" (on /4l/&lt;asset&gt;), or a
+					// failed/empty fetch (e.g. INSTRUMENT is already the
+					// last active expiry, nothing after it), never leaves
+					// a stale line drawn.
+					async function refreshAvgGammaN1() {
+						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
+						let url;
+						if (INSTRUMENT) {
+							url = '/api/four-leg-gamma/' + ASSET + '?after_instrument=' + INSTRUMENT + '&hours=all';
+						} else if (EXPIRY_MODE === 'nearest') {
+							url = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
+						} else {
+							return;
+						}
+						const data = await (await fetch(url)).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						avgGammaN1PriceLine = series.createPriceLine({
+							price: avgPrice, color: AVG_GAMMA_N1_COLOR, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dotted,
+							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_N1_COLOR,
+							title: (INSTRUMENT ? 'AVG NEXT ' : 'AVG N+1 ') + formatAbbreviated(avgValue),
+						});
+					}
+
+					// The configured Weekly expiry's own 4-leg gamma average,
+					// over its FULL trade history (&amp;hours=all), independent
+					// of the page's own Window selection — but, like "AVG N+1",
+					// drawn ONLY while the "Expiry" dropdown is on "Nearest"
+					// (cleared the moment a different Expiry is selected).
+					// Only meaningful on /4l/&lt;asset&gt; (INSTRUMENT unset) —
+					// that page has no "Weekly"/"Expiry" concept of its own to
+					// gate against. Removes its own previous line first, same
+					// as refreshAvgGammaN1(), so switching Expiry away from
+					// "Nearest", or an unconfigured/empty weekly_expiry setting
+					// (no matching trades at all), never leaves a stale line
+					// drawn.
+					async function refreshAvgGammaWeekly() {
+						if (avgGammaWeeklyPriceLine) { series.removePriceLine(avgGammaWeeklyPriceLine); avgGammaWeeklyPriceLine = null; }
+						if (INSTRUMENT || EXPIRY_MODE !== 'nearest') return;
+						const url = '/api/four-leg-gamma/' + ASSET + '?expiry=weekly&hours=all';
+						const data = await (await fetch(url)).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						avgGammaWeeklyPriceLine = series.createPriceLine({
+							price: avgPrice, color: AVG_GAMMA_WEEKLY_COLOR, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.LargeDashed,
+							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_WEEKLY_COLOR,
+							title: 'AVG WEEKLY ' + formatAbbreviated(avgValue),
+						});
+					}
+
 					function applyTheme() {
 						document.body.classList.toggle('dark', DARK_MODE);
 						chart.applyOptions({
@@ -1012,6 +1159,8 @@
 						try {
 							await loadCandles();
 							await refreshFourLegGamma();
+							await refreshAvgGammaN1();
+							await refreshAvgGammaWeekly();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -1026,9 +1175,14 @@
 					// to one instrument. refreshFourLegGamma() still runs
 					// directly from init()/setExpiry()/setWindow() regardless
 					// of mode, so a manual dropdown change always gets a
-					// fresh read.
+					// fresh read. refreshAvgGammaN1()/refreshAvgGammaWeekly()
+					// are cheap to call unconditionally every tick — each
+					// no-ops (just clears its own line) whenever EXPIRY_MODE
+					// isn't 'nearest'.
 					setInterval(() => {
 						if (!CUMULATIVE_EXPIRY_MODES.includes(EXPIRY_MODE)) refreshFourLegGamma();
+						refreshAvgGammaN1();
+						refreshAvgGammaWeekly();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>

@@ -401,6 +401,10 @@
 							S/D
 						</label>
 						<label class="toggle-label">
+							<input type="checkbox" id="jmsp-toggle" onchange="onToggleJmsp()"/>
+							JMSP
+						</label>
+						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
 							Zones
 						</label>
@@ -714,6 +718,18 @@
 					const LAST_TRADE_URL   = '/api/last-trade/' + ASSET;
 					const FORECAST_URL    = '/api/forecast/' + ASSET;
 					const SIGNAL_BOT_URL  = '/api/signal-bot/' + ASSET;
+					// "JMSP" checkbox (Delta Chart only, right after "S/D") —
+					// the Nearest+1 expiry's own 4-leg gamma average
+					// (present-leg-only average of BCG/BPG/SCG/SPG, same
+					// computation /4l/<asset>'s own "AVG N+1" line uses),
+					// over that expiry's ENTIRE trade history (?hours=all —
+					// same endpoint/params as /4l's own AVG N+1 line, see
+					// four_leg_gamma_json), independent of this chart's
+					// Timeframe/Option Flow selections. No trailing-hours
+					// window param needed here since &hours=all is baked
+					// directly into the URL, unlike this chart's other
+					// endpoints which take an optional hours override.
+					const JMSP_URL = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
 					// "Thales Forecast" checkbox (Delta Chart only — after
 					// "Bands"; the Gamma Chart no longer has this
 					// checkbox at all, so SHOW_FORECAST simply never gets
@@ -723,6 +739,21 @@
 					// Draws a fully deterministic path (see FORECAST_URL) ported
 					// from Thales's own forecast-candle engine — see forecast.py.
 					let SHOW_FORECAST = false;
+					// "JMSP" checkbox — unchecked by default, same server-
+					// load-reducing pattern as every other optional
+					// indicator on this chart (see onToggleJmsp() below):
+					// stops refreshJmsp() from calling the server at all
+					// while off, not just hiding the drawn line.
+					let SHOW_JMSP = false;
+					let jmspPriceLine = null;
+					// Fixed dark-violet dotted color — same
+					// AVG_GAMMA_N1_COLOR /4l/<asset>'s own "AVG N+1" line
+					// uses, and distinct from this chart's own light-violet
+					// dashed Gamma Band (DEFAULT_COLORS.gammaBand,
+					// '#c9a0dc') so the two stay visually separable. Not
+					// part of the "Chart Appearance" color picker — fixed,
+					// same as every other page's own AVG-family lines.
+					const JMSP_COLOR = '#6a1b9a';
 					let SHOW_RSI = false;
 					let SHOW_SIGNAL_BOT = false;
 					let SIGNAL_BOT_DETAILS_OPEN = false;
@@ -2122,6 +2153,71 @@
 						}
 					}
 
+					// Rounds and abbreviates large raw dollar-gamma values
+					// (hundreds of millions to billions is typical here) —
+					// thousands as K, millions as M, sign preserved — same
+					// convention four_leg_gamma_chart_templates.xml's own
+					// formatAbbreviated() uses for its AVG-family lines.
+					function formatAbbreviatedGamma(value) {
+						const sign = value < 0 ? '-' : '';
+						const abs = Math.abs(value);
+						if (abs >= 1e6) return sign + Math.round(abs / 1e6) + 'M';
+						if (abs >= 1e3) return sign + Math.round(abs / 1e3) + 'K';
+						return sign + Math.round(abs);
+					}
+
+					// "JMSP" checkbox — the Nearest+1 expiry's own 4-leg
+					// gamma average over its ENTIRE trade history (see
+					// JMSP_URL above), drawn as a single horizontal
+					// reference line on the main candlestick series — same
+					// present-leg-only averaging (0.0 = absent, skipped
+					// entirely when none of the 4 legs are present) and
+					// same dark-violet dotted styling /4l/<asset>'s own
+					// "AVG N+1" line uses (refreshAvgGammaN1() in
+					// four_leg_gamma_chart_templates.xml), just reusing the
+					// same /api/four-leg-gamma/<asset> endpoint from this
+					// chart instead, labeled "JMSP" here. Removes its own
+					// previous line first, so an empty/no-trades response
+					// never leaves a stale line drawn.
+					async function refreshJmsp() {
+						if (jmspPriceLine) { series.removePriceLine(jmspPriceLine); jmspPriceLine = null; }
+						if (!SHOW_JMSP) return;
+						const data = await (await fetch(JMSP_URL)).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						jmspPriceLine = series.createPriceLine({
+							price: avgPrice, color: JMSP_COLOR, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dotted,
+							axisLabelVisible: true, axisLabelColor: JMSP_COLOR,
+							title: 'JMSP ' + formatAbbreviatedGamma(avgValue),
+						});
+					}
+
+					// Stops refreshJmsp() from calling the server at all
+					// while off, same server-load-reducing pattern as
+					// every other optional indicator on this chart. Clears
+					// the line immediately on uncheck, re-fetches
+					// immediately on check.
+					function onToggleJmsp() {
+						SHOW_JMSP = document.getElementById('jmsp-toggle').checked;
+						if (SHOW_JMSP) {
+							refreshJmsp();
+						} else if (jmspPriceLine) {
+							series.removePriceLine(jmspPriceLine);
+							jmspPriceLine = null;
+						}
+					}
+
 					function clearForecastLines() {
 						forecastSeries.setData([]);
 						forecastSeries.setMarkers([]);
@@ -2712,6 +2808,7 @@
 							safeRefresh('Last Trade', refreshLastTrade),
 							safeRefresh('Forecast', updateForecastVisibility),
 							safeRefresh('Signal Bot', refreshSignalBot),
+							safeRefresh('JMSP', refreshJmsp),
 						]);
 					}
 					init();
@@ -2740,6 +2837,10 @@
 					setInterval(() => safeRefresh('Zones', refreshZonesBoxes), ZONES_BOX_REFRESH);
 					setInterval(() => safeRefresh('Forecast', refreshForecast), REFRESH);
 					setInterval(() => safeRefresh('Signal Bot', refreshSignalBot), REFRESH);
+					// refreshJmsp() is cheap to call unconditionally every
+					// tick — it no-ops (just clears its own line) whenever
+					// SHOW_JMSP is off.
+					setInterval(() => safeRefresh('JMSP', refreshJmsp), REFRESH);
 				//]]></script>
 			</body>
 		</html>
