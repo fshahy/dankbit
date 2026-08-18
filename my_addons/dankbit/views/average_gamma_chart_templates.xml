@@ -4,9 +4,9 @@
 	     (/4l/<asset>): same Deribit perpetual-futures candle source (via
 	     /api/klines-futures/<asset>, dankbit.trade.get_candles_deribit_perpetual()),
 	     same Timeframe/Theme/Ruler/Settings controls, same right-click "Reset
-	     chart view" context menu — but drawing 5 horizontal reference
-	     lines instead of 4, and with no Expiry/Window dropdown at all: the 5
-	     lines are always the average gamma-price level (see
+	     chart view" context menu — but drawing 6 horizontal reference
+	     lines instead of 4, and with no Expiry/Window dropdown at all: 5 of the
+	     6 lines are the average gamma-price level (see
 	     average_gamma_json in main.py — the present-leg-only average of
 	     that expiry's own BCG/BPG/SCG/SPG extrema, same average /4l's own
 	     AVG line and dankbit.bands' own gamma_band field compute) for the
@@ -15,7 +15,11 @@
 	     weekly_expiry/monthly_expiry instrument for `asset` ("Weekly"/
 	     "Monthly", `None` when that setting is unconfigured), each
 	     computed over ALL of that instrument's own trades (its entire
-	     retained history, no trailing-hours/since-midnight window).
+	     retained history, no trailing-hours/since-midnight window). The
+	     6th line, "All 24h", is the same average-gamma computation
+	     applied cumulatively across every one of asset's own non-expired
+	     instruments at once, restricted to the trailing 24 hours of
+	     trades only (average_gamma_json's own `all_24h` field).
 	     Recomputed live on every poll (dankbit.refresh_interval) — no
 	     model/table behind this page. -->
 
@@ -181,13 +185,14 @@
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearestPlus2"/><span>Nearest+2</span></div>
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-weekly"/><span>Weekly</span></div>
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-monthly"/><span>Monthly</span></div>
+					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-all24h"/><span>All 24h</span></div>
 				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
-						<option value="1h" selected="selected">1h</option>
-						<option value="4h">4h</option>
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -215,6 +220,7 @@
 							<label class="color-row">Nearest+2 <input type="color" id="color-nearestPlus2"/></label>
 							<label class="color-row">Weekly <input type="color" id="color-weekly"/></label>
 							<label class="color-row">Monthly <input type="color" id="color-monthly"/></label>
+							<label class="color-row">All 24h <input type="color" id="color-all24h"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -226,7 +232,7 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
-					let INTERVAL = '1h';
+					let INTERVAL = '4h';
 					// Deribit perpetual futures, same symbol convention /4l
 					// uses (server-side _DERIBIT_PERPETUAL_SYMBOL_MAP).
 					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
@@ -278,11 +284,11 @@
 					// Nearest/Nearest+1/Nearest+2 violet family, and matching
 					// the on-page color legend (#color-legend, see
 					// renderColorLegend() below): dark violet = Nearest,
-					// green = Weekly, orange = Monthly.
+					// green = Weekly, orange = Monthly, black = All 24h.
 					const COLOR_STORAGE_KEY = 'dankbit_aa_chart_colors';
 					const DEFAULT_COLORS = {
 						nearest: '#9400d3', nearestPlus1: '#e0b0ff', nearestPlus2: '#dda0dd',
-						weekly: '#2e7d32', monthly: '#ef6c00',
+						weekly: '#2e7d32', monthly: '#ef6c00', all24h: '#000000',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -352,7 +358,7 @@
 					// every poll (REFRESH), each replacing its own previous
 					// line rather than accumulating one per hour.
 					let nearestGammaLine = null, nearestPlus1GammaLine = null, nearestPlus2GammaLine = null;
-					let weeklyGammaLine = null, monthlyGammaLine = null;
+					let weeklyGammaLine = null, monthlyGammaLine = null, all24hGammaLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -498,6 +504,7 @@
 							if (nearestPlus2GammaLine) { series.removePriceLine(nearestPlus2GammaLine); nearestPlus2GammaLine = null; }
 							if (weeklyGammaLine) { series.removePriceLine(weeklyGammaLine); weeklyGammaLine = null; }
 							if (monthlyGammaLine) { series.removePriceLine(monthlyGammaLine); monthlyGammaLine = null; }
+							if (all24hGammaLine) { series.removePriceLine(all24hGammaLine); all24hGammaLine = null; }
 
 							// avg_gamma_price 0.0 means absent (no trades in the
 							// window, or no leg ever reached a gamma extremum) —
@@ -551,6 +558,18 @@
 									lineStyle: LightweightCharts.LineStyle.Dashed,
 									axisLabelVisible: true, axisLabelColor: chartColors.monthly,
 									title: monthly.instrument + ' ' + formatAbbreviated(monthly.avg_gamma_value),
+								});
+							}
+							// all_24h has no single `instrument` (cumulative across
+							// every non-expired expiry) — never `null` itself, just
+							// falls through the same 0.0-means-absent price check.
+							const all24h = data.all_24h;
+							if (all24h && all24h.avg_gamma_price) {
+								all24hGammaLine = series.createPriceLine({
+									price: all24h.avg_gamma_price, color: chartColors.all24h, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Solid,
+									axisLabelVisible: true, axisLabelColor: chartColors.all24h,
+									title: 'ALL 24h ' + formatAbbreviated(all24h.avg_gamma_value),
 								});
 							}
 						} finally {

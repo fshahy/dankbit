@@ -254,10 +254,10 @@
 					<t t-if="not instrument">
 						<span class="tf-label">Expiry:</span>
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-							<option value="nearest" selected="selected">Nearest</option>
+							<option value="nearest">Nearest</option>
 							<option value="nearest_plus_1">Nearest+1</option>
 							<option value="nearest_plus_2">Nearest+2</option>
-							<option value="weekly">Weekly</option>
+							<option value="weekly" selected="selected">Weekly</option>
 							<option value="monthly">Monthly</option>
 							<option value="all">All</option>
 						</select>
@@ -265,12 +265,12 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="midnight">00:00 UTC</option>
-						<option value="auto" selected="selected">Auto (Time to Expiry)</option>
+						<option value="auto">Auto (Time to Expiry)</option>
 						<option value="4">4h</option>
 						<option value="8">8h</option>
 						<option value="12">12h</option>
 						<option value="24">24h</option>
-						<option value="all">All</option>
+						<option value="all" selected="selected">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -346,7 +346,7 @@
 					// way); changed to single-instrument ISOLATION per
 					// product decision so they behave like the ordinal
 					// family instead.
-					let EXPIRY_MODE = 'nearest';
+					let EXPIRY_MODE = 'weekly';
 					// Only "all" is the "every active instrument at once"
 					// computation /mwa/<asset> never polled on a timer at
 					// all (options.per_leg_gamma() loops per trade in
@@ -393,10 +393,11 @@
 					// which itself later became the default in place of
 					// "00:00 UTC", then "All" became the default in "Auto"'s
 					// place, then "Auto" was made the default again per a
-					// still later product decision — see main.py's own
-					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
-					// the current full history.)
-					let WINDOW_HOURS = 'auto';
+					// still later product decision, then "All" was made the
+					// default again per a further product decision — see
+					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES/
+					// _auto_window_hours for the current full history.)
+					let WINDOW_HOURS = 'all';
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()

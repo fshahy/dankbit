@@ -2610,7 +2610,7 @@ class ChartController(http.Controller):
         present-leg-only average four_leg_gamma_chart_templates.xml's own
         client-side `gammaLegs`/AVG line and dankbit.bands' own
         gamma_band field both use — see models/bands.py's
-        _avg_present()). Feeds /aa/<asset>'s 5 horizontal reference
+        _avg_present()). Feeds /aa/<asset>'s 6 horizontal reference
         lines. `nearest`/`nearest_plus_1`/`nearest_plus_2` are each
         `None` when that ordinal position has no active expiry at all;
         `weekly`/`monthly` are each `None` when that setting is
@@ -2623,7 +2623,19 @@ class ChartController(http.Controller):
         own AVG line uses). Both are `0.0` (not absent) when the
         instrument exists but has no matching trades at all or no leg
         ever reaches a gamma extremum, same "0.0 = absent" convention
-        every other averaged-price field in this addon uses."""
+        every other averaged-price field in this addon uses.
+
+        `all_24h` is a 6th, differently-shaped reading: CUMULATIVE across
+        every one of asset's own non-expired instruments at once (same
+        `expiration >= now` domain four_leg_gamma_json's own cumulative
+        "All" Expiry mode uses), but restricted to the trailing 24 hours
+        of trades (`deribit_ts`) rather than each instrument's entire
+        history — unlike the other 5 lines, which are each one isolated
+        instrument's full retained history. `instrument` is `None` since
+        there's no single instrument to isolate to (same convention
+        four_leg_gamma_json's own cumulative "all" mode uses);
+        `avg_gamma_price`/`avg_gamma_value` are `0.0` when nothing traded
+        in the window, same absent convention as every other line here."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -2689,6 +2701,21 @@ class ChartController(http.Controller):
         weekly_param = "dankbit.eth_weekly_expiry" if asset == "ETH" else "dankbit.weekly_expiry"
         monthly_param = "dankbit.eth_monthly_expiry" if asset == "ETH" else "dankbit.monthly_expiry"
 
+        # "All 24h" — cumulative across every one of asset's own
+        # non-expired instruments (same `expiration >= now` domain
+        # four_leg_gamma_json's own "All" Expiry mode uses), but
+        # restricted to the trailing 24 hours of trades rather than
+        # each instrument's entire history — a "what's trading right
+        # now, across the whole chain" reading. No single instrument to
+        # isolate to, so `instrument` is `None` in the response, same
+        # convention four_leg_gamma_json's own cumulative "all" mode uses.
+        window_start = as_of - timedelta(hours=24)
+        all_24h_domain = [
+            ("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of), ("iv", "!=", 0),
+            ("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of),
+        ]
+        all_24h_trades = request.env["dankbit.trade"].search(all_24h_domain)
+
         payload = {
             "asset": asset,
             "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
@@ -2697,6 +2724,7 @@ class ChartController(http.Controller):
             "nearest_plus_2": _avg_gamma(expirations[2] if len(expirations) > 2 else None),
             "weekly": _avg_gamma_configured(weekly_param),
             "monthly": _avg_gamma_configured(monthly_param),
+            "all_24h": _avg_gamma_trades(None, all_24h_trades),
         }
         return request.make_response(
             json.dumps(payload),
@@ -2705,11 +2733,14 @@ class ChartController(http.Controller):
 
     @http.route("/aa/<string:asset>", type="http", auth="user", website=True)
     def average_gamma_chart(self, asset):
-        """Standalone TradingView page — 5 horizontal reference lines,
+        """Standalone TradingView page — 6 horizontal reference lines,
         the average gamma-price level (see average_gamma_json) for the
         nearest active expiry and the 1st/2nd ones after it, PLUS the
         configured weekly_expiry/monthly_expiry instrument for `asset`,
-        drawn over real Deribit perpetual-futures candles (same
+        PLUS a 6th "All 24h" line — the same average-gamma computation
+        applied cumulatively across every one of asset's own non-expired
+        instruments at once, restricted to the trailing 24 hours of
+        trades — drawn over real Deribit perpetual-futures candles (same
         /api/klines-futures/<asset> proxy /4l/<asset> uses). Recomputed
         live on every poll (dankbit.refresh_interval) — no model/table
         behind this page. Renders its own standalone template
