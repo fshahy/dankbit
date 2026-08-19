@@ -67,6 +67,9 @@ class DankbitSignal(models.Model):
     greek_direction_score = fields.Float(digits=(16, 4))
     setup_stage = fields.Selection([
         ("none", "No Setup"), ("setup", "Setup Detected"),
+        ("candidate", "Candidate / Approaching"),
+        ("touched", "Zone Touched"),
+        ("confirmation_wait", "Waiting for Confirmation"),
         ("armed", "Armed"), ("confirmed", "Entry Confirmed"),
     ], required=True, default="none", index=True)
     setup_path = fields.Selection([
@@ -75,6 +78,8 @@ class DankbitSignal(models.Model):
     ], index=True)
     plan_status = fields.Selection([
         ("watch", "Watch"), ("planned", "Planned"),
+        ("candidate", "Candidate"), ("touched", "Touched"),
+        ("confirmation_wait", "Confirmation Wait"),
         ("armed", "Armed"), ("triggered", "Triggered"),
         ("missed", "Missed Entry"), ("cancelled", "Cancelled"),
     ], index=True)
@@ -851,6 +856,59 @@ class DankbitSignal(models.Model):
         ), default=None)
 
     @staticmethod
+    def _select_nearby_rtm_zone(entry, zones, atr_4h):
+        """Select a nearby price-action zone without imposing trade bias.
+
+        This selector is deliberately separate from `_select_rtm_zone`.
+        It makes an approaching supply/demand Base visible even when the MTF
+        trend currently points the other way.  Entry permission is still
+        decided later by the trend, quality, sweep, reclaim and R:R gates.
+        """
+        if not entry:
+            return None
+        max_distance = max(2.00 * atr_4h, 0.012 * entry)
+        eligible = []
+        for zone in zones or []:
+            if zone.get("touch_count", 0) > 2:
+                continue
+            proximal = zone["low"] if zone.get("type") == "supply" else zone["high"]
+            correct_side = zone["high"] >= entry if zone.get("type") == "supply" else zone["low"] <= entry
+            distance = abs(entry - proximal)
+            if correct_side and distance <= max_distance:
+                item = dict(zone)
+                item["distance_to_market"] = distance
+                eligible.append(item)
+        distance_unit = max(atr_4h, 0.003 * entry, 1e-9)
+        return max(eligible, key=lambda z: (
+            z["score"] + (12.0 if z.get("caused_bos") else 0.0)
+            + 0.50 * z.get("origin_score", 0.0)
+            - 10.0 * z["distance_to_market"] / distance_unit,
+            z["formed_at"],
+        ), default=None)
+
+    @staticmethod
+    def _rtm_lifecycle(zone, market_price, atr_1h, liquidity_swept=False, entry_confirmed=False):
+        """Return a non-contradictory RTM stage/status for display and audit."""
+        if not zone:
+            return "none", False
+        if entry_confirmed:
+            return "confirmed", "triggered"
+        low, high = float(zone["low"]), float(zone["high"])
+        inside = low <= market_price <= high
+        previously_touched = int(zone.get("touch_count", 0) or 0) > 0
+        if liquidity_swept:
+            return "confirmation_wait", "confirmation_wait"
+        if inside:
+            return "touched", "touched"
+        if previously_touched:
+            return "confirmation_wait", "confirmation_wait"
+        distance = min(abs(market_price - low), abs(market_price - high))
+        approach_distance = max(0.50 * float(atr_1h or 0.0), 0.004 * market_price)
+        if distance <= approach_distance:
+            return "candidate", "watch"
+        return "setup", "watch"
+
+    @staticmethod
     def _forecast_pullback_gate(direction, market_price, zone, score_1h, gamma_score, score_4h):
         """Delay, never reverse, an RTM entry when forward pressure points
         from market toward a still-fresh origin Base."""
@@ -976,6 +1034,7 @@ class DankbitSignal(models.Model):
                     liquidity_swept = entry_confirmed = False
                     wait_for_pullback = False
                     pullback_pressure = 0.0
+                    countertrend_rtm_watch = False
                     rtm_zone = None
                     rtm_opposing_zone = None
                     rtm_path_clear = True
@@ -1108,23 +1167,51 @@ class DankbitSignal(models.Model):
                             elif not entry_confirmed:
                                 reasons.append("FTB reclaimed: waiting for closed 1H body Engulf/BOS")
 
+                    # Detection is independent from the trade-direction gate.
+                    # If the trend-owned route did not select a Base, retain a
+                    # nearby opposite-side Base as a WATCH candidate instead
+                    # of reporting RTM Score 0 / RTM Zone —.  This must never
+                    # become an entry merely because price is close to it.
+                    if not rtm_zone:
+                        observed_zone = self._select_nearby_rtm_zone(
+                            market_price, raw_rtm_long + raw_rtm_short, atr_4h,
+                        )
+                        if observed_zone and float(observed_zone.get("score", 0.0)) >= 50.0:
+                            rtm_zone = observed_zone
+                            rtm_score = float(rtm_zone["score"])
+                            entry_zone_low = float(rtm_zone["low"])
+                            entry_zone_high = float(rtm_zone["high"])
+                            atr_1h = self._atr(list(candles_1h or [])[:-1])
+                            observed_direction = "short" if rtm_zone["type"] == "supply" else "long"
+                            countertrend_rtm_watch = observed_direction != standard_direction
+                            direction = observed_direction
+                            setup_path = "rtm_ftb"
+                            entry_model = "ftb_watch"
+                            reasons.append(
+                                "Nearby 1H RTM %s %s detected independently; WATCH only until touch, rejection and MTF confirmation"
+                                % (rtm_zone["structure"].upper(), rtm_zone["type"].title())
+                            )
+
                     rtm_official_eligible = bool(
-                        thales_official_filters and rtm_zone and rtm_score >= 65.0
+                        not countertrend_rtm_watch and thales_official_filters and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and entry_confirmed
                         and not wait_for_pullback
                         and stop and target and rr >= 2.0
                     )
                     reclaim_shadow = bool(
-                        thales_eligible and rtm_zone and rtm_score >= 65.0
+                        not countertrend_rtm_watch and thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] == 1 and liquidity_swept and not entry_confirmed
                         and not wait_for_pullback
                     )
                     later_touch_shadow = bool(
-                        thales_eligible and rtm_zone and rtm_score >= 65.0
+                        not countertrend_rtm_watch and thales_eligible and rtm_zone and rtm_score >= 65.0
                         and rtm_path_clear and rtm_zone["touch_count"] >= 2 and entry_confirmed
                         and not wait_for_pullback
                     )
-                    rtm_watch = bool(thales_eligible and rtm_zone and rtm_score >= 50.0 and rtm_path_clear)
+                    rtm_watch = bool(
+                        rtm_zone and rtm_score >= 50.0 and rtm_path_clear
+                        and (thales_eligible or countertrend_rtm_watch)
+                    )
 
                     breakout_official_eligible = False
                     breakout_shadow = False
@@ -1267,11 +1354,16 @@ class DankbitSignal(models.Model):
                                        else "ftb_reclaim_shadow" if reclaim_shadow
                                        else "later_touch_shadow" if later_touch_shadow
                                        else "ftb_watch" if rtm_watch else False)
-                        setup_stage = "confirmed" if entry_confirmed else "armed" if rtm_zone else "setup" if direction != "neutral" else "none"
-                        plan_status = "triggered" if entry_confirmed else "armed" if rtm_zone else "watch" if direction != "neutral" else False
+                        setup_stage, plan_status = self._rtm_lifecycle(
+                            rtm_zone, market_price, atr_1h,
+                            liquidity_swept=liquidity_swept,
+                            entry_confirmed=entry_confirmed,
+                        )
+                        if not rtm_zone and direction != "neutral":
+                            setup_stage, plan_status = "setup", "watch"
                     state = ("missed" if breakout and breakout.get("entry_missed") else
                              "active" if kind == "official" else "watch" if kind == "shadow" or breakout_watch
-                             else "armed" if thales_eligible else "rejected")
+                             else "rejected")
                     if official_eligible and weekly_officials >= 3:
                         reasons.append("Weekly limit of three official signals reached; stored as shadow")
                     elif official_eligible and active_official:
@@ -1321,7 +1413,7 @@ class DankbitSignal(models.Model):
                         "breakout": breakout,
                     }
                     regime = ", ".join(sorted({r.activity_regime for r in rows4.values() if r.activity_regime}))
-                    visible_plan = kind in ("official", "shadow") or breakout_watch
+                    visible_plan = (kind in ("official", "shadow") or breakout_watch) and not countertrend_rtm_watch
                     self.sudo().create({
                         "asset": asset, "evaluated_at": now_naive, "utc_day": now.date(),
                         "kind": kind, "state": state, "direction": direction,
