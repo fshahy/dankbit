@@ -2220,7 +2220,9 @@ class ChartController(http.Controller):
         or has no matching trades in the resolved window. `points`
         holds exactly one (current) reading, kept as a list for
         shape-compatibility with the page's own existing
-        points[points.length-1] read."""
+        points[points.length-1] read.
+
+        """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -2409,14 +2411,15 @@ class ChartController(http.Controller):
             # "0.0 = absent" sentinel the client's own
             # `if (latest.bcg_price)` falsy checks already expect
             # (dankbit_four_leg_gamma_chart_templates.xml).
-            points.append({
+            point = {
                 "t": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
                 "trade_count": len(trades),
                 "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
                 "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
                 "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
                 "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
-            })
+            }
+            points.append(point)
 
         # `hours` here is either "all"/"midnight" (as requested) or a
         # plain int — for a numeric Window selection that int is just an
@@ -2448,11 +2451,12 @@ class ChartController(http.Controller):
         perpetuals (not spot) while still getting a native 4h/1d
         resolution — moved back to Deribit perpetuals per product
         decision, now that the 4h bucket is built server-side instead.
-        Own "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m was
+        Own "Timeframe" dropdown (15m/1h/4h/1d, 1d default — 15m was
         added to match /gt/<asset>'s own dropdown, since Deribit natively
         supports it too, and was originally also this page's own default
-        until it was changed to 4h per product decision, matching the
-        Delta/Gamma/Strike Gamma charts' own default),
+        until it was changed to 4h per product decision (matching the
+        Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
+        further product decision (2026-08-19)),
         own "Expiry" dropdown — Nearest/Nearest+1 on the dropdown itself
         (Nearest default, same nearest+1 ordinal notion /gt/<asset>'s own
         2nd price line used before that page was removed; trades

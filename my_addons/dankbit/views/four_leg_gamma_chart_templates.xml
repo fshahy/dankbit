@@ -1,10 +1,11 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
-	     "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m added to
+	     "Timeframe" dropdown (15m/1h/4h/1d, 1d default — 15m added to
 	     match /gt/<asset>'s own dropdown, since Deribit natively
 	     supports it too, and was originally also this page's own default
-	     until it was changed to 4h per product decision, matching the
-	     Delta/Gamma/Strike Gamma charts' own default), candles
+	     until it was changed to 4h per product decision (matching the
+	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
+	     further product decision (2026-08-19)), candles
 	     from Deribit perpetual futures (dankbit.trade.
 	     get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
 	     proxy /gt/<asset> uses — Deribit has no native 4h resolution, so
@@ -41,54 +42,47 @@
 	     selected); on /<instrument>/4l (see below) it's drawn
 	     unconditionally instead, resolving the expiry immediately after
 	     the URL's own fixed instrument via ?after_instrument= (labeled
-	     "AVG NEXT" there instead of "AVG N+1"). A 7th line, teal
-	     large-dashed "AVG WEEKLY" (refreshAvgGammaWeekly()), is drawn
-	     only on /4l/<asset> (not /<instrument>/4l, which has no
-	     "Weekly" concept of its own) and, like "AVG N+1", only while
-	     the "Expiry" dropdown is on "Nearest" — the configured
-	     weekly_expiry instrument's own 4-leg gamma average, over its
-	     FULL trade history (?expiry=weekly&hours=all), independent of
-	     the page's own Window selection, as a second forward-looking
-	     reference alongside Nearest+1's.
-	     "Expiry" dropdown (Nearest, Nearest+1, Nearest+2, and
-	     Weekly/Monthly, Nearest default — all ISOLATED to that one
-	     resolved instrument's own trades — PLUS All, CUMULATIVE across
-	     every non-expired instrument at once, same domain the
-	     since-removed standalone /mwa/<asset> page's own mwa_gamma_json
-	     used before that page was folded into this one and removed;
+	     "AVG NEXT" there instead of "AVG N+1").
+	     "Expiry" dropdown (Nearest and Weekly/Monthly, Monthly default —
+	     was Weekly, changed per product decision (2026-08-19) — all
+	     ISOLATED to that one resolved instrument's own trades;
 	     Weekly/Monthly used to be CUMULATIVE through the selected expiry
-	     too, changed to single-instrument isolation per product decision;
-	     Nearest+1 and Nearest+2 were added to the dropdown once
-	     four_leg_gamma_json's own already-existing "nearest_plus_1"/
-	     "nearest_plus_2" ordinal options (see that route's own
-	     docstring) needed a UI entry; see four_leg_gamma_json
-	     for the full option-family history and resolution) picks that
-	     expiry via ?expiry= on /api/four-leg-gamma/<asset>. The routine
-	     poll (dankbit.refresh_interval) is skipped client-side only while
-	     the cumulative All expiry is selected — same reason /mwa/<asset>
-	     never polled that class of computation on a timer at all —
-	     Weekly/Monthly poll routinely like the ordinal family now that
-	     they're isolated too — see CUMULATIVE_EXPIRY_MODES in the
-	     template's own script. "Window" dropdown (00:00 UTC/Auto/4h/8h/
-	     12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES
-	     plus the "00:00 UTC" since-midnight option, the "Auto" dynamic
-	     option (now the default, in place of "00:00 UTC"), and the "All"
-	     no-window-bound option;
-	     option values are still raw hours (24-240 for the 1d-10d
-	     entries) — see windowLabel() for the hours-vs-days display
-	     split; see FOUR_LEG_WINDOW_HOURS_CHOICES/
-	     FOUR_LEG_DEFAULT_WINDOW_HOURS in main.py for this choice set's
-	     full history) independently
-	     picks
-	     the trailing-hours trade window via ?hours= on that same
-	     endpoint — "00:00 UTC" instead restricts to trades since the
-	     most recent UTC midnight (options.day_window_start), same
-	     day-boundary convention the Zones/single-leg pages and
-	     dankbit.bands' own default window use; "Auto" (?hours=auto)
-	     instead lets the server shrink the trailing-hours window as the
-	     selected Expiry's own settlement nears — see
-	     _auto_window_hours() in main.py for the bucket mapping and its
-	     rationale.
+	     too, changed to single-instrument isolation per product decision.
+	     Nearest+1/Nearest+2 (four_leg_gamma_json's own already-existing
+	     "nearest_plus_1"/"nearest_plus_2" ordinal options — see that
+	     route's own docstring) and All (CUMULATIVE across every
+	     non-expired instrument at once, same domain the since-removed
+	     standalone /mwa/<asset> page's own mwa_gamma_json used before that
+	     page was folded into this one and removed) were both once offered
+	     here too, but removed from this dropdown per product decisions
+	     (2026-08-19) — four_leg_gamma_json's own ?expiry=nearest_plus_1/
+	     nearest_plus_2/all server-side resolutions are unchanged and still
+	     reachable by a direct API call (the AVG N+1 line above still calls
+	     ?expiry=nearest_plus_1 directly on its own independent fetch,
+	     regardless of this dropdown's own option list), just no longer
+	     offered from this page's UI; see four_leg_gamma_json for the full
+	     option-family history and resolution) picks that expiry via
+	     ?expiry= on /api/four-leg-gamma/<asset>. The routine poll
+	     (dankbit.refresh_interval) is skipped client-side only while the
+	     cumulative All expiry is selected — now unreachable from this
+	     dropdown since All's removal above, left in as inert code (see
+	     CUMULATIVE_EXPIRY_MODES in the template's own script) — Weekly/
+	     Monthly poll routinely like the ordinal family since they're
+	     isolated too. "Window" dropdown (Auto/24h/All —
+	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "24h" entry plus the "Auto"
+	     dynamic option (the default) and the "All" no-window-bound option;
+	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
+	     main.py for this choice set's full history. "00:00 UTC"/"4h"/"8h"/
+	     "12h" were also once offered here, removed from this dropdown per
+	     a product decision (2026-08-19) — the server-side "midnight"/"4"/
+	     "8"/"12" ?hours= resolutions, and windowLabel()'s own display
+	     strings for them, are unchanged and still reachable by a direct
+	     API call, just no longer offered from this page's UI) independently
+	     picks the trailing-hours trade window via ?hours= on that same
+	     endpoint; "Auto" (?hours=auto) lets the server shrink the
+	     trailing-hours window as the selected Expiry's own settlement
+	     nears — see _auto_window_hours() in main.py for the bucket mapping
+	     and its rationale.
 
 	     Also rendered, mostly unchanged, by /<instrument>/4l
 	     (instrument_four_leg_gamma_chart in main.py) — the same page
@@ -248,27 +242,20 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
-						<option value="1d">1d</option>
+						<option value="4h">4h</option>
+						<option value="1d" selected="selected">1d</option>
 					</select>
 					<t t-if="not instrument">
 						<span class="tf-label">Expiry:</span>
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 							<option value="nearest">Nearest</option>
-							<option value="nearest_plus_1">Nearest+1</option>
-							<option value="nearest_plus_2">Nearest+2</option>
-							<option value="weekly" selected="selected">Weekly</option>
-							<option value="monthly">Monthly</option>
-							<option value="all">All</option>
+							<option value="weekly">Weekly</option>
+							<option value="monthly" selected="selected">Monthly</option>
 						</select>
 					</t>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="midnight">00:00 UTC</option>
 						<option value="auto">Auto (Time to Expiry)</option>
-						<option value="4">4h</option>
-						<option value="8">8h</option>
-						<option value="12">12h</option>
 						<option value="24">24h</option>
 						<option value="all" selected="selected">All</option>
 					</select>
@@ -316,13 +303,13 @@
 					// and fourLegGammaUrl() below isolates directly to this one
 					// instrument via ?instrument= instead of ?expiry=.
 					const INSTRUMENT = cfg.instrument || null;
-					// "Timeframe" dropdown, 4h default — same options and
-					// default as the Delta/Gamma/Strike Gamma charts' own
-					// dropdown; was 15m by default until changed to 4h per
-					// product decision (see TF_WINDOW below for the
-					// per-timeframe visible-window convention this page
-					// shares with those pages).
-					let INTERVAL = '4h';
+					// "Timeframe" dropdown — same options as the Delta/Gamma/
+					// Strike Gamma charts' own dropdown; was 15m by default,
+					// then changed to 4h (matching those pages), then to 1d
+					// per a further product decision (2026-08-19) — see
+					// TF_WINDOW below for the per-timeframe visible-window
+					// convention this page shares with those pages.
+					let INTERVAL = '1d';
 					// Deribit perpetual futures, same symbol convention
 					// /gt/<asset> uses (server-side
 					// _DERIBIT_PERPETUAL_SYMBOL_MAP).
@@ -346,7 +333,7 @@
 					// way); changed to single-instrument ISOLATION per
 					// product decision so they behave like the ordinal
 					// family instead.
-					let EXPIRY_MODE = 'weekly';
+					let EXPIRY_MODE = 'monthly';
 					// Only "all" is the "every active instrument at once"
 					// computation /mwa/<asset> never polled on a timer at
 					// all (options.per_leg_gamma() loops per trade in
@@ -506,19 +493,6 @@
 					// violet) so the two stay visually distinguishable when
 					// both are shown at once.
 					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
-					// The configured weekly_expiry/eth_weekly_expiry instrument's
-					// own 4-leg gamma average, over its FULL trade history
-					// (?expiry=weekly&amp;hours=all — same endpoint/params the
-					// "Weekly" Expiry dropdown option already resolves, just
-					// fetched independently rather than swapping the primary
-					// EXPIRY_MODE). Drawn ONLY while the "Expiry" dropdown is
-					// on "Nearest" — same gating as AVG_GAMMA_N1_COLOR's own
-					// line, a forward reference alongside Nearest+1's rather
-					// than shown for every Expiry selection. Only drawn on
-					// /4l/&lt;asset&gt; (INSTRUMENT unset) — see
-					// refreshAvgGammaWeekly() below. Teal, distinct from the
-					// AVG/AVG N+1 lines' violet family.
-					const AVG_GAMMA_WEEKLY_COLOR = '#00897b';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -570,6 +544,7 @@
 						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
+
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -597,7 +572,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null, avgGammaWeeklyPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -785,7 +760,6 @@
 						EXPIRY_MODE = mode;
 						await refreshFourLegGamma();
 						await refreshAvgGammaN1();
-						await refreshAvgGammaWeekly();
 					}
 
 					async function setWindow(hours) {
@@ -803,9 +777,9 @@
 					function formatAbbreviated(value) {
 						const sign = value < 0 ? '-' : '';
 						const abs = Math.abs(value);
-						if (abs >= 1e6) return sign + Math.round(abs / 1e6) + 'M';
-						if (abs >= 1e3) return sign + Math.round(abs / 1e3) + 'K';
-						return sign + Math.round(abs);
+						if (abs >= 1e6) return sign + Math.round(abs / 1e6).toLocaleString('en-US') + 'M';
+						if (abs >= 1e3) return sign + Math.round(abs / 1e3).toLocaleString('en-US') + 'K';
+						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
 					// Only the LATEST persisted row is used — /api/four-leg-gamma
@@ -1021,43 +995,6 @@
 						});
 					}
 
-					// The configured Weekly expiry's own 4-leg gamma average,
-					// over its FULL trade history (&amp;hours=all), independent
-					// of the page's own Window selection — but, like "AVG N+1",
-					// drawn ONLY while the "Expiry" dropdown is on "Nearest"
-					// (cleared the moment a different Expiry is selected).
-					// Only meaningful on /4l/&lt;asset&gt; (INSTRUMENT unset) —
-					// that page has no "Weekly"/"Expiry" concept of its own to
-					// gate against. Removes its own previous line first, same
-					// as refreshAvgGammaN1(), so switching Expiry away from
-					// "Nearest", or an unconfigured/empty weekly_expiry setting
-					// (no matching trades at all), never leaves a stale line
-					// drawn.
-					async function refreshAvgGammaWeekly() {
-						if (avgGammaWeeklyPriceLine) { series.removePriceLine(avgGammaWeeklyPriceLine); avgGammaWeeklyPriceLine = null; }
-						if (INSTRUMENT || EXPIRY_MODE !== 'nearest') return;
-						const url = '/api/four-leg-gamma/' + ASSET + '?expiry=weekly&hours=all';
-						const data = await (await fetch(url)).json();
-						const points = data.points || [];
-						const latest = points.length ? points[points.length - 1] : null;
-						if (!latest) return;
-						const legs = [
-							{ price: latest.bcg_price, value: latest.bcg_value },
-							{ price: latest.bpg_price, value: latest.bpg_value },
-							{ price: latest.scg_price, value: latest.scg_value },
-							{ price: latest.spg_price, value: latest.spg_value },
-						].filter(leg => leg.price);
-						if (!legs.length) return;
-						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
-						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
-						avgGammaWeeklyPriceLine = series.createPriceLine({
-							price: avgPrice, color: AVG_GAMMA_WEEKLY_COLOR, lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.LargeDashed,
-							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_WEEKLY_COLOR,
-							title: 'AVG WEEKLY ' + formatAbbreviated(avgValue),
-						});
-					}
-
 					function applyTheme() {
 						document.body.classList.toggle('dark', DARK_MODE);
 						chart.applyOptions({
@@ -1161,7 +1098,6 @@
 							await loadCandles();
 							await refreshFourLegGamma();
 							await refreshAvgGammaN1();
-							await refreshAvgGammaWeekly();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -1176,14 +1112,12 @@
 					// to one instrument. refreshFourLegGamma() still runs
 					// directly from init()/setExpiry()/setWindow() regardless
 					// of mode, so a manual dropdown change always gets a
-					// fresh read. refreshAvgGammaN1()/refreshAvgGammaWeekly()
-					// are cheap to call unconditionally every tick — each
-					// no-ops (just clears its own line) whenever EXPIRY_MODE
-					// isn't 'nearest'.
+					// fresh read. refreshAvgGammaN1() is cheap to call
+					// unconditionally every tick — it no-ops (just clears
+					// its own line) whenever EXPIRY_MODE isn't 'nearest'.
 					setInterval(() => {
 						if (!CUMULATIVE_EXPIRY_MODES.includes(EXPIRY_MODE)) refreshFourLegGamma();
 						refreshAvgGammaN1();
-						refreshAvgGammaWeekly();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>

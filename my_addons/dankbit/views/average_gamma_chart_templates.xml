@@ -4,22 +4,25 @@
 	     (/4l/<asset>): same Deribit perpetual-futures candle source (via
 	     /api/klines-futures/<asset>, dankbit.trade.get_candles_deribit_perpetual()),
 	     same Timeframe/Theme/Ruler/Settings controls, same right-click "Reset
-	     chart view" context menu — but drawing 6 horizontal reference
-	     lines instead of 4, and with no Expiry/Window dropdown at all: 5 of the
-	     6 lines are the average gamma-price level (see
+	     chart view" context menu — but drawing 3 horizontal reference
+	     lines instead of 4, and with no Expiry/Window dropdown at all: 2 of
+	     the 3 lines are the average gamma-price level (see
 	     average_gamma_json in main.py — the present-leg-only average of
 	     that expiry's own BCG/BPG/SCG/SPG extrema, same average /4l's own
 	     AVG line and dankbit.bands' own gamma_band field compute) for the
-	     nearest active expiry and the 1st/2nd ones after it
-	     ("Nearest"/"Nearest+1"/"Nearest+2"), PLUS the configured
-	     weekly_expiry/monthly_expiry instrument for `asset` ("Weekly"/
-	     "Monthly", `None` when that setting is unconfigured), each
-	     computed over ALL of that instrument's own trades (its entire
-	     retained history, no trailing-hours/since-midnight window). The
-	     6th line, "All 24h", is the same average-gamma computation
-	     applied cumulatively across every one of asset's own non-expired
+	     nearest active expiry and the 1st one after it
+	     ("Nearest"/"Nearest+1"), each computed over ALL of that
+	     instrument's own trades (its entire retained history, no
+	     trailing-hours/since-midnight window). The 3rd, black, solid
+	     "All 24h" line is the same average-gamma computation applied
+	     cumulatively across every one of asset's own non-expired
 	     instruments at once, restricted to the trailing 24 hours of
-	     trades only (average_gamma_json's own `all_24h` field).
+	     trades only (average_gamma_json's own `all_24h` field). Nearest+2,
+	     Weekly, and Monthly were also once drawn here but stay dropped
+	     per product decision — average_gamma_json still computes/returns
+	     those fields too, this page simply doesn't draw them; "All 24h"
+	     was brought back on its own per a further product decision
+	     (2026-08-19).
 	     Recomputed live on every poll (dankbit.refresh_interval) — no
 	     model/table behind this page. -->
 
@@ -52,7 +55,7 @@
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
 						z-index: 10; pointer-events: none;
 					}
-					/* Color legend for the 5 average-gamma reference lines —
+					/* Color legend for the 3 average-gamma reference lines —
 					   see renderColorLegend() below. Swatch colors are read
 					   live from chartColors, so a user-recolored line (via
 					   the "Settings" modal) always shows the matching swatch
@@ -108,7 +111,7 @@
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
 					/* "Settings" button/dialog — color pickers for this
-					   page's own 5 average-gamma lines, persisted to
+					   page's own 3 average-gamma lines, persisted to
 					   localStorage under a key completely independent of
 					   both the Delta Chart's and /4l's own color settings. */
 					.modal-overlay {
@@ -182,9 +185,6 @@
 				<div id="color-legend">
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearest"/><span>Nearest</span></div>
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearestPlus1"/><span>Nearest+1</span></div>
-					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-nearestPlus2"/><span>Nearest+2</span></div>
-					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-weekly"/><span>Weekly</span></div>
-					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-monthly"/><span>Monthly</span></div>
 					<div class="legend-row"><span class="legend-swatch" id="legend-swatch-all24h"/><span>All 24h</span></div>
 				</div>
 				<div id="tf-bar">
@@ -217,9 +217,6 @@
 							<div class="modal-section-title">Average Gamma Lines</div>
 							<label class="color-row">Nearest <input type="color" id="color-nearest"/></label>
 							<label class="color-row">Nearest+1 <input type="color" id="color-nearestPlus1"/></label>
-							<label class="color-row">Nearest+2 <input type="color" id="color-nearestPlus2"/></label>
-							<label class="color-row">Weekly <input type="color" id="color-weekly"/></label>
-							<label class="color-row">Monthly <input type="color" id="color-monthly"/></label>
 							<label class="color-row">All 24h <input type="color" id="color-all24h"/></label>
 						</div>
 						<div class="modal-actions">
@@ -276,19 +273,21 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 5 average-gamma lines, persisted per-browser
+					// page's own 3 average-gamma lines, persisted per-browser
 					// to localStorage under its own key, independent of both
 					// the Delta Chart's ('dankbit_chart_colors') and /4l's own
-					// ('dankbit_4l_chart_colors') color settings. Weekly/
-					// Monthly default to green/orange — distinct from the
-					// Nearest/Nearest+1/Nearest+2 violet family, and matching
-					// the on-page color legend (#color-legend, see
-					// renderColorLegend() below): dark violet = Nearest,
-					// green = Weekly, orange = Monthly, black = All 24h.
-					const COLOR_STORAGE_KEY = 'dankbit_aa_chart_colors';
+					// ('dankbit_4l_chart_colors') color settings. Key bumped
+					// to a 'v2' suffix when Nearest/Nearest+1's defaults were
+					// swapped, so a browser with an old saved color set (under
+					// the pre-swap defaults) doesn't silently keep overriding
+					// the new assignment — same stale-state-retirement trick
+					// the Delta Chart's own Bands smoothing state uses (see
+					// CLAUDE.md, the 'v3:' bandSmoothingState key prefix).
+					// "All 24h" defaults to black, same as before it was
+					// briefly dropped, then brought back per product decision.
+					const COLOR_STORAGE_KEY = 'dankbit_aa_chart_colors_v2';
 					const DEFAULT_COLORS = {
-						nearest: '#9400d3', nearestPlus1: '#e0b0ff', nearestPlus2: '#dda0dd',
-						weekly: '#2e7d32', monthly: '#ef6c00', all24h: '#000000',
+						nearest: '#e0b0ff', nearestPlus1: '#9400d3', all24h: '#000000',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -299,7 +298,7 @@
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
 
 					// #color-legend (see CSS above) — one swatch row per
-					// line (all 5 of DEFAULT_COLORS' own keys), read live
+					// line (all 3 of DEFAULT_COLORS' own keys), read live
 					// from chartColors so a user-recolored line (Settings →
 					// Save/Reset) is always reflected here too, not just a
 					// hardcoded default.
@@ -352,13 +351,12 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The 5 average-gamma "lines" are horizontal reference
+					// The 3 average-gamma "lines" are horizontal reference
 					// lines at the CURRENT (latest) value only — not a
 					// connected historical time series. Redrawn fresh on
 					// every poll (REFRESH), each replacing its own previous
 					// line rather than accumulating one per hour.
-					let nearestGammaLine = null, nearestPlus1GammaLine = null, nearestPlus2GammaLine = null;
-					let weeklyGammaLine = null, monthlyGammaLine = null, all24hGammaLine = null;
+					let nearestGammaLine = null, nearestPlus1GammaLine = null, all24hGammaLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -501,9 +499,6 @@
 
 							if (nearestGammaLine) { series.removePriceLine(nearestGammaLine); nearestGammaLine = null; }
 							if (nearestPlus1GammaLine) { series.removePriceLine(nearestPlus1GammaLine); nearestPlus1GammaLine = null; }
-							if (nearestPlus2GammaLine) { series.removePriceLine(nearestPlus2GammaLine); nearestPlus2GammaLine = null; }
-							if (weeklyGammaLine) { series.removePriceLine(weeklyGammaLine); weeklyGammaLine = null; }
-							if (monthlyGammaLine) { series.removePriceLine(monthlyGammaLine); monthlyGammaLine = null; }
 							if (all24hGammaLine) { series.removePriceLine(all24hGammaLine); all24hGammaLine = null; }
 
 							// avg_gamma_price 0.0 means absent (no trades in the
@@ -527,37 +522,6 @@
 									lineStyle: LightweightCharts.LineStyle.Dashed,
 									axisLabelVisible: true, axisLabelColor: chartColors.nearestPlus1,
 									title: nearestPlus1.instrument + ' ' + formatAbbreviated(nearestPlus1.avg_gamma_value),
-								});
-							}
-							const nearestPlus2 = data.nearest_plus_2;
-							if (nearestPlus2 && nearestPlus2.avg_gamma_price) {
-								nearestPlus2GammaLine = series.createPriceLine({
-									price: nearestPlus2.avg_gamma_price, color: chartColors.nearestPlus2, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: chartColors.nearestPlus2,
-									title: nearestPlus2.instrument + ' ' + formatAbbreviated(nearestPlus2.avg_gamma_value),
-								});
-							}
-							// weekly/monthly are `null` (not just a 0.0 price)
-							// when that setting is unconfigured — same falsy
-							// check covers both that and the 0.0-means-absent
-							// convention the ordinal 3 lines above already use.
-							const weekly = data.weekly;
-							if (weekly && weekly.avg_gamma_price) {
-								weeklyGammaLine = series.createPriceLine({
-									price: weekly.avg_gamma_price, color: chartColors.weekly, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: chartColors.weekly,
-									title: weekly.instrument + ' ' + formatAbbreviated(weekly.avg_gamma_value),
-								});
-							}
-							const monthly = data.monthly;
-							if (monthly && monthly.avg_gamma_price) {
-								monthlyGammaLine = series.createPriceLine({
-									price: monthly.avg_gamma_price, color: chartColors.monthly, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: chartColors.monthly,
-									title: monthly.instrument + ' ' + formatAbbreviated(monthly.avg_gamma_value),
 								});
 							}
 							// all_24h has no single `instrument` (cumulative across
@@ -596,7 +560,7 @@
 					}
 
 					// "Settings" modal — see COLOR_STORAGE_KEY/DEFAULT_COLORS/
-					// chartColors above. This page's 5 lines are plain
+					// chartColors above. This page's 3 lines are plain
 					// createPriceLine()s recreated fresh on every
 					// refreshAverageGamma() call — there's no series object to
 					// restyle in place, so Save/Reset just trigger an
