@@ -2079,18 +2079,53 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/klines-futures/<string:asset>", type="http", auth="user", website=False, csrf=False)
-    def klines_futures_proxy(self, asset, interval="4h", limit="500"):
-        """Deribit perpetual-futures equivalent of klines_proxy above —
-        sourced from dankbit.trade.get_candles_deribit_perpetual() instead
-        of get_candles() (Binance spot). Used by /4l/<asset>'s own candle
-        series, per product decision to keep that page on Deribit's own
-        perpetuals rather than switching every TradingView page's candle
-        source."""
-        candles = request.env["dankbit.trade"].get_candles_deribit_perpetual(asset, interval=interval, limit=int(limit))
+    @http.route("/api/klines-coinbase/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def klines_coinbase_proxy(self, asset, interval="4h", limit="500"):
+        """Coinbase-spot equivalent of klines_proxy above — sourced from
+        dankbit.trade.get_candles_coinbase() instead of get_candles()
+        (Binance spot). Used by /4l/<asset>'s and /aa/<asset>'s own candle
+        series, per product decision to move both pages off Deribit
+        perpetual futures onto Coinbase spot (was
+        /api/klines-futures/<asset> when those pages sourced Deribit
+        perpetuals instead)."""
+        candles = request.env["dankbit.trade"].get_candles_coinbase(asset, interval=interval, limit=int(limit))
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/api/expiries/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def expiries_json(self, asset):
+        """Every non-expired (active) instrument for `asset`, soonest-first
+        — dankbit.bands._distinct_expirations()/_format_instrument(), the
+        same helpers the ordinal Nearest/Nearest+1/Nearest+2 family below
+        and /api/nearest-expiry/<asset> already use, just returning the
+        full active set instead of one ordinal slot. Backs /4l/<asset>'s
+        own "Expiry" dropdown (four_leg_gamma_chart_templates.xml), which
+        used to offer a fixed Nearest/Weekly/Monthly option set — replaced
+        per product decision with this dynamically-loaded list of every
+        actually-active expiry, so a real expiry can be picked directly
+        instead of only through the weekly_expiry/monthly_expiry settings
+        indirection. `limit=200` is generous headroom over the dozen or so
+        expiries actually active at once in practice. This route only
+        lists instruments — `/api/four-leg-gamma/<asset>`'s own
+        `?expiry=nearest`/`weekly`/`monthly`/etc. resolutions are
+        unchanged and still reachable by a direct API call, just no
+        longer offered from this page's dropdown."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        bands_model = request.env["dankbit.bands"]
+        expirations = bands_model._distinct_expirations(asset, as_of, 200)
+        expiries = [bands_model._format_instrument(asset, exp) for exp in expirations]
+        payload = {"asset": asset, "expiries": expiries}
+        return request.make_response(
+            json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
@@ -2439,20 +2474,26 @@ class ChartController(http.Controller):
         dollar-gamma curve, over trailing trades restricted to one
         expiry, peaks or bottoms), recomputed live on every poll via
         /api/four-leg-gamma (no model/table behind this page), alongside
-        real Deribit perpetual-futures candles (dankbit.trade.
-        get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
-        proxy /gt/<asset> uses — Deribit has no native 4h resolution, so
-        "4h" is built server-side by fetching native 60-minute bars and
-        bucketing every 4 into one; 15m/1h/1d map directly onto Deribit's
-        own resolution strings). This page originally sourced Deribit
-        perpetual-futures candles at a fixed 1h timeframe, then moved to
-        Binance spot candles since Deribit's chart API has no native 4h
-        resolution, then moved to Kraken Futures to keep this page on
-        perpetuals (not spot) while still getting a native 4h/1d
-        resolution — moved back to Deribit perpetuals per product
-        decision, now that the 4h bucket is built server-side instead.
+        real Coinbase spot candles (dankbit.trade.get_candles_coinbase(),
+        same /api/klines-coinbase/<asset> proxy /aa/<asset> uses —
+        Coinbase has no native 4h resolution, so "4h" is built
+        server-side by fetching native 60-minute bars and bucketing
+        every 4 into one; 15m/1h/1d map directly onto Coinbase's own
+        900/3600/86400-second granularities). This page originally
+        sourced Deribit perpetual-futures candles at a fixed 1h
+        timeframe, then moved to Binance spot candles since Deribit's
+        chart API has no native 4h resolution, then moved to Kraken
+        Futures to keep this page on perpetuals (not spot) while still
+        getting a native 4h/1d resolution, then moved back to Deribit
+        perpetuals once the missing native 4h bucket was built
+        server-side instead of switching exchanges for it — moved to
+        Coinbase spot per a later product decision (also incidentally
+        fixing the daily-timeframe "no candle for today" discrepancy
+        against the Delta Chart, since Deribit's own daily bars were
+        08:00-UTC-anchored rather than UTC-midnight-anchored like
+        Coinbase's/Binance's).
         Own "Timeframe" dropdown (15m/1h/4h/1d, 1d default — 15m was
-        added to match /gt/<asset>'s own dropdown, since Deribit natively
+        added to match /aa/<asset>'s own dropdown, since Coinbase natively
         supports it too, and was originally also this page's own default
         until it was changed to 4h per product decision (matching the
         Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
@@ -2744,8 +2785,8 @@ class ChartController(http.Controller):
         PLUS a 6th "All 24h" line — the same average-gamma computation
         applied cumulatively across every one of asset's own non-expired
         instruments at once, restricted to the trailing 24 hours of
-        trades — drawn over real Deribit perpetual-futures candles (same
-        /api/klines-futures/<asset> proxy /4l/<asset> uses). Recomputed
+        trades — drawn over real Coinbase spot candles (same
+        /api/klines-coinbase/<asset> proxy /4l/<asset> uses). Recomputed
         live on every poll (dankbit.refresh_interval) — no model/table
         behind this page. Renders its own standalone template
         (dankbit_average_gamma_chart)."""

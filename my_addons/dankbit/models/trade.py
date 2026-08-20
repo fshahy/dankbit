@@ -23,15 +23,12 @@ _DERIBIT_CACHE = {
 _BINANCE_CACHE = {}
 _BINANCE_CANDLES_CACHE_TTL = 5.0
 
-# Separate cache for Deribit perpetual-futures candles
-# (get_candles_deribit_perpetual) — same short-fixed-TTL reasoning as
-# _BINANCE_CACHE above, just a distinct dict/key-space since this is a
-# different upstream API (and a different Deribit endpoint than the
-# get_index_price/get_open_interest_by_currency calls cached in
-# _DERIBIT_CACHE, which use the configurable dankbit.deribit_cache_ttl
-# instead of this fixed 5s).
-_DERIBIT_PERP_CACHE = {}
-_DERIBIT_PERP_CANDLES_CACHE_TTL = 5.0
+# Separate cache for Coinbase spot candles (get_candles_coinbase) — same
+# short-fixed-TTL reasoning as _BINANCE_CACHE above, just a distinct
+# dict/key-space since this is a different upstream API/venue than either
+# Binance (get_candles) or the Deribit index calls cached in _DERIBIT_CACHE.
+_COINBASE_CACHE = {}
+_COINBASE_CANDLES_CACHE_TTL = 5.0
 
 # get_last_trades()'s recently-expired grace window (see
 # _get_recently_expired_instruments) — both this REST cron and the WS
@@ -80,6 +77,40 @@ def _safe_binance_request(
         except Exception as e:
             _logger.warning(
                 "Binance request failed (%d/%d) %s params=%s error=%s",
+                attempt, retries, url, params, e
+            )
+            if attempt < retries:
+                time_module.sleep(backoff * (2 ** (attempt - 1)))
+            else:
+                if raise_on_fail:
+                    raise
+                return None
+
+def _safe_coinbase_request(
+    url,
+    params,
+    timeout=10.0,
+    retries=3,
+    backoff=0.4,
+    raise_on_fail=False,
+):
+    """Same robust GET-with-retries/backoff shape as _safe_binance_request/
+    _safe_deribit_request above, for Coinbase Exchange's public REST API.
+    Coinbase signals errors via a normal non-2xx status (caught by
+    raise_for_status()) with a JSON {"message": ...} body — checked here too
+    as defense-in-depth, same reasoning as the other two helpers' own
+    envelope checks."""
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict) and "message" in data:
+                raise RuntimeError(f"Coinbase error: {data}")
+            return data
+        except Exception as e:
+            _logger.warning(
+                "Coinbase request failed (%d/%d) %s params=%s error=%s",
                 attempt, retries, url, params, e
             )
             if attempt < retries:
@@ -384,13 +415,6 @@ class Trade(models.Model):
         _BINANCE_CACHE[cache_key] = {"ts": now_ts, "value": candles}
         return candles
 
-    _DERIBIT_PERPETUAL_SYMBOL_MAP = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
-    # Deribit's get_tradingview_chart_data resolution strings — no native
-    # "4h" bucket (unlike Binance/Kraken Futures), so "4h" resolves to the
-    # native 60 (1h) resolution here and gets bucketed in Python afterward.
-    _DERIBIT_CHART_RESOLUTION_MAP = {"15m": "15", "1h": "60", "4h": "60", "1d": "1D"}
-    _DERIBIT_CHART_RESOLUTION_SECONDS = {"15": 900, "60": 3600, "1D": 86400}
-
     @staticmethod
     def _bucket_candles(candles, bucket_seconds):
         """Merge oldest-first {t, o, h, l, c} 1-bar candles into
@@ -421,87 +445,101 @@ class Trade(models.Model):
             for bucket_start in order
         ]
 
-    def get_candles_deribit_perpetual(self, asset, interval="4h", limit=500):
-        """Real Deribit perpetual-futures candles (BTC-PERPETUAL/
-        ETH-PERPETUAL), oldest-first, same {t, o, h, l, c} shape
-        get_candles() returns — used by /4l/<asset> (via
-        klines_futures_proxy), per product decision to source that
-        page's candles from Deribit's own perpetual futures instead of
-        Kraken Futures; every other TradingView page in this addon
-        (/chart) keeps using get_candles()/Binance spot unchanged.
+    _COINBASE_SYMBOL_MAP = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
+    # Coinbase Exchange's native candle granularities (seconds) — no native
+    # 4h bucket (same gap Deribit perpetuals had), so "4h" resolves to the
+    # native 3600 (1h) granularity here and gets bucketed in Python
+    # afterward, same technique as the old Deribit-perpetual path this
+    # replaced. 15m/1h/1d map directly onto Coinbase's own 900/3600/86400.
+    _COINBASE_GRANULARITY_SECONDS = {"15m": 900, "1h": 3600, "4h": 3600, "1d": 86400}
+    _COINBASE_MAX_CANDLES_PER_REQUEST = 300
 
-        Deribit's public get_tradingview_chart_data endpoint takes an
-        explicit start_timestamp/end_timestamp window (unlike Binance's/
-        Kraken Futures' own simple "give me the most recent N" limit/count
-        param) and has no native 4h resolution — its resolution set is
-        1/3/5/10/15/30/60/120/180/360/720/1D. "15m"/"1h"/"1d" map directly
-        onto 15/60/1D; "4h" fetches native 60-minute bars (4x `limit`, so
-        there's enough raw history to bucket) and merges them into 4h bars
-        via _bucket_candles() — reintroducing the same fetch-1h-then-
-        aggregate step this addon used before it briefly moved this page's
-        candles to Binance spot and then to Kraken Futures (see
-        TradingView Chart Notes).
+    def get_candles_coinbase(self, asset, interval="4h", limit=500):
+        """Real Coinbase Exchange spot candles (BTC-USD/ETH-USD), oldest-
+        first, same {t, o, h, l, c} shape get_candles() returns — used by
+        /4l/<asset> and /aa/<asset> (via klines_coinbase_proxy), per
+        product decision to move both pages off Deribit perpetual futures
+        onto Coinbase spot; every other TradingView page in this addon
+        (/chart) keeps using get_candles()/Binance spot unchanged. Also
+        fixes the daily-timeframe discrepancy those two pages used to have
+        against the Delta Chart: Deribit's own daily bars were bucketed on
+        an 08:00 UTC boundary (its option-settlement time), so "today"'s
+        bar didn't appear until 08:00 UTC — Coinbase's daily granularity is
+        UTC-midnight-anchored, same as Binance's, so this is no longer an
+        issue.
 
-        end_timestamp is "now"; start_timestamp is far enough back to
-        cover the requested bar count at the native resolution actually
-        fetched. Cached in the separate _DERIBIT_PERP_CACHE dict (same
-        short fixed _DERIBIT_PERP_CANDLES_CACHE_TTL=5s reasoning as
-        _BINANCE_CANDLES_CACHE_TTL — this gets polled every 5s per open
-        /4l tab), keyed by the *requested* interval/limit
-        (not the native resolution actually fetched), so a 4h request and
-        a 1h request never collide in the cache despite both hitting
-        Deribit at resolution=60."""
-        instrument = self._DERIBIT_PERPETUAL_SYMBOL_MAP.get(asset.upper(), asset.upper() + "-PERPETUAL")
-        resolution = self._DERIBIT_CHART_RESOLUTION_MAP.get(interval, "60")
+        Coinbase's public /products/<id>/candles endpoint caps each
+        request at _COINBASE_MAX_CANDLES_PER_REQUEST (300) bars and takes
+        an explicit start/end window (unix seconds) rather than a simple
+        "give me the most recent N" limit param, so this paginates
+        backward in up to-300-bar windows (deduped by timestamp, since a
+        window's own start/end edges can overlap the next page's) until
+        `fetch_limit` native bars are collected or the exchange returns
+        fewer rows than requested (i.e. its own history is exhausted).
+        "4h" fetches native 60-minute bars (4x `limit`, so there's enough
+        raw history to bucket) and merges them into 4h bars via
+        _bucket_candles() — same fetch-1h-then-aggregate step the old
+        Deribit-perpetual path used.
+
+        Cached in the separate _COINBASE_CACHE dict (same short fixed
+        _COINBASE_CANDLES_CACHE_TTL=5s reasoning as _BINANCE_CANDLES_CACHE_TTL
+        — this gets polled every 5s per open /4l or /aa tab), keyed by the
+        *requested* interval/limit (not the native granularity actually
+        fetched), so a 4h request and a 1h request never collide in the
+        cache despite both hitting Coinbase at granularity=3600."""
+        product_id = self._COINBASE_SYMBOL_MAP.get(asset.upper(), asset.upper() + "-USD")
         aggregate_4h = interval == "4h"
-        bar_seconds = self._DERIBIT_CHART_RESOLUTION_SECONDS.get(resolution, 3600)
+        granularity = self._COINBASE_GRANULARITY_SECONDS.get(interval, 3600)
         fetch_limit = limit * 4 if aggregate_4h else limit
 
-        cache_key = f"deribit_perp_candles_{instrument}_{interval}_{limit}"
+        cache_key = f"coinbase_candles_{product_id}_{interval}_{limit}"
         now_ts = time_module.time()
-        cached = _DERIBIT_PERP_CACHE.get(cache_key, {})
-        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _DERIBIT_PERP_CANDLES_CACHE_TTL):
+        cached = _COINBASE_CACHE.get(cache_key, {})
+        if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _COINBASE_CANDLES_CACHE_TTL):
             return cached.get("value")
 
-        end_ms = int(now_ts * 1000)
-        start_ms = end_ms - fetch_limit * bar_seconds * 1000
-        url = "https://www.deribit.com/api/v2/public/get_tradingview_chart_data"
-        params = {
-            "instrument_name": instrument,
-            "start_timestamp": start_ms,
-            "end_timestamp": end_ms,
-            "resolution": resolution,
-        }
-        data = _safe_deribit_request(url, params=params, timeout=10.0)
-        result = (data or {}).get("result") or {}
-        ticks = result.get("ticks") or []
-        if result.get("status") != "ok" or not ticks:
+        url = f"https://api.exchange.coinbase.com/products/{product_id}/candles"
+        by_t = {}
+        end_ts = int(now_ts)
+        remaining = fetch_limit
+        while remaining > 0:
+            batch = min(remaining, self._COINBASE_MAX_CANDLES_PER_REQUEST)
+            start_ts = end_ts - batch * granularity
+            params = {"granularity": granularity, "start": start_ts, "end": end_ts}
+            data = _safe_coinbase_request(url, params=params, timeout=10.0)
+            if not data:
+                break
+            new_rows = 0
+            oldest_t = None
+            # Coinbase's candle row is [time, low, high, open, close,
+            # volume], newest-first.
+            for row in data:
+                t = int(row[0])
+                oldest_t = t if oldest_t is None else min(oldest_t, t)
+                if t not in by_t:
+                    by_t[t] = {"t": t * 1000, "o": float(row[3]), "h": float(row[2]), "l": float(row[1]), "c": float(row[4])}
+                    new_rows += 1
+            if oldest_t is None:
+                break
+            end_ts = oldest_t - 1  # next page ends just before this page's oldest bar
+            remaining -= new_rows
+            if len(data) < batch:
+                break  # exchange has no more history behind this point
+
+        if not by_t:
             if cached and cached.get("value") is not None:
-                _logger.warning("get_candles_deribit_perpetual: using stale cached value for %s", cache_key)
+                _logger.warning("get_candles_coinbase: using stale cached value for %s", cache_key)
                 return cached.get("value")
-            _logger.exception("get_candles_deribit_perpetual failed and no cache available for %s", cache_key)
+            _logger.exception("get_candles_coinbase failed and no cache available for %s", cache_key)
             return []
 
-        # get_tradingview_chart_data's result is parallel arrays
-        # (ticks/open/high/low/close), oldest-first, ms timestamps —
-        # zipped into this function's own documented {t, o, h, l, c}
-        # per-candle shape.
-        candles = [
-            {
-                "t": int(ticks[i]),
-                "o": float(result["open"][i]),
-                "h": float(result["high"][i]),
-                "l": float(result["low"][i]),
-                "c": float(result["close"][i]),
-            }
-            for i in range(len(ticks))
-        ]
+        candles = [by_t[t] for t in sorted(by_t)]
 
         if aggregate_4h:
-            candles = self._bucket_candles(candles, 4 * bar_seconds)
+            candles = self._bucket_candles(candles, 4 * granularity)
 
         candles = candles[-limit:]
-        _DERIBIT_PERP_CACHE[cache_key] = {"ts": now_ts, "value": candles}
+        _COINBASE_CACHE[cache_key] = {"ts": now_ts, "value": candles}
         return candles
 
     # ========== FETCHING & INGESTION ==========

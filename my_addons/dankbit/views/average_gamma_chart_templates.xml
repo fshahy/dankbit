@@ -1,8 +1,8 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /aa/<asset> — its own file,
 	     structurally a stripped-down copy of four_leg_gamma_chart_templates.xml
-	     (/4l/<asset>): same Deribit perpetual-futures candle source (via
-	     /api/klines-futures/<asset>, dankbit.trade.get_candles_deribit_perpetual()),
+	     (/4l/<asset>): same Coinbase spot candle source (via
+	     /api/klines-coinbase/<asset>, dankbit.trade.get_candles_coinbase()),
 	     same Timeframe/Theme/Ruler/Settings controls, same right-click "Reset
 	     chart view" context menu — but drawing 3 horizontal reference
 	     lines instead of 4, and with no Expiry/Window dropdown at all: 2 of
@@ -230,11 +230,11 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					let INTERVAL = '4h';
-					// Deribit perpetual futures, same symbol convention /4l
-					// uses (server-side _DERIBIT_PERPETUAL_SYMBOL_MAP).
-					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
-					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
-					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+					// Coinbase spot, same symbol convention /4l uses
+					// (server-side _COINBASE_SYMBOL_MAP).
+					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
+					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
+					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					const AVERAGE_GAMMA_URL = '/api/average-gamma/' + ASSET;
 					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
 					let   lastTradeTs = null;

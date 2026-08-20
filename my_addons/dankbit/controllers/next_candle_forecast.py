@@ -52,10 +52,10 @@ from math import sqrt
 from . import forecast as forecast_lib
 
 # Per-timeframe span/revision-count/real-candle-interval. `candle_interval`
-# is passed straight to dankbit.trade.get_candles()/get_candles_deribit_perpetual
-# (both return "1h"/"4h"/"1d" bars — get_candles_deribit_perpetual's "4h" is
-# bucketed server-side from native 60-minute Deribit bars, transparent to
-# this caller) so each timeframe's ATR/wick/rejection-history/freeze-Open
+# is passed straight to dankbit.trade.get_candles() (both it and the
+# separate get_candles_coinbase() return "1h"/"4h"/"1d" bars in the same
+# shape — this module always uses get_candles()/Binance spot, never the
+# Coinbase one) so each timeframe's ATR/wick/rejection-history/freeze-Open
 # all come from real candles of a matching width, rather than always 4h
 # ones.
 TIMEFRAME_CONFIG = {

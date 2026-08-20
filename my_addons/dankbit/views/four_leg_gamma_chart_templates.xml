@@ -1,23 +1,28 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
 	     "Timeframe" dropdown (15m/1h/4h/1d, 1d default — 15m added to
-	     match /gt/<asset>'s own dropdown, since Deribit natively
+	     match /aa/<asset>'s own dropdown, since Coinbase natively
 	     supports it too, and was originally also this page's own default
 	     until it was changed to 4h per product decision (matching the
 	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
 	     further product decision (2026-08-19)), candles
-	     from Deribit perpetual futures (dankbit.trade.
-	     get_candles_deribit_perpetual(), same /api/klines-futures/<asset>
-	     proxy /gt/<asset> uses — Deribit has no native 4h resolution, so
-	     "4h" is bucketed server-side from native 60-minute bars; 15m/1h/1d
-	     map directly onto Deribit's own resolution strings).
+	     from Coinbase spot (dankbit.trade.get_candles_coinbase(), same
+	     /api/klines-coinbase/<asset> proxy /aa/<asset> uses — Coinbase
+	     has no native 4h resolution, so "4h" is bucketed server-side from
+	     native 60-minute bars; 15m/1h/1d map directly onto Coinbase's own
+	     900/3600/86400-second granularities).
 	     This page originally sourced Deribit perpetual-futures candles at
 	     a fixed 1h timeframe, then moved to Binance spot candles
 	     since Deribit's chart API has no native 4h resolution, then moved
 	     to Kraken Futures to keep this page on perpetuals (not
-	     spot) while still getting a native 4h/1d resolution — moved back
-	     to Deribit perpetuals per product decision, now that the 4h
-	     bucket is built server-side instead. 4 horizontal
+	     spot) while still getting a native 4h/1d resolution, then moved
+	     back to Deribit perpetuals per product decision once the 4h
+	     bucket was built server-side instead — moved to Coinbase spot
+	     per a later product decision (2026-08-20), also fixing a
+	     daily-timeframe discrepancy against the Delta Chart: Deribit's
+	     own daily bars were 08:00-UTC-anchored (its option-settlement
+	     time) rather than UTC-midnight-anchored like Coinbase's/
+	     Binance's, so "today"'s bar didn't appear until 08:00 UTC. 4 horizontal
 	     reference lines redrawn fresh on every poll from
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
@@ -43,32 +48,28 @@
 	     unconditionally instead, resolving the expiry immediately after
 	     the URL's own fixed instrument via ?after_instrument= (labeled
 	     "AVG NEXT" there instead of "AVG N+1").
-	     "Expiry" dropdown (Nearest and Weekly/Monthly, Monthly default —
-	     was Weekly, changed per product decision (2026-08-19) — all
-	     ISOLATED to that one resolved instrument's own trades;
-	     Weekly/Monthly used to be CUMULATIVE through the selected expiry
-	     too, changed to single-instrument isolation per product decision.
-	     Nearest+1/Nearest+2 (four_leg_gamma_json's own already-existing
-	     "nearest_plus_1"/"nearest_plus_2" ordinal options — see that
-	     route's own docstring) and All (CUMULATIVE across every
-	     non-expired instrument at once, same domain the since-removed
-	     standalone /mwa/<asset> page's own mwa_gamma_json used before that
-	     page was folded into this one and removed) were both once offered
-	     here too, but removed from this dropdown per product decisions
-	     (2026-08-19) — four_leg_gamma_json's own ?expiry=nearest_plus_1/
-	     nearest_plus_2/all server-side resolutions are unchanged and still
-	     reachable by a direct API call (the AVG N+1 line above still calls
-	     ?expiry=nearest_plus_1 directly on its own independent fetch,
-	     regardless of this dropdown's own option list), just no longer
-	     offered from this page's UI; see four_leg_gamma_json for the full
-	     option-family history and resolution) picks that expiry via
-	     ?expiry= on /api/four-leg-gamma/<asset>. The routine poll
-	     (dankbit.refresh_interval) is skipped client-side only while the
-	     cumulative All expiry is selected — now unreachable from this
-	     dropdown since All's removal above, left in as inert code (see
-	     CUMULATIVE_EXPIRY_MODES in the template's own script) — Weekly/
-	     Monthly poll routinely like the ordinal family since they're
-	     isolated too. "Window" dropdown (Auto/24h/All —
+	     "Expiry" dropdown — dynamically loaded from every currently active
+	     (non-expired) instrument for the asset (loadExpiries(), sourced
+	     from /api/expiries/<asset>, dankbit.bands._distinct_expirations()/
+	     _format_instrument()), soonest-first, nearest expiry selected by
+	     default — each option ISOLATES trades to that one instrument's own
+	     trades via four_leg_gamma_json's own ?instrument= override (see
+	     that route's own docstring), the same one /<instrument>/4l already
+	     uses. Replaced a fixed Nearest/Weekly/Monthly option set (each
+	     resolved server-side via ?expiry= mode strings) per product
+	     decision (2026-08-20), so any real expiry can be picked directly
+	     instead of only through the weekly_expiry/monthly_expiry settings
+	     indirection or the nearest/nearest_plus_1/nearest_plus_2 ordinal
+	     family — four_leg_gamma_json's own ?expiry=nearest/weekly/monthly/
+	     nearest_plus_1/nearest_plus_2/all server-side resolutions are all
+	     unchanged and still reachable by a direct API call (the AVG N+1
+	     line above still calls ?expiry=nearest_plus_1 directly on its own
+	     independent fetch whenever the current selection is the nearest
+	     expiry), just no longer offered from this page's dropdown. The
+	     routine poll (dankbit.refresh_interval) always refreshes now — no
+	     cumulative "all expiries at once" option exists on this dropdown
+	     (never did), so there is nothing to skip polling for. "Window"
+	     dropdown (Auto/24h/All —
 	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "24h" entry plus the "Auto"
 	     dynamic option (the default) and the "All" no-window-bound option;
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
@@ -88,9 +89,9 @@
 	     (instrument_four_leg_gamma_chart in main.py) — the same page
 	     scoped to one specific instrument via the URL instead of the
 	     "Expiry" dropdown, which that variant omits entirely (the
-	     dropdown's markup and every EXPIRY_MODE-driven code path below
-	     are gated behind `t-if="not instrument"`/`if (INSTRUMENT)`, so
-	     /4l/<asset> itself is unaffected either way — see
+	     dropdown's markup and every SELECTED_INSTRUMENT-driven code path
+	     below are gated behind `t-if="not instrument"`/`if (INSTRUMENT)`,
+	     so /4l/<asset> itself is unaffected either way — see
 	     instrument_four_leg_gamma_chart's own docstring). The one
 	     exception is the "AVG N+1"/"AVG NEXT" line above, which behaves
 	     differently (but is still drawn by the exact same
@@ -248,9 +249,6 @@
 					<t t-if="not instrument">
 						<span class="tf-label">Expiry:</span>
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-							<option value="nearest">Nearest</option>
-							<option value="weekly">Weekly</option>
-							<option value="monthly" selected="selected">Monthly</option>
 						</select>
 					</t>
 					<span class="tf-label">Window:</span>
@@ -266,6 +264,7 @@
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+					<span class="tf-label" id="instrument-label" style="font-weight:bold;"><t t-if="instrument" t-esc="instrument"/></span>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -299,9 +298,9 @@
 					// t-att-* drops entirely, so cfg.instrument is undefined there
 					// and INSTRUMENT stays null, same as before this route existed.
 					// When set, this page has no "Expiry" dropdown at all (see
-					// EXPIRY_MODE below and the template's own t-if="not instrument")
-					// and fourLegGammaUrl() below isolates directly to this one
-					// instrument via ?instrument= instead of ?expiry=.
+					// SELECTED_INSTRUMENT below and the template's own
+					// t-if="not instrument") and fourLegGammaUrl() below
+					// isolates directly to this one instrument.
 					const INSTRUMENT = cfg.instrument || null;
 					// "Timeframe" dropdown — same options as the Delta/Gamma/
 					// Strike Gamma charts' own dropdown; was 15m by default,
@@ -310,48 +309,38 @@
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
 					let INTERVAL = '1d';
-					// Deribit perpetual futures, same symbol convention
-					// /gt/<asset> uses (server-side
-					// _DERIBIT_PERPETUAL_SYMBOL_MAP).
-					const DERIBIT_PERP_SYMBOL = { BTC: 'BTC-PERPETUAL', ETH: 'ETH-PERPETUAL' }[ASSET] || (ASSET + '-PERPETUAL');
-					document.getElementById('exchange-label').textContent = 'Deribit · ' + DERIBIT_PERP_SYMBOL;
-					const klineUrl = (iv, limit) => '/api/klines-futures/' + ASSET + '?interval=' + iv + '&limit=' + limit;
+					// Coinbase spot, same symbol convention /aa/<asset> uses
+					// (server-side _COINBASE_SYMBOL_MAP).
+					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
+					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
+					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 					// "Expiry" dropdown — which expiry's trades feed the 4
-					// gamma legs, "nearest" default. "nearest" (the nearest
-					// active expiry) and "weekly"/"monthly" (the configured
-					// weekly_expiry/monthly_expiry instrument) all ISOLATE
-					// trades to that one resolved instrument's own trades;
-					// only "all" instead considers every non-expired
-					// instrument at once and computes CUMULATIVE across
-					// all of them — same domain the since-removed
-					// /mwa/<asset> page's own mwa_gamma_json used, folded
-					// onto this dropdown alongside the original ordinal
-					// options once that standalone page was removed — see
-					// four_leg_gamma_json. Weekly/Monthly used to be
-					// CUMULATIVE through the selected expiry too (pulling
-					// in every other active expiry's trades along the
-					// way); changed to single-instrument ISOLATION per
-					// product decision so they behave like the ordinal
-					// family instead.
-					let EXPIRY_MODE = 'monthly';
-					// Only "all" is the "every active instrument at once"
-					// computation /mwa/<asset> never polled on a timer at
-					// all (options.per_leg_gamma() loops per trade in
-					// plain Python, so cost scales directly with trade
-					// count) — Weekly/Monthly are now as cheap as the
-					// ordinal family (a single isolated instrument) and so
-					// poll routinely like they do.
-					// setInterval(refreshFourLegGamma, REFRESH) below skips
-					// its own fetch entirely while EXPIRY_MODE is one of
-					// these — refreshFourLegGamma() itself is still called
-					// directly (bypassing this list) on page load and on
-					// any manual Timeframe/Expiry/Window change, same
-					// "on-demand only" pattern /mwa/<asset> used for every
-					// one of its own expiry options.
-					const CUMULATIVE_EXPIRY_MODES = ['all'];
+					// gamma legs. Used to offer a fixed Nearest/Weekly/
+					// Monthly option set (each resolved server-side via
+					// four_leg_gamma_json's own ?expiry= mode strings) —
+					// replaced per product decision with a dynamically
+					// loaded list of every actually-active (non-expired)
+					// instrument for ASSET (see loadExpiries() below,
+					// sourced from /api/expiries/<asset>), so any real
+					// expiry can be picked directly rather than only
+					// through the weekly_expiry/monthly_expiry settings
+					// indirection or the nearest/nearest_plus_1/
+					// nearest_plus_2 ordinal family. Every option now
+					// ISOLATES trades to that one instrument's own trades
+					// via four_leg_gamma_json's own ?instrument= override
+					// (same one /<instrument>/4l already uses) — there is
+					// no cumulative "all expiries at once" option on this
+					// dropdown (never was). SELECTED_INSTRUMENT holds the
+					// currently chosen instrument string; NEAREST_INSTRUMENT
+					// (the first, soonest-expiring entry loadExpiries()
+					// receives) is tracked separately so refreshAvgGammaN1()
+					// below can tell whether the current selection is the
+					// nearest expiry without re-deriving it.
+					let SELECTED_INSTRUMENT = null;
+					let NEAREST_INSTRUMENT = null;
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
-					// EXPIRY_MODE. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
+					// SELECTED_INSTRUMENT. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
 					// split out from /gt/<asset>'s own 12h/24h/48h.
 					// 16h/20h/48h/72h were offered at one point and removed
 					// per product decision; 3h/5h/7h were added later,
@@ -393,11 +382,12 @@
 					// so windowLabel() can fall back to a plain "Auto" label
 					// before that.
 					let autoResolvedHours = null;
-					// INSTRUMENT (only set on /<instrument>/4l) takes priority over
-					// EXPIRY_MODE entirely — same precedence four_leg_gamma_json's
-					// own ?instrument= override applies server-side.
+					// INSTRUMENT (only set on /<instrument>/4l) takes priority
+					// over SELECTED_INSTRUMENT — both ultimately resolve to
+					// the same ?instrument= override server-side, just
+					// sourced from the URL vs. this page's own dropdown.
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + (INSTRUMENT ? '?instrument=' + INSTRUMENT : '?expiry=' + EXPIRY_MODE) + '&hours=' + WINDOW_HOURS;
+						'/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -520,31 +510,6 @@
 						chart.resize(window.innerWidth, window.innerHeight);
 					});
 
-					// Light-orange fill between LP/SP (when LP is below SP) and between
-					// LC/SC (when LC is above SC) — same addBaselineSeries flat-top +
-					// baseValue-bottom fill trick the Delta Chart's own zones boxes use
-					// (dankbit_templates.xml) to fake a bounded rectangle: two data
-					// points at the top price, baseValue set to the bottom price, so
-					// the area between fills instead of only stroking a single line.
-					// No border stroke (topLineColor/bottomLineColor transparent) since
-					// this is meant as a plain shaded zone, not another bordered box.
-					// Added to the chart BEFORE the candlestick series below, so it
-					// renders underneath the candles and the LC/LP/SC/SP reference
-					// lines (series added later draw on top) rather than muddying them.
-					const putFillSeries = chart.addBaselineSeries({
-						baseValue: { type: 'price', price: 0 },
-						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
-						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
-						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-					const callFillSeries = chart.addBaselineSeries({
-						baseValue: { type: 'price', price: 0 },
-						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
-						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
-						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-
-
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -651,18 +616,6 @@
 					// FUTURE_MARGIN_DAYS.
 					const FUTURE_MARGIN_DAYS = 5;
 
-					// Time span the LP/SP and LC/SC fill rectangles stretch across —
-					// from the earliest loaded candle out to the same future-axis
-					// edge applyVisibleRange() scrolls to, so the shaded zone spans
-					// the full plotted width instead of stopping at the last real bar.
-					function fillRectTimeRange() {
-						if (!realCandles.length) return null;
-						return {
-							fromTime: realCandles[0].time,
-							toTime: realCandles[realCandles.length - 1].time + FUTURE_MARGIN_DAYS * 86400,
-						};
-					}
-
 					function applyVisibleRange() {
 						if (!realCandles.length) return;
 						const days = TF_WINDOW[INTERVAL] || 15;
@@ -756,10 +709,54 @@
 						await loadCandles();
 					}
 
-					async function setExpiry(mode) {
-						EXPIRY_MODE = mode;
+					// Keeps the bold instrument-name label after "Settings" in
+					// sync with whichever instrument is actually driving the
+					// 4 gamma legs right now — INSTRUMENT (fixed by the URL
+					// on /<instrument>/4l) takes priority, same precedence
+					// fourLegGammaUrl() uses; SELECTED_INSTRUMENT otherwise
+					// (the "Expiry" dropdown's own current choice, /4l/<asset>
+					// only). On /<instrument>/4l this is redundant with the
+					// template's own server-rendered t-esc="instrument" (the
+					// span already shows the right text before this ever
+					// runs) but harmless to call regardless.
+					function updateInstrumentLabel() {
+						document.getElementById('instrument-label').textContent = INSTRUMENT || SELECTED_INSTRUMENT || '';
+					}
+
+					async function setExpiry(instr) {
+						SELECTED_INSTRUMENT = instr;
+						updateInstrumentLabel();
 						await refreshFourLegGamma();
 						await refreshAvgGammaN1();
+					}
+
+					// Populates the "Expiry" dropdown from every currently
+					// active (non-expired) instrument for ASSET — see
+					// /api/expiries/<asset> and the SELECTED_INSTRUMENT
+					// comment above. Selects the nearest (first, soonest)
+					// entry by default. No-op on /<instrument>/4l (no
+					// "Expiry" dropdown/#expiry-select element there at
+					// all, since the instrument is already fixed by the
+					// URL). Called once from init(), before the first
+					// refreshFourLegGamma()/refreshAvgGammaN1() call, so
+					// SELECTED_INSTRUMENT/NEAREST_INSTRUMENT are resolved
+					// before either needs them.
+					async function loadExpiries() {
+						const select = document.getElementById('expiry-select');
+						if (!select) return;
+						const data = await (await fetch('/api/expiries/' + ASSET)).json();
+						const expiries = data.expiries || [];
+						select.innerHTML = '';
+						expiries.forEach(instr => {
+							const opt = document.createElement('option');
+							opt.value = instr;
+							opt.textContent = instr;
+							select.appendChild(opt);
+						});
+						NEAREST_INSTRUMENT = expiries.length ? expiries[0] : null;
+						SELECTED_INSTRUMENT = NEAREST_INSTRUMENT;
+						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
+						updateInstrumentLabel();
 					}
 
 					async function setWindow(hours) {
@@ -821,8 +818,6 @@
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
 							if (!latest) {
-								putFillSeries.setData([]);
-								callFillSeries.setData([]);
 								return;
 							}
 
@@ -906,32 +901,6 @@
 									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}
-
-							// Light-orange shaded zone between LP/SP when LP sits below SP,
-							// and between LC/SC when LC sits above SC — see putFillSeries/
-							// callFillSeries above. 0.0 (falsy) on either price means that
-							// leg had no trades in the window, same absent-price convention
-							// the lines above already check, so the fill is skipped rather
-							// than drawn against a spurious price-0 edge.
-							const fillRange = fillRectTimeRange();
-							if (fillRange && latest.bpg_price && latest.spg_price && latest.bpg_price < latest.spg_price) {
-								putFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.bpg_price } });
-								putFillSeries.setData([
-									{ time: fillRange.fromTime, value: latest.spg_price },
-									{ time: fillRange.toTime, value: latest.spg_price },
-								]);
-							} else {
-								putFillSeries.setData([]);
-							}
-							if (fillRange && latest.bcg_price && latest.scg_price && latest.bcg_price > latest.scg_price) {
-								callFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.scg_price } });
-								callFillSeries.setData([
-									{ time: fillRange.fromTime, value: latest.bcg_price },
-									{ time: fillRange.toTime, value: latest.bcg_price },
-								]);
-							} else {
-								callFillSeries.setData([]);
-							}
 						} finally {
 							hideSpinner();
 						}
@@ -947,9 +916,11 @@
 					// trailing window. Two different resolutions depending
 					// on page mode:
 					//  - /4l/&lt;asset&gt; (INSTRUMENT unset): only drawn while
-					//    the "Expiry" dropdown is on "Nearest", resolving
-					//    Nearest+1 the same way the dropdown's own
-					//    "Nearest+1" option would (?expiry=nearest_plus_1).
+					//    the "Expiry" dropdown's current selection is the
+					//    nearest active expiry (SELECTED_INSTRUMENT ===
+					//    NEAREST_INSTRUMENT), resolving Nearest+1 via the
+					//    same ordinal endpoint the dropdown used to offer
+					//    directly (?expiry=nearest_plus_1).
 					//  - /&lt;instrument&gt;/4l (INSTRUMENT set, no "Expiry"
 					//    dropdown/"Nearest" concept at all — the
 					//    instrument is fixed by the URL): drawn
@@ -960,16 +931,16 @@
 					//    after an arbitrary instrument (see
 					//    four_leg_gamma_json's own docstring).
 					// Removes its own previous line first, so switching
-					// Expiry away from "Nearest" (on /4l/&lt;asset&gt;), or a
-					// failed/empty fetch (e.g. INSTRUMENT is already the
-					// last active expiry, nothing after it), never leaves
-					// a stale line drawn.
+					// Expiry away from the nearest expiry (on
+					// /4l/&lt;asset&gt;), or a failed/empty fetch (e.g.
+					// INSTRUMENT is already the last active expiry,
+					// nothing after it), never leaves a stale line drawn.
 					async function refreshAvgGammaN1() {
 						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
 						let url;
 						if (INSTRUMENT) {
 							url = '/api/four-leg-gamma/' + ASSET + '?after_instrument=' + INSTRUMENT + '&hours=all';
-						} else if (EXPIRY_MODE === 'nearest') {
+						} else if (SELECTED_INSTRUMENT && SELECTED_INSTRUMENT === NEAREST_INSTRUMENT) {
 							url = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
 						} else {
 							return;
@@ -1096,6 +1067,7 @@
 					async function init() {
 						try {
 							await loadCandles();
+							await loadExpiries();
 							await refreshFourLegGamma();
 							await refreshAvgGammaN1();
 							await refreshLastTrade();
@@ -1105,18 +1077,15 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					// Skips the routine poll entirely while the cumulative
-					// "All" Expiry is selected (see CUMULATIVE_EXPIRY_MODES
-					// above) — Weekly/Monthly now poll routinely too, same
-					// as the ordinal Nearest family, since they're isolated
-					// to one instrument. refreshFourLegGamma() still runs
-					// directly from init()/setExpiry()/setWindow() regardless
-					// of mode, so a manual dropdown change always gets a
-					// fresh read. refreshAvgGammaN1() is cheap to call
-					// unconditionally every tick — it no-ops (just clears
-					// its own line) whenever EXPIRY_MODE isn't 'nearest'.
+					// Every "Expiry" option now isolates to a single
+					// instrument (see SELECTED_INSTRUMENT above) — no more
+					// cumulative "all expiries at once" mode to skip polling
+					// for, so this always refreshes. refreshAvgGammaN1() is
+					// cheap to call unconditionally every tick — it no-ops
+					// (just clears its own line) whenever the current
+					// selection isn't the nearest expiry.
 					setInterval(() => {
-						if (!CUMULATIVE_EXPIRY_MODES.includes(EXPIRY_MODE)) refreshFourLegGamma();
+						refreshFourLegGamma();
 						refreshAvgGammaN1();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
