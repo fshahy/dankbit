@@ -454,7 +454,7 @@ class Trade(models.Model):
     _COINBASE_GRANULARITY_SECONDS = {"15m": 900, "1h": 3600, "4h": 3600, "1d": 86400}
     _COINBASE_MAX_CANDLES_PER_REQUEST = 300
 
-    def get_candles_coinbase(self, asset, interval="4h", limit=500):
+    def get_candles_coinbase(self, asset, interval="4h", limit=500, as_of_ts=None):
         """Real Coinbase Exchange spot candles (BTC-USD/ETH-USD), oldest-
         first, same {t, o, h, l, c} shape get_candles() returns — used by
         /4l/<asset> and /aa/<asset> (via klines_coinbase_proxy), per
@@ -467,6 +467,15 @@ class Trade(models.Model):
         bar didn't appear until 08:00 UTC — Coinbase's daily granularity is
         UTC-midnight-anchored, same as Binance's, so this is no longer an
         issue.
+
+        `as_of_ts` (unix seconds, default None) anchors the fetch window's
+        right edge — None means "ending now" (every existing caller's
+        behavior, unchanged); a real value returns the `limit` bars ending
+        at/before that moment instead, i.e. "candles as of a past point in
+        time" — used by /tm/<asset> (the Time Machine page, see
+        controllers/main.py's time_machine_chart) to show historical
+        candles leading up to a user-picked date rather than the live
+        present.
 
         Coinbase's public /products/<id>/candles endpoint caps each
         request at _COINBASE_MAX_CANDLES_PER_REQUEST (300) bars and takes
@@ -484,23 +493,25 @@ class Trade(models.Model):
         Cached in the separate _COINBASE_CACHE dict (same short fixed
         _COINBASE_CANDLES_CACHE_TTL=5s reasoning as _BINANCE_CANDLES_CACHE_TTL
         — this gets polled every 5s per open /4l or /aa tab), keyed by the
-        *requested* interval/limit (not the native granularity actually
-        fetched), so a 4h request and a 1h request never collide in the
-        cache despite both hitting Coinbase at granularity=3600."""
+        *requested* interval/limit/as_of_ts (not the native granularity
+        actually fetched), so a 4h request and a 1h request never collide
+        in the cache despite both hitting Coinbase at granularity=3600, and
+        a historical as_of_ts request never collides with (or evicts) the
+        live one."""
         product_id = self._COINBASE_SYMBOL_MAP.get(asset.upper(), asset.upper() + "-USD")
         aggregate_4h = interval == "4h"
         granularity = self._COINBASE_GRANULARITY_SECONDS.get(interval, 3600)
         fetch_limit = limit * 4 if aggregate_4h else limit
 
-        cache_key = f"coinbase_candles_{product_id}_{interval}_{limit}"
         now_ts = time_module.time()
+        cache_key = f"coinbase_candles_{product_id}_{interval}_{limit}_{int(as_of_ts) if as_of_ts is not None else 'live'}"
         cached = _COINBASE_CACHE.get(cache_key, {})
         if cached and cached.get("value") is not None and (now_ts - cached.get("ts", 0) < _COINBASE_CANDLES_CACHE_TTL):
             return cached.get("value")
 
         url = f"https://api.exchange.coinbase.com/products/{product_id}/candles"
         by_t = {}
-        end_ts = int(now_ts)
+        end_ts = int(as_of_ts) if as_of_ts is not None else int(now_ts)
         remaining = fetch_limit
         while remaining > 0:
             batch = min(remaining, self._COINBASE_MAX_CANDLES_PER_REQUEST)

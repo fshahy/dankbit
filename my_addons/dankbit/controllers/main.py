@@ -80,6 +80,32 @@ def _auto_window_hours(dte_hours):
             return choice
     return FOUR_LEG_WINDOW_HOURS_CHOICES[-1]
 
+def _parse_as_of_param(raw):
+    """Parses the `?as_of=` query param shared by expiries_json/
+    klines_coinbase_proxy/four_leg_gamma_json for /tm/<asset> (the Time
+    Machine page, see time_machine_chart below) into a naive-UTC datetime,
+    clamped to not exceed "now" (a future as_of has no real historical
+    meaning here — every one of this param's consumers already treats
+    "now" as the live/default case). `raw` is the value the page's own
+    `<input type="datetime-local">` produces, e.g. "2026-03-01T14:30" — no
+    timezone suffix, interpreted as UTC directly (matching this addon's
+    UTC-anchored trade-window convention throughout, see
+    options.day_window_start). Returns None for a missing/malformed value,
+    same as every other query param in this file — callers fall back to
+    "now" in that case, so a Time Machine URL with no `as_of` still
+    behaves exactly like the live page it's based on."""
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return min(parsed, now)
+
+
 def _forecast_leg_completeness(snapshot):
     """Return whether all four participant legs have any usable Greek pair.
 
@@ -2087,8 +2113,19 @@ class ChartController(http.Controller):
         series, per product decision to move both pages off Deribit
         perpetual futures onto Coinbase spot (was
         /api/klines-futures/<asset> when those pages sourced Deribit
-        perpetuals instead)."""
-        candles = request.env["dankbit.trade"].get_candles_coinbase(asset, interval=interval, limit=int(limit))
+        perpetuals instead).
+
+        An optional `?as_of=` query param (see _parse_as_of_param) anchors
+        the returned window's right edge to that past moment instead of
+        "now" — the `limit` candles ending at/before it, forwarded as
+        get_candles_coinbase()'s own `as_of_ts` (unix seconds). Used by
+        /tm/<asset> (Time Machine) for its own candle series; every other
+        caller (no `as_of`) is unaffected."""
+        as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
+        as_of_ts = as_of_override.replace(tzinfo=timezone.utc).timestamp() if as_of_override is not None else None
+        candles = request.env["dankbit.trade"].get_candles_coinbase(
+            asset, interval=interval, limit=int(limit), as_of_ts=as_of_ts,
+        )
         candles = candles[::-1]  # newest-first for frontend
         return request.make_response(
             json.dumps({"result": candles}),
@@ -2112,16 +2149,28 @@ class ChartController(http.Controller):
         lists instruments — `/api/four-leg-gamma/<asset>`'s own
         `?expiry=nearest`/`weekly`/`monthly`/etc. resolutions are
         unchanged and still reachable by a direct API call, just no
-        longer offered from this page's dropdown."""
+        longer offered from this page's dropdown.
+
+        An optional `?as_of=` query param (see _parse_as_of_param) switches
+        this from "every currently-active expiry" to "every expiry that
+        had already traded and hadn't yet expired as of that past moment"
+        — via dankbit.bands._distinct_expirations_asof() instead of the
+        plain _distinct_expirations() the live (no as_of) path still uses.
+        Backs /tm/<asset>'s (Time Machine) own "Expiry" dropdown, which
+        reloads this list every time the user picks a different date."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
                 json.dumps({"error": "Unknown asset"}),
                 headers=[("Content-Type", "application/json")],
             )
-        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
         bands_model = request.env["dankbit.bands"]
-        expirations = bands_model._distinct_expirations(asset, as_of, 200)
+        as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
+        if as_of_override is not None:
+            expirations = bands_model._distinct_expirations_asof(asset, as_of_override, 200)
+        else:
+            as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+            expirations = bands_model._distinct_expirations(asset, as_of, 200)
         expiries = [bands_model._format_instrument(asset, exp) for exp in expirations]
         payload = {"asset": asset, "expiries": expiries}
         return request.make_response(
@@ -2257,6 +2306,22 @@ class ChartController(http.Controller):
         shape-compatibility with the page's own existing
         points[points.length-1] read.
 
+        An optional `?as_of=` query param (see _parse_as_of_param)
+        substitutes for "now" everywhere in this function — every
+        `?expiry=`/`?instrument=`/`?after_instrument=`/`?hours=`
+        resolution above is already written relative to a local `as_of`
+        variable rather than calling datetime.now() inline, so overriding
+        just that one assignment retargets the whole computation at a
+        past moment with no other changes needed. Used by /tm/<asset>
+        (Time Machine) to compute the 4 gamma legs as they stood at a
+        user-picked historical date; every trade domain search below
+        already runs with `active_test=False` for exactly this reason —
+        so archived (long-since-expired) trades from that period are
+        still found — except the cumulative "all" branch, which now also
+        bypasses active_test unconditionally (harmless for the live/no
+        as_of case too, since that branch's own `expiration >= as_of`
+        condition already excludes anything old enough to have been
+        archived when as_of is "now").
         """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -2281,7 +2346,8 @@ class ChartController(http.Controller):
         if expiry_mode not in expiry_ordinals and expiry_mode not in cumulative_modes:
             expiry_mode = "nearest"
 
-        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
+        as_of = as_of_override if as_of_override is not None else datetime.now(timezone.utc).replace(tzinfo=None)
         hours_param = request.httprequest.args.get("hours")
 
         # Resolve which single instrument (if any) this Expiry mode
@@ -2404,31 +2470,41 @@ class ChartController(http.Controller):
         trades = request.env["dankbit.trade"]
         if instrument_override or after_instrument_param:
             if instrument:
-                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0), ("deribit_ts", "<=", as_of)]
                 if window_start is not None:
-                    domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+                    domain.append(("deribit_ts", ">=", window_start))
                 trades = trades.with_context(active_test=False).search(domain)
         elif expiry_mode in expiry_ordinals:
             if instrument:
-                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0), ("deribit_ts", "<=", as_of)]
                 if window_start is not None:
-                    domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+                    domain.append(("deribit_ts", ">=", window_start))
                 trades = trades.with_context(active_test=False).search(domain)
         elif expiry_mode == "all":
-            # "all" — cumulative, no upper bound: every one of asset's own
-            # non-expired instruments (same domain the since-removed
+            # "all" — cumulative across every one of asset's own non-expired
+            # (as of `as_of`) instruments (same domain the since-removed
             # /mwa/<asset>'s own mwa_gamma_json used). Unlike weekly/
             # monthly below, there's no single instrument to isolate to.
-            domain = [("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of), ("iv", "!=", 0)]
+            # `deribit_ts <= as_of` is always applied (not just when a
+            # trailing-hours Window is selected) — a no-op for the live
+            # case (nothing has deribit_ts in the future of "now"), but
+            # required for /tm/<asset> (Time Machine)'s historical `as_of`:
+            # without it, Window=All would include every trade for a
+            # tracked instrument regardless of whether it happened before
+            # or after the selected past moment.
+            domain = [
+                ("name", "=ilike", f"{asset}-%"), ("expiration", ">=", as_of),
+                ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
+            ]
             if window_start is not None:
-                domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
-            trades = request.env["dankbit.trade"].search(domain)
+                domain.append(("deribit_ts", ">=", window_start))
+            trades = request.env["dankbit.trade"].with_context(active_test=False).search(domain)
         else:
             # weekly/monthly — instrument already resolved above.
             if instrument:
-                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0)]
+                domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0), ("deribit_ts", "<=", as_of)]
                 if window_start is not None:
-                    domain += [("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of)]
+                    domain.append(("deribit_ts", ">=", window_start))
                 trades = trades.with_context(active_test=False).search(domain)
 
         STs = np.arange(from_price, to_price, step, dtype=np.float64)
@@ -2627,6 +2703,56 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "instrument": instrument, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
+    def time_machine_chart(self, asset):
+        """"Time Machine" — a standalone TradingView page, structurally a
+        historical-replay sibling of /4l/<asset> (four_leg_gamma_chart):
+        same Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/
+        SPG) + AVG line rendering, same Timeframe/Window/Theme/Ruler/
+        Settings controls — but everything anchored to a user-picked past
+        "As Of" date instead of "now", using this addon's ~9 months of
+        retained trade history (including long-expired, archived
+        instruments) to let a user scroll back and study how the 4-leg
+        gamma structure lined up against price for an expiry that has
+        since settled.
+
+        Renders its own standalone template (dankbit_time_machine_chart),
+        not dankbit_four_leg_gamma_chart — the two pages share no markup,
+        since this one needs an "As Of" date/time picker in place of the
+        live page's auto-refresh polling (a past "as of" moment is frozen
+        by definition, so nothing here polls on a timer; every fetch is
+        re-triggered only when the user changes As Of/Timeframe/Expiry/
+        Window). Every fetch just adds `?as_of=<ISO-8601, no tz — treated
+        as UTC>` to the same 3 endpoints /4l/<asset> already uses:
+        /api/klines-coinbase/<asset> (historical candles ending at that
+        moment, via get_candles_coinbase()'s new `as_of_ts` param),
+        /api/expiries/<asset> (which expiries had already traded and
+        hadn't yet expired as of that moment, via
+        dankbit.bands._distinct_expirations_asof() — not the live path's
+        plain _distinct_expirations(), which only knows about currently-
+        active instruments), and /api/four-leg-gamma/<asset> (the 4 gamma
+        legs computed over that resolved instrument's own trades as of
+        that moment — see that route's own `?as_of=` handling, including
+        why it forces `active_test=False` so long-archived trades are
+        still found). No new backend computation exists for this page —
+        every number it shows is something /4l/<asset> can already
+        compute for "now"; this page just asks those same 3 endpoints
+        about a different point in time.
+
+        `?as_of=` on this page's own URL (e.g. /tm/BTC?as_of=2026-03-01T00:00)
+        pre-fills the "As Of" input so a specific historical view is
+        bookmarkable/shareable; missing/malformed defaults to "now" (the
+        input's own value, not a server-side default), so a bare /tm/BTC
+        starts out looking like a frozen snapshot of the live page before
+        the user picks an earlier date."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        as_of_param = request.httprequest.args.get("as_of") or ""
+        ctx = {"asset": asset, "as_of": as_of_param}
+        return request.render("dankbit.dankbit_time_machine_chart", ctx)
 
     @http.route("/api/average-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def average_gamma_json(self, asset):
