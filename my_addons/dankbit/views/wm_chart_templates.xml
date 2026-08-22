@@ -1,34 +1,35 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /tm/<asset> — "Time Machine",
-	     a historical-replay sibling of /4l/<asset> (four_leg_gamma_chart_
-	     templates.xml, which this file is structurally based on — same
-	     Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/SPG) +
-	     AVG line rendering, same Timeframe/Window/Theme/Ruler/Settings
-	     controls). The one structural difference: everything on this page
-	     is anchored to a user-picked "As Of" date/time instead of "now" —
-	     candles end at that moment instead of the live present, and the
-	     "Expiry" dropdown lists whichever expiries had already traded and
-	     hadn't yet expired AS OF that moment (dankbit.bands.
-	     _distinct_expirations_asof(), not the live path's plain
-	     _distinct_expirations() four_leg_gamma_chart_templates.xml's own
-	     Expiry dropdown uses) — including long-expired, archived
-	     instruments this addon's ~9 months of retained trade history still
-	     covers. A past "as of" moment is frozen by definition, so unlike
-	     /4l/<asset> this page has NO auto-refresh timer at all: every fetch
-	     (candles/expiries/gamma legs) only re-runs when the user changes
-	     As Of/Timeframe/Expiry/Window by hand. See main.py's
-	     time_machine_chart for the full route docstring — this page adds
-	     no new backend computation of its own, it just asks
-	     /api/klines-coinbase, /api/expiries, and /api/four-leg-gamma (the
-	     same 3 endpoints /4l/<asset> already uses) about a different point
-	     in time via their shared new `?as_of=` query param. -->
+	<!-- Standalone, minimal TradingView page for /wm/<asset> ("WM chart")
+	     — its own file. A simpler sibling of /4l/<asset>
+	     (four_leg_gamma_chart_templates.xml): same Coinbase-spot candle
+	     source (dankbit.trade.get_candles_coinbase(), via
+	     /api/klines-coinbase/<asset>), same Timeframe (15m/1h/4h/1d, 4h
+	     default)/Theme/Ruler/Settings controls, same 4 horizontal
+	     BCG/BPG/SCG/SPG gamma-price lines plus the present-leg-only AVG
+	     line — but its own "Expiry" dropdown only ever offers two fixed
+	     options, Weekly and Monthly (the asset's configured
+	     weekly_expiry/monthly_expiry instrument), each CUMULATIVE across
+	     every active instrument between now and that configured
+	     instrument's own expiration (see wm_gamma_json's own docstring in
+	     main.py) — restoring the pre-product-decision cumulative Weekly/
+	     Monthly behavior /api/four-leg-gamma's own Weekly/Monthly modes
+	     used to have, before a later product decision moved those to
+	     single-instrument isolation and /4l/<asset>'s own "Expiry"
+	     dropdown moved to a dynamically-loaded list of every active
+	     instrument. Its own "Window" dropdown likewise only offers two
+	     fixed options, 24h and All (no Auto/00:00-UTC/1h-10d choices).
+	     No per-instrument-scoped ("/<instrument>/wm") variant and no
+	     "AVG N+1" forward-looking line — this page has no single-
+	     instrument concept to hang either on. Recomputed live on every
+	     poll via /api/wm-gamma/<asset> — no model/table behind this
+	     page. -->
 
-	<template id="dankbit_time_machine_chart" name="Dankbit Time Machine Chart">
+	<template id="dankbit_wm_chart" name="Dankbit WM Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — Time Machine</title>
+				<title><t t-esc="asset"/> — Weekly/Monthly Gamma</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -44,7 +45,6 @@
 					#tf-bar {
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
-						flex-wrap: wrap; max-width: calc(100vw - 24px);
 					}
 					#exchange-label {
 						position: fixed; top: 8px; right: 80px;
@@ -71,11 +71,7 @@
 						cursor: pointer; border: 1px solid #ccc;
 					}
 					.tf-btn:hover { background: #f0f0f0; }
-					#as-of-input {
-						font-family: monospace; font-size: 11pt;
-						color: #555; background: rgba(255,255,255,0.88);
-						padding: 1px 6px; border-radius: 4px; border: 1px solid #ccc;
-					}
+					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
 
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
@@ -93,11 +89,11 @@
 					}
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
-					/* "Settings" button/dialog — color pickers for this page's
-					   own 4 gamma-leg lines. Plain centered overlay + box, no
-					   library — same hand-rolled shape /4l/&lt;asset&gt; uses, copied
-					   rather than shared so the two pages' color settings stay
-					   completely independent (see COLOR_STORAGE_KEY below). */
+					/* "Settings" button/dialog (see openSettingsModal() below) —
+					   color pickers for this page's own 4 gamma-leg lines.
+					   Own localStorage key (WM_COLOR_STORAGE_KEY below),
+					   independent of every other page's own color settings
+					   in this addon. */
 					.modal-overlay {
 						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
 						background: rgba(0,0,0,0.4);
@@ -134,7 +130,7 @@
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
-					body.dark #as-of-input { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
@@ -142,10 +138,12 @@
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
 
-					/* Shown while any fetch driven by As Of/Timeframe/Expiry/
-					   Window is in flight — this page has no live poll, so a
-					   fetch only ever happens in direct response to the user
-					   changing one of those controls. */
+					/* Shown while refreshWmGamma() is fetching/computing the 4
+					   gamma lines (a fresh options.per_leg_gamma() call
+					   server-side each time, over a cumulative multi-
+					   instrument trade set — no persisted history behind
+					   this page). Hidden as soon as that fetch resolves,
+					   success or error. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -159,34 +157,28 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-asset="asset" t-att-data-as-of="as_of" id="cfg" style="display:none"/>
+				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="tf-bar">
-					<span class="tf-label">As Of (UTC):</span>
-					<input type="datetime-local" id="as-of-input" onchange="onAsOfChange()"/>
-					<button class="tf-btn" id="now-btn" onclick="jumpToNow()">Now</button>
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h">4h</option>
-						<option value="1d" selected="selected">1d</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
+						<option value="weekly" selected="selected">Weekly</option>
+						<option value="monthly">Monthly</option>
 					</select>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
-						Cumulative
-					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="auto">Auto (Time to Expiry)</option>
-						<option value="24">24h</option>
-						<option value="all" selected="selected">All</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -195,7 +187,6 @@
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
-					<span class="tf-label" id="instrument-label" style="font-weight:bold;"/>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -221,124 +212,59 @@
 					</div>
 				</div>
 				<script>//<![CDATA[
-					const cfg   = document.getElementById('cfg').dataset;
-					const ASSET = cfg.asset;
-					// Server-rendered `?as_of=` from the page's own URL (see
-					// time_machine_chart's own docstring) — pre-fills the "As
-					// Of" input so a specific historical view is bookmarkable.
-					// Empty string (not set) means "start at now", same as a
-					// bare /tm/<asset> visit.
-					const INITIAL_AS_OF = cfg.asOf || '';
+					const cfg      = document.getElementById('cfg').dataset;
+					const ASSET    = cfg.asset;
+					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					// "Timeframe" dropdown — same options/defaults as /4l/<asset>.
+					let INTERVAL = '4h';
 					// Coinbase spot, same symbol convention /4l/<asset>/
 					// /aa/<asset> use (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
+					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
-					// "As Of" — the single moment this whole page is frozen
-					// at. AS_OF_ISO is always "YYYY-MM-DDTHH:MM:SS" (seconds
-					// forced to :00 client-side — the <input type="datetime-
-					// local">'s own .value has no seconds — so the server's
-					// _parse_as_of_param (main.py) always gets a fully-formed
-					// ISO string regardless of Python's own fromisoformat
-					// version quirks around omitted seconds). Every fetch on
-					// this page appends `&as_of=` + this value.
-					let AS_OF_ISO = null;
+					// "Expiry" dropdown — only ever "weekly" or "monthly" on
+					// this page (unlike /4l/<asset>'s own dynamically-loaded
+					// per-instrument list) — see wm_gamma_json's own
+					// docstring in main.py for the CUMULATIVE trade domain
+					// each resolves to.
+					let EXPIRY_MODE = 'weekly';
+					// "Window" dropdown — only ever 24 (24h trailing, via
+					// deribit_ts) or 'all' (every trade in the resolved
+					// cumulative expiration range, no deribit_ts floor) on
+					// this page (unlike /4l/<asset>'s own Auto/00:00-UTC/
+					// 1h-10d choice set).
+					let WINDOW_HOURS = 24;
+					const wmGammaUrl = () =>
+						'/api/wm-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + WINDOW_HOURS;
+					// The configured Weekly/Monthly instrument the current
+					// EXPIRY_MODE resolved to server-side (wm_gamma_json's
+					// own `instrument` response field) — null until the
+					// first refreshWmGamma() resolves, or if that setting
+					// is unconfigured/has no trades yet. Shown in the
+					// status line so the cumulative cutoff is visible.
+					let resolvedInstrument = null;
 
-					function pad(n) { return String(n).padStart(2, '0'); }
+					// Same "Last trade:" footer field the Delta Chart/
+					// /4l/<asset> use — a growing gap between this and
+					// "now" is the at-a-glance signal that dankbit_ws has
+					// stalled.
+					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
+					let   lastTradeTs = null;
+					// Trade count for the currently selected Window/Expiry —
+					// null until the first refreshWmGamma() resolves.
+					let   tradeCount = null;
 
-					// Formats a JS Date as the UTC "YYYY-MM-DDTHH:MM" string
-					// <input type="datetime-local"> expects for its own
-					// .value/default — the input has no timezone concept of
-					// its own, so this addon's usual UTC-anchored convention
-					// is applied by simply reading the UTC getters, not the
-					// local ones.
-					function toDatetimeLocalUTC(date) {
-						return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate())
-							+ 'T' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes());
+					// Shown in real UTC (not a browser-local shift) — this is a
+					// staleness check against server time, not a chart position.
+					function formatLastTradeTs(iso) {
+						if (!iso) return null;
+						return new Date(iso).toLocaleString('de-DE', {
+							timeZone: 'UTC',
+							year: 'numeric', month: '2-digit', day: '2-digit',
+							hour: '2-digit', minute: '2-digit', second: '2-digit',
+						}) + ' UTC';
 					}
-
-					// Europe/Berlin's current UTC offset in seconds (Berlin -
-					// UTC, positive), DST-aware (CET/CEST) via Intl's own
-					// timezone data rather than a fixed UTC+1/+2 guess — same
-					// "diff two toLocaleString renderings of the same instant"
-					// idiom the page-wide `tzOffset` above uses, just for
-					// Berlin instead of the viewer's own browser zone.
-					function berlinOffsetSeconds(refDate) {
-						const utc = new Date(refDate.toLocaleString('en-US', { timeZone: 'UTC' }));
-						const berlin = new Date(refDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
-						return (berlin - utc) / 1000;
-					}
-
-					// The page's own default "As Of" when no `?as_of=` was
-					// given on the URL — today's date at 15:30 Europe/Berlin
-					// local time, not the exact current instant (that's what
-					// the "Now" button is for). Uses BERLIN's own calendar
-					// day (via toLocaleDateString('en-CA', ...), which yields
-					// "YYYY-MM-DD"), not the browser's or UTC's, since those
-					// can disagree with Berlin's "today" for part of the day
-					// near midnight. Builds a UTC instant for 15:30 on that
-					// same calendar day, then shifts it back by Berlin's own
-					// current offset so the result is the real UTC moment
-					// that reads as 15:30 on a Berlin clock.
-					function defaultAsOfBerlin1530() {
-						const now = new Date();
-						const offsetSec = berlinOffsetSeconds(now);
-						const [y, m, d] = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }).split('-').map(Number);
-						const guessUTC = Date.UTC(y, m - 1, d, 15, 30, 0);
-						return new Date(guessUTC - offsetSec * 1000);
-					}
-
-					function setAsOfInput(value) {
-						document.getElementById('as-of-input').value = value;
-						// Normalized to exactly "YYYY-MM-DDTHH:MM:SS" regardless
-						// of whether `value` already carries seconds (e.g. a
-						// server-rendered `?as_of=` from the page's own URL,
-						// which isn't guaranteed to match the plain "YYYY-MM-
-						// DDTHH:MM" shape the <input>'s own .value getter always
-						// produces) — sliced to the first 16 chars (dropping any
-						// existing seconds) before re-appending ':00', so this
-						// never produces a malformed double-seconds string.
-						AS_OF_ISO = value.slice(0, 16) + ':00';
-					}
-
-					// "Timeframe" dropdown — same options/defaults as /4l/<asset>.
-					let INTERVAL = '1d';
-					const klineUrl = (iv, limit) =>
-						'/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit + '&as_of=' + encodeURIComponent(AS_OF_ISO);
-
-					// "Expiry" dropdown — which expiry's trades feed the 4
-					// gamma legs, reloaded from /api/expiries/<asset>?as_of=
-					// (dankbit.bands._distinct_expirations_asof — expiries that
-					// had already traded and hadn't yet expired as of AS_OF_ISO,
-					// unlike /4l/<asset>'s own live-only _distinct_expirations)
-					// every time As Of changes, not just once at page load.
-					let SELECTED_INSTRUMENT = null;
-
-					// "Window" dropdown — trailing-hours trade window fed into
-					// that expiry's trades, ending at AS_OF_ISO instead of
-					// "now" — same choice set/semantics as /4l/<asset>'s own
-					// (see FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours in
-					// main.py), just relative to a past moment.
-					let WINDOW_HOURS = 'all';
-					let autoResolvedHours = null;
-
-					// "Cumulative" checkbox — off by default. When checked,
-					// /api/four-leg-gamma's own `?cumulative=1` (see
-					// four_leg_gamma_json in main.py) switches the selected
-					// Expiry from an ISOLATED single-instrument trade domain
-					// to a CUMULATIVE one spanning every instrument whose own
-					// expiration falls between AS_OF_ISO and the selected
-					// expiry's own expiration, inclusive — the Window
-					// dropdown's trailing-hours filter still applies on top,
-					// same as the isolated path.
-					let CUMULATIVE = false;
-
-					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
-						+ '&as_of=' + encodeURIComponent(AS_OF_ISO)
-						+ (CUMULATIVE ? '&cumulative=1' : '');
-
-					let tradeCount = null;
 
 					// Same browser-local-timezone shift every other TV chart page
 					// in this addon applies — Lightweight Charts always renders
@@ -362,13 +288,13 @@
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
-					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 4 gamma-leg lines, persisted per-browser under
-					// a key completely independent of /4l/<asset>'s own
-					// 'dankbit_4l_chart_colors' and the Delta Chart's
-					// 'dankbit_chart_colors', since Time Machine is its own
-					// page with its own settings.
-					const COLOR_STORAGE_KEY = 'dankbit_tm_chart_colors';
+					// "Settings" button/dialog — user-pickable colors for
+					// this page's own 4 gamma-leg lines, persisted
+					// per-browser to localStorage under this page's own key
+					// (independent of /4l's/the Delta Chart's own color
+					// settings). No line-style picker (these 4 lines are
+					// always solid createPriceLine()s).
+					const COLOR_STORAGE_KEY = 'dankbit_wm_chart_colors';
 					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -379,29 +305,12 @@
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
 					// Average of the 4 gamma legs' own price levels — fixed
 					// light violet (dashed line), same "gamma" color
-					// association this addon uses elsewhere — not part of the
-					// "Chart Appearance" color picker above (that modal only
-					// covers the 4 raw BCG/BPG/SCG/SPG lines).
+					// association this addon uses elsewhere — not part of
+					// the "Chart Appearance" color picker above.
 					const AVG_GAMMA_COLOR = '#c9a0dc';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
-
-					// Watermark — this page only (not /4l/<asset>, /aa/<asset>, or the
-					// Delta Chart), via Lightweight Charts v4's own built-in
-					// `watermark` chart option (drawn directly onto the
-					// chart's own canvas, so it's properly clipped/resized
-					// along with everything else — not a hand-rolled DOM
-					// overlay). Fixed gray, deliberately NOT theme-reactive
-					// (unlike every other themed chart option on this page)
-					// — a light/dark-switching black-ish/white-ish color
-					// went invisible in practice (white-on-white in Light,
-					// black-on-black in Dark, reported directly), so a
-					// single mid-gray at moderate alpha is used instead,
-					// which reads against both a white and a black
-					// background without needing to track DARK_MODE at all.
-					const WATERMARK_TEXT = 'Dankbit Time Machine';
-					const WATERMARK_COLOR = 'rgba(120,120,120,0.35)';
 
 					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
 						width: window.innerWidth, height: window.innerHeight,
@@ -413,7 +322,6 @@
 						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
 						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
 						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
-						watermark: { visible: true, text: WATERMARK_TEXT, fontSize: 36, color: WATERMARK_COLOR, horzAlign: 'center', vertAlign: 'center' },
 						localization: {
 							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
 								timeZone: 'UTC',
@@ -433,51 +341,49 @@
 					});
 
 					// Invisible helper series solely to extend the shared time
-					// axis a little past the last historical candle, same
-					// mechanism /4l/<asset>'s own futureAxisSeries uses — just
-					// breathing room for the 4 gamma price lines' own axis
-					// labels, not a claim about real future price action (this
-					// page shows a frozen past moment, not a live forecast).
+					// axis past the last real candle, same mechanism every
+					// other standalone TV page in this addon uses — candlestick
+					// setData() silently drops OHLC-less "whitespace" points.
 					const futureAxisSeries = chart.addLineSeries({
 						color: 'rgba(0,0,0,0)', lineWidth: 1,
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
 					// The 4 gamma "lines" are horizontal reference lines at the
-					// resolved As-Of/Expiry/Window reading — same
-					// createPriceLine() pattern /4l/<asset> uses — redrawn
-					// fresh whenever As Of/Expiry/Window changes.
+					// CURRENT (latest) value only — not a connected historical
+					// time series. Redrawn fresh on every poll (REFRESH, from
+					// dankbit.refresh_interval), each replacing its own
+					// previous line rather than accumulating one per hour.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
+
+					function lastTradeSuffix() {
+						const label = formatLastTradeTs(lastTradeTs);
+						return label ? '  ·  Last trade: ' + label : '';
+					}
 
 					function tradeCountSuffix() {
 						return tradeCount !== null ? '  ·  ' + tradeCount + ' trades' : '';
 					}
 
-					function hoursLabel(hours) {
-						if (hours >= 24 && hours % 24 === 0) return (hours / 24) + 'd';
-						return hours + 'h';
-					}
 					function windowLabel() {
-						if (WINDOW_HOURS === 'all') return 'all trades';
-						if (WINDOW_HOURS === 'auto') {
-							return autoResolvedHours !== null
-								? 'Auto → ' + hoursLabel(autoResolvedHours) + ' trailing window'
-								: 'Auto trailing window';
-						}
-						return hoursLabel(WINDOW_HOURS) + ' trailing window';
+						return WINDOW_HOURS === 'all' ? 'all trades' : (WINDOW_HOURS + 'h trailing window');
+					}
+
+					function expiryLabel() {
+						const label = EXPIRY_MODE === 'monthly' ? 'Monthly' : 'Weekly';
+						return resolvedInstrument ? (label + ' (through ' + resolvedInstrument + ')') : (label + ' (not configured)');
 					}
 
 					function statusText() {
-						return (SELECTED_INSTRUMENT || ASSET) + ' · Four Leg Gamma (Time Machine, ' + windowLabel() + ')'
-							+ (CUMULATIVE ? ' · Cumulative (As Of → Expiry)' : '')
-							+ '  ·  As of ' + (AS_OF_ISO || '?') + ' UTC' + tradeCountSuffix();
+						return ASSET + ' · ' + expiryLabel() + ' · Four Leg Gamma (' + windowLabel() + ', live, cumulative)' + lastTradeSuffix() + tradeCountSuffix();
 					}
 
-					function onToggleCumulative() {
-						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
-						refreshFourLegGamma();
+					async function refreshLastTrade() {
+						const data = await (await fetch(LAST_TRADE_URL)).json();
+						lastTradeTs = data.last_trade_ts || null;
+						setStatus(statusText());
 					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
@@ -489,8 +395,8 @@
 
 					let realCandles = [];
 
-					// Same per-timeframe visible-window convention /4l/<asset>'s
-					// own TF_WINDOW uses.
+					// Same per-timeframe visible-window convention the
+					// Delta/Gamma/Strike Gamma/4l charts' own TF_WINDOW uses.
 					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
 					const INTERVAL_SECONDS = { '15m': 15 * 60, '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
 					const FUTURE_MARGIN_DAYS = 5;
@@ -562,54 +468,37 @@
 						applyVisibleRange();
 					}
 
+					async function updateLatestCandle() {
+						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
+						const klines = resp.result || [];
+						if (!klines.length) return;
+						const updated = toCandle(klines[0]);
+						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
+							realCandles[realCandles.length - 1] = updated;
+						} else {
+							realCandles.push(updated);
+						}
+						rebuildSeriesData();
+					}
+
 					async function setTf(iv) {
 						INTERVAL = iv;
 						await loadCandles();
-						setStatus(statusText());
 					}
 
-					function updateInstrumentLabel() {
-						document.getElementById('instrument-label').textContent = SELECTED_INSTRUMENT || '';
-					}
-
-					async function setExpiry(instr) {
-						SELECTED_INSTRUMENT = instr;
-						updateInstrumentLabel();
-						await refreshFourLegGamma();
-					}
-
-					// Populates the "Expiry" dropdown from every expiry that had
-					// already traded and hadn't yet expired as of AS_OF_ISO (see
-					// dankbit.bands._distinct_expirations_asof, /api/expiries'
-					// own `?as_of=` branch) — reloaded every time As Of changes,
-					// unlike /4l/<asset>'s own loadExpiries() (called once at
-					// page load only, since that page's "now" never moves).
-					// Selects the soonest (first) entry by default.
-					async function loadExpiries() {
-						const select = document.getElementById('expiry-select');
-						const data = await (await fetch('/api/expiries/' + ASSET + '?as_of=' + encodeURIComponent(AS_OF_ISO))).json();
-						const expiries = data.expiries || [];
-						select.innerHTML = '';
-						expiries.forEach(instr => {
-							const opt = document.createElement('option');
-							opt.value = instr;
-							opt.textContent = instr;
-							select.appendChild(opt);
-						});
-						SELECTED_INSTRUMENT = expiries.length ? expiries[0] : null;
-						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
-						updateInstrumentLabel();
+					async function setExpiry(mode) {
+						EXPIRY_MODE = mode;
+						await refreshWmGamma();
 					}
 
 					async function setWindow(hours) {
-						WINDOW_HOURS = (hours === 'all' || hours === 'auto') ? hours : parseInt(hours, 10);
-						autoResolvedHours = null;
-						await refreshFourLegGamma();
-						setStatus(statusText());
+						WINDOW_HOURS = hours === 'all' ? 'all' : parseInt(hours, 10);
+						await refreshWmGamma();
 					}
 
-					// Rounds and abbreviates large raw dollar-gamma values —
-					// same convention /4l/<asset>'s own formatAbbreviated() uses.
+					// Rounds and abbreviates large raw dollar-gamma values
+					// (hundreds of millions to billions is typical here) —
+					// thousands as K, millions as M, sign preserved.
 					function formatAbbreviated(value) {
 						const sign = value < 0 ? '-' : '';
 						const abs = Math.abs(value);
@@ -618,31 +507,19 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
-					// Fetches and redraws the 4 gamma-leg lines (+ AVG) for the
-					// current SELECTED_INSTRUMENT/WINDOW_HOURS as of AS_OF_ISO —
-					// same shape as /4l/<asset>'s own refreshFourLegGamma(),
-					// minus the AVG N+1 forward-looking line (which has no clean
-					// meaning for a frozen past moment) and minus the periodic
-					// re-poll (this only ever runs in direct response to a
-					// control change on this page).
-					async function refreshFourLegGamma() {
-						if (!SELECTED_INSTRUMENT) {
-							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
-							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
-							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
-							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
-							tradeCount = null;
-							setStatus(statusText());
-							return;
-						}
+					// Shows #spinner for the duration of the fetch — this
+					// endpoint recomputes the cumulative 4-leg gamma curve
+					// fresh server-side on every call. Hidden in a finally
+					// so a fetch error still clears it rather than leaving
+					// it spinning forever.
+					async function refreshWmGamma() {
 						showSpinner();
 						try {
-							const data = await (await fetch(fourLegGammaUrl())).json();
+							const data = await (await fetch(wmGammaUrl())).json();
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
-							autoResolvedHours = typeof data.window_hours === 'number' ? data.window_hours : null;
+							resolvedInstrument = data.instrument || null;
 							tradeCount = latest ? latest.trade_count : 0;
 							setStatus(statusText());
 
@@ -655,6 +532,9 @@
 								return;
 							}
 
+							// 0.0 means absent (same convention every gamma_band/
+							// smart_liq_*_price field in this addon uses) — no
+							// line drawn rather than a spurious price-0 line.
 							if (latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
 									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
@@ -689,6 +569,10 @@
 									title: 'SP ' + formatAbbreviated(latest.spg_value) + ' | ' + formatAbbreviated(smartLiqPut),
 								});
 							}
+							// Average of the legs' own gamma PRICE levels (not their
+							// gamma value) — over whichever legs are actually present
+							// (0.0 means absent), not a fixed /4. Skipped entirely
+							// when none of the 4 are present.
 							const gammaLegs = [
 								{ price: latest.bcg_price, value: latest.bcg_value },
 								{ price: latest.bpg_price, value: latest.bpg_value },
@@ -728,6 +612,12 @@
 						applyTheme();
 					}
 
+					// "Settings" modal — see COLOR_STORAGE_KEY/DEFAULT_COLORS/
+					// chartColors above. This page's 4 gamma lines are plain
+					// createPriceLine()s recreated fresh on every
+					// refreshWmGamma() call — there's no series object to
+					// restyle in place, so Save/Reset just trigger an
+					// immediate redraw instead.
 					function openSettingsModal() {
 						Object.keys(DEFAULT_COLORS).forEach(key => {
 							const input = document.getElementById('color-' + key);
@@ -746,7 +636,7 @@
 							if (input) chartColors[key] = input.value;
 						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
-						refreshFourLegGamma();
+						refreshWmGamma();
 						closeSettingsModal();
 					}
 
@@ -757,7 +647,7 @@
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
 						});
-						refreshFourLegGamma();
+						refreshWmGamma();
 					}
 
 					let rulerActive = false;
@@ -800,49 +690,19 @@
 						}
 					});
 
-					// Re-runs every fetch on this page against the current
-					// AS_OF_ISO — called whenever the "As Of" input changes or
-					// the "Now" button is pressed. Candles/Expiries/gamma legs
-					// all depend on AS_OF_ISO, so all 3 are re-fetched together
-					// (unlike setTf/setExpiry/setWindow, which each only touch
-					// the one thing they control).
-					async function reloadForAsOf() {
-						showSpinner();
-						try {
-							await loadCandles();
-							await loadExpiries();
-							await refreshFourLegGamma();
-							setStatus(statusText());
-						} catch (e) {
-							setStatus('Error: ' + e.message);
-						} finally {
-							hideSpinner();
-						}
-					}
-
-					function onAsOfChange() {
-						const value = document.getElementById('as-of-input').value;
-						if (!value) return;
-						setAsOfInput(value);
-						reloadForAsOf();
-					}
-
-					function jumpToNow() {
-						setAsOfInput(toDatetimeLocalUTC(new Date()));
-						reloadForAsOf();
-					}
-
 					async function init() {
 						try {
-							setAsOfInput(INITIAL_AS_OF || toDatetimeLocalUTC(defaultAsOfBerlin1530()));
 							await loadCandles();
-							await loadExpiries();
-							await refreshFourLegGamma();
+							await refreshWmGamma();
+							await refreshLastTrade();
 							setStatus(statusText());
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
 					}
 					init();
+					setInterval(updateLatestCandle, 5000);
+					setInterval(refreshWmGamma, REFRESH);
+					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>
 		</html>

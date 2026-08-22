@@ -2306,6 +2306,25 @@ class ChartController(http.Controller):
         shape-compatibility with the page's own existing
         points[points.length-1] read.
 
+        An optional `?cumulative=1` (or "true") query param — only
+        meaningful alongside `?instrument=` — switches that branch from
+        ISOLATING to the given instrument's own trades to a CUMULATIVE
+        domain across every one of `asset`'s own instruments whose own
+        `expiration` falls between `as_of` (or its `?as_of=` override)
+        and the given instrument's own expiration, inclusive — same
+        "from as_of through and including this cutoff" shape
+        wm_gamma_json's own Weekly/Monthly cumulation uses, just with
+        the cutoff being the caller's chosen instrument instead of the
+        configured weekly/monthly one, and the lower bound being `as_of`
+        instead of "now". The trailing-hours Window (`?hours=`) still
+        applies on top, same as the isolated path. Used by /tm/<asset>
+        (Time Machine)'s own "Cumulative" checkbox. Requires a lookup of
+        the given instrument's own expiration (the same single-row
+        lookup `?hours=auto` already performs for `?instrument=`, now
+        also run whenever `?cumulative=` is set) — falls back to the
+        ordinary isolated behavior if that instrument has no trades at
+        all (nothing to resolve a cutoff expiration from).
+
         An optional `?as_of=` query param (see _parse_as_of_param)
         substitutes for "now" everywhere in this function — every
         `?expiry=`/`?instrument=`/`?after_instrument=`/`?hours=`
@@ -2385,9 +2404,10 @@ class ChartController(http.Controller):
         # `instrument` ends up holding that NEXT instrument, not the one
         # passed in — same as `payload["instrument"]` below.
         after_instrument_param = (request.httprequest.args.get("after_instrument") or "").upper() or None
+        cumulative_param = (request.httprequest.args.get("cumulative") or "").lower() in ("1", "true")
         if instrument_override:
             instrument = instrument_override
-            if hours_param == "auto":
+            if hours_param == "auto" or cumulative_param:
                 exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
                     [("name", "=ilike", f"{instrument}-%")], limit=1,
                 )
@@ -2469,7 +2489,20 @@ class ChartController(http.Controller):
 
         trades = request.env["dankbit.trade"]
         if instrument_override or after_instrument_param:
-            if instrument:
+            if cumulative_param and instrument_override and target_expiration is not None:
+                # Cumulative from as_of through and including the selected
+                # expiry — every instrument in that expiration range, not
+                # just the one the Expiry dropdown picked. See this
+                # method's own docstring above.
+                domain = [
+                    ("name", "=ilike", f"{asset}-%"),
+                    ("expiration", ">=", as_of), ("expiration", "<=", target_expiration),
+                    ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
+                ]
+                if window_start is not None:
+                    domain.append(("deribit_ts", ">=", window_start))
+                trades = trades.with_context(active_test=False).search(domain)
+            elif instrument:
                 domain = [("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0), ("deribit_ts", "<=", as_of)]
                 if window_start is not None:
                     domain.append(("deribit_ts", ">=", window_start))
@@ -2703,6 +2736,156 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "instrument": instrument, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/api/wm-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def wm_gamma_json(self, asset):
+        """Computed fresh on every request — no model/table behind this
+        route: 4-leg gamma extrema (BCG/BPG/SCG/SPG) for /wm/<asset>
+        ("WM chart" — a simpler sibling of /4l/<asset>, see wm_chart's
+        own docstring), via the same options.per_leg_gamma()
+        four_leg_gamma_json already uses. Differs from that route in
+        one respect: an `?expiry=weekly`/`?expiry=monthly` selection
+        here is CUMULATIVE across every one of `asset`'s own active
+        instruments whose own expiration falls between "now" and the
+        configured weekly_expiry/monthly_expiry instrument's own
+        expiration (inclusive) — restoring the behavior
+        four_leg_gamma_json's own Weekly/Monthly modes used to have
+        before a later product decision moved those to single-
+        instrument isolation (see that route's own docstring) — rather
+        than isolating to that one configured instrument's own trades
+        alone. `?expiry=` defaults to "weekly" for any other/missing
+        value.
+
+        The configured cutoff instrument's own real settlement time is
+        read off its own trades' `expiration` column (a single cheap
+        row lookup, same as four_leg_gamma_json's own `?hours=auto`
+        instrument-expiration lookup) rather than parsed/assumed from
+        its day-suffix string, so a Deribit settlement time that isn't
+        exactly 08:00 UTC is still handled correctly. No points at all
+        (same nothing-computable-yet convention every other route here
+        follows) when that setting is unconfigured for `asset`, or when
+        no trade yet exists for the configured instrument at all (its
+        own expiration can't be resolved).
+
+        `?hours=` independently restricts to a trailing-hours trade
+        window — only "24" (24h trailing, via `deribit_ts`) or "all"
+        (every trade in the resolved expiration range, no `deribit_ts`
+        floor) are meaningful here, matching this page's own "Window"
+        dropdown, which offers only those two options; any other/
+        missing value falls back to 24 (same FOUR_LEG_DEFAULT_WINDOW_HOURS
+        default four_leg_gamma_json uses for its own malformed-?hours=
+        case).
+
+        Returns `{asset, expiry_mode, instrument, window_hours,
+        points}` — `instrument` is the resolved weekly/monthly cutoff
+        instrument string (not a single isolated trade domain, just
+        the label the page's own status line shows), `None` if
+        unconfigured/unresolved. `points` holds exactly one (current)
+        reading, same list-of-one shape four_leg_gamma_json's own
+        `points` uses.
+        """
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            step = float(icp.get_param("dankbit.steps", default=100))
+        else:
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            step = float(icp.get_param("dankbit.eth_steps", default=50))
+
+        expiry_mode = (request.httprequest.args.get("expiry") or "").lower()
+        if expiry_mode not in ("weekly", "monthly"):
+            expiry_mode = "weekly"
+
+        hours = 24 if request.httprequest.args.get("hours") != "all" else "all"
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if asset == "ETH":
+            expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+        else:
+            expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
+        instrument = icp.get_param(expiry_param, default="").upper() or None
+
+        cutoff_expiration = None
+        if instrument:
+            exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                [("name", "=ilike", f"{instrument}-%")], limit=1,
+            )
+            if exp_trade:
+                cutoff_expiration = exp_trade.expiration
+
+        trades = request.env["dankbit.trade"]
+        if cutoff_expiration is not None:
+            domain = [
+                ("name", "=ilike", f"{asset}-%"),
+                ("expiration", ">=", now),
+                ("expiration", "<=", cutoff_expiration),
+                ("iv", "!=", 0),
+            ]
+            if hours != "all":
+                domain.append(("deribit_ts", ">=", now - timedelta(hours=hours)))
+            trades = trades.with_context(active_test=False).search(domain)
+
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+
+        points = []
+        if trades:
+            # per_leg_gamma() rather than per_leg_greeks() — only
+            # gamma_price/gamma_value are read below, same reasoning
+            # as four_leg_gamma_json.
+            legs = options.per_leg_gamma(STs, trades)
+            point = {
+                "t": int(now.replace(tzinfo=timezone.utc).timestamp() * 1000),
+                "trade_count": len(trades),
+                "bcg_price": legs["long_call"]["gamma_price"] or 0.0, "bcg_value": legs["long_call"]["gamma_value"],
+                "bpg_price": legs["long_put"]["gamma_price"] or 0.0, "bpg_value": legs["long_put"]["gamma_value"],
+                "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
+                "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
+            }
+            points.append(point)
+
+        payload = {"asset": asset, "expiry_mode": expiry_mode, "instrument": instrument, "window_hours": hours, "points": points}
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
+    @http.route("/wm/<string:asset>", type="http", auth="user", website=True)
+    def wm_chart(self, asset):
+        """Standalone TradingView page — a simpler sibling of
+        /4l/<asset> (four_leg_gamma_chart): same Coinbase-spot candle
+        source, same 4 horizontal gamma-price lines (BCG/BPG/SCG/SPG)
+        plus the same present-leg-only AVG line, same Timeframe/Theme/
+        Ruler/Settings controls — but its own "Expiry" dropdown only
+        ever offers Weekly/Monthly (the asset's configured
+        weekly_expiry/monthly_expiry instrument), and each selection is
+        CUMULATIVE across every active instrument up to that cutoff
+        (see wm_gamma_json's own docstring) rather than isolated to one
+        instrument the way /4l/<asset>'s own dropdown is — restoring
+        the pre-product-decision cumulative Weekly/Monthly behavior
+        four_leg_gamma_json used to have. Its own "Window" dropdown
+        only offers 24h/All (no Auto/00:00-UTC/1h-10d options). No
+        "AVG N+1" line and no instrument-scoped ("/<instrument>/wm")
+        variant — this page has no single-instrument concept to hang
+        either on.
+        """
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_wm_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):

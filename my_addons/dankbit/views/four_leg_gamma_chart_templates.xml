@@ -251,6 +251,10 @@
 						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 						</select>
 					</t>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
+						Cumulative
+					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
@@ -382,12 +386,29 @@
 					// so windowLabel() can fall back to a plain "Auto" label
 					// before that.
 					let autoResolvedHours = null;
+					// "Cumulative" checkbox — off by default. When checked,
+					// /api/four-leg-gamma's own `?cumulative=1` (see
+					// four_leg_gamma_json in main.py) switches the resolved
+					// instrument (INSTRUMENT or SELECTED_INSTRUMENT, whichever
+					// fourLegGammaUrl() below is currently using) from an
+					// ISOLATED single-instrument trade domain to a CUMULATIVE
+					// one spanning every instrument whose own expiration falls
+					// between "now" and that instrument's own expiration,
+					// inclusive — same behavior /tm/<asset> (Time Machine)'s
+					// own "Cumulative" checkbox drives, just relative to "now"
+					// instead of a user-picked As-Of moment (this page has no
+					// As-Of concept — it's always live). The Window dropdown's
+					// trailing-hours filter still applies on top, same as the
+					// isolated path. Works identically on /<instrument>/4l
+					// (cumulates up through the URL-fixed INSTRUMENT).
+					let CUMULATIVE = false;
 					// INSTRUMENT (only set on /<instrument>/4l) takes priority
 					// over SELECTED_INSTRUMENT — both ultimately resolve to
 					// the same ?instrument= override server-side, just
 					// sourced from the URL vs. this page's own dropdown.
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + WINDOW_HOURS;
+						'/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + WINDOW_HOURS
+						+ (CUMULATIVE ? '&cumulative=1' : '');
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -585,7 +606,14 @@
 					}
 
 					function statusText() {
-						return (INSTRUMENT || ASSET) + ' · Four Leg Gamma (' + windowLabel() + ', live)' + lastTradeSuffix() + tradeCountSuffix();
+						return (INSTRUMENT || ASSET) + ' · Four Leg Gamma (' + windowLabel() + ', live)'
+							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
+							+ lastTradeSuffix() + tradeCountSuffix();
+					}
+
+					function onToggleCumulative() {
+						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
+						refreshFourLegGamma();
 					}
 
 					async function refreshLastTrade() {
