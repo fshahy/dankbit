@@ -89,6 +89,7 @@ class ForecastLog(models.Model):
     impulse_liquidity = fields.Float(digits=(16, 6))
     impulse_greek_flow = fields.Float(digits=(16, 6))
     impulse_term_slope = fields.Float(digits=(16, 6))
+    impulse_fomo_carry = fields.Float(digits=(16, 6))
 
     # Regime/context flags active when this candle was generated — the
     # same signals `mode` summarizes as free text, broken out here so they
@@ -106,6 +107,15 @@ class ForecastLog(models.Model):
     gamma_neutral_score = fields.Float(digits=(16, 4))
     absorption_mode = fields.Char()
     effective_atr = fields.Float(digits=(16, 4))
+    fomo_active = fields.Boolean(index=True)
+    fomo_direction = fields.Integer()
+    fomo_score = fields.Float(digits=(16, 4))
+    fomo_raw_score = fields.Float(digits=(16, 4))
+    fomo_move_atr = fields.Float(digits=(16, 4))
+    fomo_exhaustion = fields.Float(digits=(16, 4))
+    fomo_option_alignment = fields.Float(digits=(16, 4))
+    fomo_option_quality = fields.Float(digits=(16, 4))
+    fomo_strength = fields.Float(digits=(16, 4))
 
     # Backfilled by check_accuracy() once target_time has passed — see
     # that method's own docstring for how actual_price is sourced.
@@ -159,6 +169,7 @@ class ForecastLog(models.Model):
                 "impulse_liquidity": p["impulse_liquidity"],
                 "impulse_greek_flow": p["impulse_greek_flow"],
                 "impulse_term_slope": p["impulse_term_slope"],
+                "impulse_fomo_carry": p.get("impulse_fomo_carry", 0.0),
                 "is_weekend": p["is_weekend"],
                 "session_name": p["session_name"],
                 "activity_regime": p["activity_regime"],
@@ -171,6 +182,15 @@ class ForecastLog(models.Model):
                 "gamma_neutral_score": p["gamma_neutral_score"],
                 "absorption_mode": p["absorption_mode"],
                 "effective_atr": p["effective_atr"],
+                "fomo_active": p.get("fomo_active", False),
+                "fomo_direction": p.get("fomo_direction", 0),
+                "fomo_score": p.get("fomo_score", 0.0),
+                "fomo_raw_score": p.get("fomo_raw_score", 0.0),
+                "fomo_move_atr": p.get("fomo_move_atr", 0.0),
+                "fomo_exhaustion": p.get("fomo_exhaustion", 0.0),
+                "fomo_option_alignment": p.get("fomo_option_alignment", 0.0),
+                "fomo_option_quality": p.get("fomo_option_quality", 0.0),
+                "fomo_strength": p.get("fomo_strength", 0.0),
             } for p in result["points"]]
             self.sudo().create(vals_list)
 

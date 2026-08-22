@@ -460,6 +460,15 @@ class ForecastSnapshot(models.Model):
         cfg["ZONE_BRAKE_ATR_DISTANCE"] = f("forecast_zone_brake_atr_distance", 0.5)
         cfg["ZONE_BRAKE_MIN_BODY_MULT"] = f("forecast_zone_brake_min_body_mult", 1.0)
         cfg["BREAKOUT_GATE_WICK_BLEED"] = f("forecast_breakout_gate_wick_bleed", 0.6)
+        cfg["FOMO_ACTIVATION_SCORE"] = f("forecast_fomo_activation_score", 0.62)
+        cfg["FOMO_CONFIRMED_SCORE"] = f("forecast_fomo_confirmed_score", 0.75)
+        cfg["FOMO_EXTREME_SCORE"] = f("forecast_fomo_extreme_score", 0.88)
+        cfg["FOMO_MIN_MOVE_ATR"] = f("forecast_fomo_min_move_atr", 2.0)
+        cfg["FOMO_CARRY_MAX_IMPULSE"] = f("forecast_fomo_carry_max_impulse", 0.10)
+        cfg["FOMO_CARRY_DECAY"] = f("forecast_fomo_carry_decay", 0.84)
+        cfg["FOMO_MEAN_REVERSION_RELEASE"] = f("forecast_fomo_mean_reversion_release", 0.45)
+        cfg["FOMO_CONFIDENCE_FLOOR_BOOST"] = f("forecast_fomo_confidence_floor_boost", 0.18)
+        cfg["FOMO_MAX_ALIGNED_BODY_ATR"] = f("forecast_fomo_max_aligned_body_atr", 1.50)
 
         # Per-asset dollar-Greek activity scale — see forecast.py's own
         # module-level comment on GAMMA_ABS_NORMALIZER/etc. for why these

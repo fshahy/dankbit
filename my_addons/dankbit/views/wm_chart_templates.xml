@@ -3,7 +3,7 @@
 	     — its own file. A simpler sibling of /4l/<asset>
 	     (four_leg_gamma_chart_templates.xml): same Coinbase-spot candle
 	     source (dankbit.trade.get_candles_coinbase(), via
-	     /api/klines-coinbase/<asset>), same Timeframe (15m/1h/4h/1d, 4h
+	     /api/klines-coinbase/<asset>), same Timeframe (15m/1h/4h/1d, 1d
 	     default)/Theme/Ruler/Settings controls, same 4 horizontal
 	     BCG/BPG/SCG/SPG gamma-price lines plus the present-leg-only AVG
 	     line — but its own "Expiry" dropdown only ever offers two fixed
@@ -167,8 +167,8 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
-						<option value="1d">1d</option>
+						<option value="4h">4h</option>
+						<option value="1d" selected="selected">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
@@ -216,7 +216,7 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// "Timeframe" dropdown — same options/defaults as /4l/<asset>.
-					let INTERVAL = '4h';
+					let INTERVAL = '1d';
 					// Coinbase spot, same symbol convention /4l/<asset>/
 					// /aa/<asset> use (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');

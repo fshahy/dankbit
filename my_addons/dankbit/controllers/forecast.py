@@ -1590,6 +1590,18 @@ MOMENTUM_BODY_CONFIDENCE_FLOOR = 0.62
 MOMENTUM_WICK_COMPRESSION = 0.75
 SWEEP_REJECTION_BODY_BOOST = 1.35
 
+# Rare multi-session momentum expansion. This stays inert during ordinary
+# markets and never relaxes the existing weekend safety budget.
+FOMO_ACTIVATION_SCORE = 0.62
+FOMO_CONFIRMED_SCORE = 0.75
+FOMO_EXTREME_SCORE = 0.88
+FOMO_MIN_MOVE_ATR = 2.0
+FOMO_CARRY_MAX_IMPULSE = 0.10
+FOMO_CARRY_DECAY = 0.84
+FOMO_MEAN_REVERSION_RELEASE = 0.45
+FOMO_CONFIDENCE_FLOOR_BOOST = 0.18
+FOMO_MAX_ALIGNED_BODY_ATR = 1.50
+
 
 # ============================================================
 # FlowImbalance damping, Zone Brake, and the Breakout Gate — added per
@@ -1692,6 +1704,96 @@ def _momentum_override(candles, atr):
     override_bull = momentum_bull and (bullish_sweep or last["c"] > prev_confirmed_close)
     sweep_boost = SWEEP_REJECTION_BODY_BOOST if (override_bear and bearish_sweep) or (override_bull and bullish_sweep) else 1.0
     return override_bear, override_bull, sweep_boost
+
+
+def _fomo_price_regime(candles, atr, step_hours=4, min_move_atr=FOMO_MIN_MOVE_ATR):
+    """Score rare momentum persistence from fully closed real candles.
+
+    Cumulative ATR travel, directional bodies, closes near the advancing
+    edge, structure and acceleration build the score. Rejection wicks, body
+    contraction and a fresh structure break reduce it. Option confirmation
+    is intentionally applied later by simulate_forecast, so price alone can
+    never manufacture a FOMO forecast.
+    """
+    closed = list(candles or [])[:-1]
+    bars_for_72h = max(int(round(72.0 / max(float(step_hours), 1.0))), 3)
+    lookback = min(max(bars_for_72h, 6), 72)
+    rows = closed[-lookback:]
+    empty = {"direction": 0, "score": 0.0, "raw_score": 0.0,
+             "move_atr": 0.0, "exhaustion": 0.0, "bars": len(rows)}
+    if len(rows) < 3 or atr <= 0:
+        return empty
+
+    net = float(rows[-1]["c"]) - float(rows[0]["o"])
+    direction = 1 if net > 0 else -1 if net < 0 else 0
+    if not direction:
+        return empty
+
+    move_atr = abs(net) / max(atr, 1e-9)
+    move_score = max(min((move_atr - 1.25) / 2.75, 1.0), 0.0)
+    bodies = [float(r["c"]) - float(r["o"]) for r in rows]
+    body_total = sum(abs(body) for body in bodies) or 1.0
+    body_share = sum(max(direction * body, 0.0) for body in bodies) / body_total
+
+    locations = []
+    for row in rows:
+        high, low = float(row["h"]), float(row["l"])
+        location = (float(row["c"]) - low) / max(high - low, 1e-9)
+        locations.append(location if direction > 0 else 1.0 - location)
+    close_score = sum(locations) / len(locations)
+
+    structure_hits = 0
+    comparisons = 0
+    for previous, current in zip(rows, rows[1:]):
+        if direction > 0:
+            structure_hits += int(float(current["h"]) >= float(previous["h"]))
+            structure_hits += int(float(current["l"]) >= float(previous["l"]))
+        else:
+            structure_hits += int(float(current["h"]) <= float(previous["h"]))
+            structure_hits += int(float(current["l"]) <= float(previous["l"]))
+        comparisons += 2
+    structure_score = structure_hits / comparisons if comparisons else 0.0
+
+    chunk = max(len(rows) // 3, 1)
+    recent = rows[-chunk:]
+    previous = rows[-2 * chunk:-chunk]
+    recent_move = direction * (float(recent[-1]["c"]) - float(recent[0]["o"]))
+    previous_move = direction * (float(previous[-1]["c"]) - float(previous[0]["o"])) if previous else 0.0
+    acceleration = max(min((recent_move - previous_move) / max(atr, 1e-9), 1.0), 0.0)
+
+    raw_score = max(min(
+        0.30 * move_score + 0.25 * body_share + 0.20 * close_score
+        + 0.15 * structure_score + 0.10 * acceleration,
+        1.0,
+    ), 0.0)
+
+    tail = rows[-min(4, len(rows)):]
+    rejection = []
+    for row in tail:
+        high, low = float(row["h"]), float(row["l"])
+        top = max(float(row["o"]), float(row["c"]))
+        bottom = min(float(row["o"]), float(row["c"]))
+        opposite_wick = high - top if direction > 0 else bottom - low
+        rejection.append(opposite_wick / max(high - low, 1e-9))
+    rejection_score = max(min((sum(rejection) / len(rejection) - 0.30) / 0.35, 1.0), 0.0)
+    recent_body = sum(abs(b) for b in bodies[-3:]) / min(3, len(bodies))
+    prior_slice = bodies[-6:-3]
+    prior_body = sum(abs(b) for b in prior_slice) / len(prior_slice) if prior_slice else recent_body
+    contraction = max(min((0.65 - recent_body / max(prior_body, 1e-9)) / 0.45, 1.0), 0.0)
+    last = rows[-1]
+    prior_tail = rows[-4:-1]
+    structure_break = 0.0
+    if prior_tail:
+        if direction > 0 and float(last["c"]) < min(float(r["l"]) for r in prior_tail):
+            structure_break = 1.0
+        elif direction < 0 and float(last["c"]) > max(float(r["h"]) for r in prior_tail):
+            structure_break = 1.0
+    exhaustion = max(min(0.40 * rejection_score + 0.30 * contraction + 0.30 * structure_break, 1.0), 0.0)
+    score = raw_score * (1.0 - 0.65 * exhaustion)
+    if move_atr < min_move_atr:
+        score = 0.0
+    return {"direction": direction, "score": score, "raw_score": raw_score,
+            "move_atr": move_atr, "exhaustion": exhaustion, "bars": len(rows)}
 
 
 def _atr14(candles):
@@ -1841,6 +1943,15 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     ZONE_BRAKE_ATR_DISTANCE = _cfg(cfg, "ZONE_BRAKE_ATR_DISTANCE")
     ZONE_BRAKE_MIN_BODY_MULT = _cfg(cfg, "ZONE_BRAKE_MIN_BODY_MULT")
     BREAKOUT_GATE_WICK_BLEED = _cfg(cfg, "BREAKOUT_GATE_WICK_BLEED")
+    FOMO_ACTIVATION_SCORE = _cfg(cfg, "FOMO_ACTIVATION_SCORE")
+    FOMO_CONFIRMED_SCORE = _cfg(cfg, "FOMO_CONFIRMED_SCORE")
+    FOMO_EXTREME_SCORE = _cfg(cfg, "FOMO_EXTREME_SCORE")
+    FOMO_MIN_MOVE_ATR = _cfg(cfg, "FOMO_MIN_MOVE_ATR")
+    FOMO_CARRY_MAX_IMPULSE = _cfg(cfg, "FOMO_CARRY_MAX_IMPULSE")
+    FOMO_CARRY_DECAY = _cfg(cfg, "FOMO_CARRY_DECAY")
+    FOMO_MEAN_REVERSION_RELEASE = _cfg(cfg, "FOMO_MEAN_REVERSION_RELEASE")
+    FOMO_CONFIDENCE_FLOOR_BOOST = _cfg(cfg, "FOMO_CONFIDENCE_FLOOR_BOOST")
+    FOMO_MAX_ALIGNED_BODY_ATR = _cfg(cfg, "FOMO_MAX_ALIGNED_BODY_ATR")
 
     levels = derive_levels(current, cfg)
     band_width = levels["band_width"]
@@ -1958,6 +2069,16 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     # Gamma-Band Term-Structure Bias — computed once (both points, and thus
     # the slope between them, are step-invariant).
     term_direction, term_strength, _term_slope_norm = gamma_band_term_slope(gamma_band_term_structure, band_width)
+    fomo_price = _fomo_price_regime(
+        candles, atr, step_hours=step_hours, min_move_atr=FOMO_MIN_MOVE_ATR,
+    )
+    fomo_leg_fields = (
+        "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
+        "bcd_abs", "bpd_abs", "scd_abs", "spd_abs",
+        "bct_abs", "bpt_abs", "sct_abs", "spt_abs",
+        "bcv_abs", "bpv_abs", "scv_abs", "spv_abs",
+    )
+    fomo_option_quality = sum(bool(current.get(field)) for field in fomo_leg_fields) / len(fomo_leg_fields)
 
     points = []
     projected_open = index_price
@@ -2072,6 +2193,53 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
                            session_flow_mult=activity["greek_flow_mult"], session_fakeout_mult=activity["fakeout_mult"],
                            cfg=cfg)
 
+        fomo_direction = int(fomo_price["direction"])
+        fomo_votes = []
+        if consensus["consensus_direction"]:
+            fomo_votes.append(int(consensus["consensus_direction"]))
+        if abs(float(flow["impulse"])) > 1e-9:
+            fomo_votes.append(1 if flow["impulse"] > 0 else -1)
+        if term_direction:
+            fomo_votes.append(int(term_direction))
+        if abs(center_slope) > 1e-9:
+            fomo_votes.append(1 if center_slope > 0 else -1)
+        if alignment >= CLUSTER_ALIGNMENT_THRESHOLD and cluster_direction:
+            fomo_votes.append(1 if cluster_direction > 0 else -1)
+        fomo_aligned_votes = sum(v == fomo_direction for v in fomo_votes)
+        fomo_opposed_votes = sum(v == -fomo_direction for v in fomo_votes)
+        fomo_option_alignment = fomo_aligned_votes / max(len(fomo_votes), 1)
+        fomo_active = bool(
+            fomo_direction
+            and fomo_price["score"] >= FOMO_ACTIVATION_SCORE
+            and fomo_aligned_votes >= 2
+            and fomo_opposed_votes <= 1
+        )
+        fomo_strength = 0.0
+        if fomo_active:
+            score_span = max(1.0 - FOMO_ACTIVATION_SCORE, 1e-9)
+            score_strength = max(min(
+                (fomo_price["score"] - FOMO_ACTIVATION_SCORE) / score_span, 1.0,
+            ), 0.0)
+            # Missing option legs reduce the amount of freedom but do not
+            # reinterpret missing as bearish/bullish. The chart's existing
+            # low-data warning remains the user-facing confidence signal.
+            quality_factor = 0.35 + 0.65 * fomo_option_quality
+            fomo_strength = score_strength * (0.65 + 0.35 * fomo_option_alignment) * quality_factor
+        fomo_carry_impulse = (
+            fomo_direction * FOMO_CARRY_MAX_IMPULSE * fomo_strength
+            * (FOMO_CARRY_DECAY ** step) * combined_body_mult
+            if fomo_active else 0.0
+        )
+
+        # Release only mean-reversion components that oppose an independently
+        # confirmed price regime. Aligned structural terms are not boosted.
+        if fomo_active:
+            release_mult = max(1.0 - FOMO_MEAN_REVERSION_RELEASE * fomo_strength, 0.50)
+            if base_pull_impulse * fomo_direction < 0:
+                base_pull_impulse *= release_mult
+            if curve_extreme_impulse * fomo_direction < 0:
+                curve_extreme_impulse *= release_mult
+
         term_slope_impulse = 0.0
         if term_direction != 0:
             term_slope_impulse = term_direction * term_strength * GAMMA_BAND_TERM_SLOPE_IMPULSE_STRENGTH * combined_body_mult * (0.88 ** step)
@@ -2099,7 +2267,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         if not any_shock_active:
             neutral_score = gamma_neutral_score(projected_open, closes[-1] if closes else projected_open, gamma_ref, band_width, effective_atr)
             if neutral_score > 0:
-                body_confidence *= max(1.0 - NEAR_GAMMA_BODY_DAMPING * neutral_score, 0.35)
+                fomo_neutral_release = 1.0 - 0.50 * fomo_strength if fomo_active else 1.0
+                body_confidence *= max(1.0 - NEAR_GAMMA_BODY_DAMPING * fomo_neutral_release * neutral_score, 0.35)
                 wick_expansion *= 1.0 + NEAR_GAMMA_WICK_EXPANSION * neutral_score
 
         # Option Cluster Structure Engine (computed once above, applied
@@ -2141,7 +2310,14 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             base_pull_impulse + slope_impulse + current_body_impulse + curve_extreme_impulse
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
             + liquidity["impulse"] + flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT + term_slope_impulse
+            + fomo_carry_impulse
         )
+
+        if fomo_active and raw_impulse_sum * fomo_direction > 0:
+            body_confidence = max(
+                body_confidence,
+                min(MOMENTUM_BODY_CONFIDENCE_FLOOR + FOMO_CONFIDENCE_FLOOR_BOOST * fomo_strength, 0.88),
+            )
 
         # Zone Brake — as the pre-confidence impulse points toward `top`
         # (bullish) or `low` (bearish) within ZONE_BRAKE_ATR_DISTANCE ATRs
@@ -2163,13 +2339,27 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
                 forecast_impulse = min(forecast_impulse, allowed_opposite)
             elif consensus["consensus_direction"] > 0 and forecast_impulse < 0:
                 forecast_impulse = max(forecast_impulse, -allowed_opposite)
-        impulse_limit = 0.85 if any_shock_active else 0.45
+        impulse_limit = 0.85 if any_shock_active else (
+            0.45 + 0.10 * fomo_strength
+            if fomo_active and forecast_impulse * fomo_direction > 0 else 0.45
+        )
         forecast_impulse = max(min(forecast_impulse, impulse_limit), -impulse_limit)
 
         step_move = band_width * forecast_impulse
         if step == 0:
-            first_move_cap = max(effective_atr * SESSION_FIRST_MOVE_ATR[sess], 1e-9)
+            first_cap_release = (
+                1.0 + 0.35 * fomo_strength
+                if fomo_active and step_move * fomo_direction > 0 else 1.0
+            )
+            first_move_cap = max(effective_atr * SESSION_FIRST_MOVE_ATR[sess] * first_cap_release, 1e-9)
             step_move = max(min(step_move, first_move_cap), -first_move_cap)
+
+        # More room is granted only in the established direction and remains
+        # ATR-bounded. The unchanged weekend block below is tighter and wins.
+        if fomo_active and step_move * fomo_direction > 0:
+            aligned_atr_mult = min(1.0 + 0.50 * fomo_strength, FOMO_MAX_ALIGNED_BODY_ATR)
+            aligned_cap = effective_atr * aligned_atr_mult
+            step_move = max(min(step_move, aligned_cap), -aligned_cap)
 
         # Weekend move cap — the rest of the cascade above (combined_body_mult,
         # combined_shock_mult, the shock modules' own threshold_mult) already
@@ -2324,6 +2514,13 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             mode.append("Gamma Band Term " + ("Up" if term_direction > 0 else "Down"))
         if activity["regime"] != "normal":
             mode.append("Activity " + activity["regime"].capitalize())
+        if fomo_active:
+            if fomo_price["score"] >= FOMO_EXTREME_SCORE:
+                mode.append("FOMO Extreme")
+            elif fomo_price["score"] >= FOMO_CONFIRMED_SCORE:
+                mode.append("FOMO Confirmed")
+            else:
+                mode.append("Momentum Watch")
         if is_weekend:
             mode.append("Weekend")
         mode.append(sess)
@@ -2353,6 +2550,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             "impulse_liquidity": float(liquidity["impulse"]),
             "impulse_greek_flow": float(flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT),
             "impulse_term_slope": float(term_slope_impulse),
+            "impulse_fomo_carry": float(fomo_carry_impulse),
             # Regime/context flags active for this candle — same signals
             # `mode` summarizes as free text, broken out here so they can be
             # filtered/grouped on directly instead of string-parsed.
@@ -2368,6 +2566,15 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             "gamma_neutral_score": float(neutral_score),
             "absorption_mode": absorption_mode or None,
             "effective_atr": float(effective_atr),
+            "fomo_active": bool(fomo_active),
+            "fomo_direction": int(fomo_direction),
+            "fomo_score": float(fomo_price["score"]),
+            "fomo_raw_score": float(fomo_price["raw_score"]),
+            "fomo_move_atr": float(fomo_price["move_atr"]),
+            "fomo_exhaustion": float(fomo_price["exhaustion"]),
+            "fomo_option_alignment": float(fomo_option_alignment),
+            "fomo_option_quality": float(fomo_option_quality),
+            "fomo_strength": float(fomo_strength),
         })
         projected_open = projected_close
 

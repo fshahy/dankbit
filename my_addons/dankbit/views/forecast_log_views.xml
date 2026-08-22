@@ -42,6 +42,7 @@
                         <field name="impulse_liquidity" />
                         <field name="impulse_greek_flow" />
                         <field name="impulse_term_slope" />
+                        <field name="impulse_fomo_carry" />
                     </group>
                     <group string="Regime Context">
                         <field name="is_weekend" />
@@ -56,6 +57,15 @@
                         <field name="gamma_neutral_score" />
                         <field name="absorption_mode" />
                         <field name="effective_atr" />
+                        <field name="fomo_active" />
+                        <field name="fomo_direction" />
+                        <field name="fomo_score" />
+                        <field name="fomo_raw_score" />
+                        <field name="fomo_move_atr" />
+                        <field name="fomo_exhaustion" />
+                        <field name="fomo_option_alignment" />
+                        <field name="fomo_option_quality" />
+                        <field name="fomo_strength" />
                     </group>
                 </sheet>
             </form>
@@ -97,6 +107,7 @@
                 <field name="impulse_liquidity" optional="hide" />
                 <field name="impulse_greek_flow" optional="hide" />
                 <field name="impulse_term_slope" optional="hide" />
+                <field name="impulse_fomo_carry" optional="hide" />
                 <field name="is_weekend" optional="hide" />
                 <field name="session_name" optional="hide" />
                 <field name="activity_regime" optional="hide" />
@@ -109,6 +120,14 @@
                 <field name="gamma_neutral_score" optional="hide" />
                 <field name="absorption_mode" optional="hide" />
                 <field name="effective_atr" optional="hide" />
+                <field name="fomo_active" optional="hide" />
+                <field name="fomo_direction" optional="hide" />
+                <field name="fomo_score" optional="hide" />
+                <field name="fomo_move_atr" optional="hide" />
+                <field name="fomo_exhaustion" optional="hide" />
+                <field name="fomo_option_alignment" optional="hide" />
+                <field name="fomo_option_quality" optional="hide" />
+                <field name="fomo_strength" optional="hide" />
             </list>
         </field>
     </record>
@@ -126,6 +145,7 @@
                 <field name="forecast_impulse" type="measure"/>
                 <field name="impulse_greek_flow" type="measure"/>
                 <field name="impulse_gamma_band" type="measure"/>
+                <field name="impulse_fomo_carry" type="measure"/>
             </pivot>
         </field>
     </record>
@@ -149,6 +169,7 @@
                 <filter name="is_weekend" string="Weekend" domain="[('is_weekend', '=', True)]"/>
                 <filter name="any_shock_active" string="Shock Active" domain="[('any_shock_active', '=', True)]"/>
                 <filter name="fakeout_risk" string="Fakeout Risk" domain="[('fakeout_risk', '=', True)]"/>
+                <filter name="fomo_active" string="FOMO Active" domain="[('fomo_active', '=', True)]"/>
 
                 <group expand="0" string="Group By">
                     <filter string="Asset" name="asset" context="{'group_by':'asset'}"/>
@@ -159,6 +180,7 @@
                     <filter string="Activity Regime" name="activity_regime" context="{'group_by':'activity_regime'}"/>
                     <filter string="Gamma-Band Consensus Direction" name="gb_consensus_direction" context="{'group_by':'gb_consensus_direction'}"/>
                     <filter string="Weekend" name="group_is_weekend" context="{'group_by':'is_weekend'}"/>
+                    <filter string="FOMO Active" name="group_fomo_active" context="{'group_by':'fomo_active'}"/>
                 </group>
             </search>
         </field>
