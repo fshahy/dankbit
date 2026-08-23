@@ -268,7 +268,6 @@
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
-					<span class="tf-label" id="instrument-label" style="font-weight:bold;"><t t-if="instrument" t-esc="instrument"/></span>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -286,6 +285,10 @@
 							<label class="color-row">Buyer Put (LP) <input type="color" id="color-bpg"/></label>
 							<label class="color-row">Seller Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Seller Put (SP) <input type="color" id="color-spg"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">AVG Line</div>
+							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -474,7 +477,7 @@
 					// Smart Liquidity colors, which are likewise fixed once
 					// chosen rather than swapping with the theme).
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
-					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
+					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -482,15 +485,13 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
-					// Average of the 4 gamma legs' own price levels — fixed
-					// light violet (dashed line, see avgGammaPriceLine
-					// below), same "gamma" color association this addon
+					// Average of the 4 gamma legs' own price levels (dashed
+					// line, see avgGammaPriceLine below) — default light
+					// violet, same "gamma" color association this addon
 					// uses elsewhere (the Zones page's violet Gamma section
 					// header, the Delta Chart's own dashed violet Gamma Band
-					// line) — not part of the "Chart Appearance" color
-					// picker above (that modal only covers the 4 raw
-					// BCG/BPG/SCG/SPG lines).
-					const AVG_GAMMA_COLOR = '#c9a0dc';
+					// line), user-recolorable via the "Chart Appearance"
+					// modal's own "AVG Line" section (chartColors.avg).
 					// Nearest+1 expiry's own 4-leg gamma average — drawn
 					// ONLY while the "Expiry" dropdown is on "Nearest", as
 					// a forward-looking reference for what's coming up
@@ -737,23 +738,8 @@
 						await loadCandles();
 					}
 
-					// Keeps the bold instrument-name label after "Settings" in
-					// sync with whichever instrument is actually driving the
-					// 4 gamma legs right now — INSTRUMENT (fixed by the URL
-					// on /<instrument>/4l) takes priority, same precedence
-					// fourLegGammaUrl() uses; SELECTED_INSTRUMENT otherwise
-					// (the "Expiry" dropdown's own current choice, /4l/<asset>
-					// only). On /<instrument>/4l this is redundant with the
-					// template's own server-rendered t-esc="instrument" (the
-					// span already shows the right text before this ever
-					// runs) but harmless to call regardless.
-					function updateInstrumentLabel() {
-						document.getElementById('instrument-label').textContent = INSTRUMENT || SELECTED_INSTRUMENT || '';
-					}
-
 					async function setExpiry(instr) {
 						SELECTED_INSTRUMENT = instr;
-						updateInstrumentLabel();
 						await refreshFourLegGamma();
 						await refreshAvgGammaN1();
 					}
@@ -784,7 +770,6 @@
 						NEAREST_INSTRUMENT = expiries.length ? expiries[0] : null;
 						SELECTED_INSTRUMENT = NEAREST_INSTRUMENT;
 						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
-						updateInstrumentLabel();
 					}
 
 					async function setWindow(hours) {
@@ -923,9 +908,9 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
+									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
+									axisLabelVisible: true, axisLabelColor: chartColors.avg,
 									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}
