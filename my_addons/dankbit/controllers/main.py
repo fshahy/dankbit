@@ -55,6 +55,15 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192, 2
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
+# /wm/<asset>'s own valid `?hours=` values (wm_gamma_json) — only 24 is
+# offered by that page's own "Window" dropdown (alongside the "all"
+# string sentinel, handled separately); 4/8/12 exist solely for the
+# "12h Avg"/"8h Avg"/"4h Avg" checkboxes (wm_chart_templates.xml), which
+# hit this same endpoint directly with a fixed hours= independent of the
+# Window dropdown, same principle as /4l/<asset>'s own fixed-window AVG
+# checkboxes against FOUR_LEG_WINDOW_HOURS_CHOICES/four_leg_gamma_json.
+_WM_VALID_HOURS = (4, 8, 12, 24)
+
 def _auto_window_hours(dte_hours):
     """`?hours=auto` on /api/four-leg-gamma resolves to this — the
     smallest FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers
@@ -2768,13 +2777,17 @@ class ChartController(http.Controller):
         own expiration can't be resolved).
 
         `?hours=` independently restricts to a trailing-hours trade
-        window — only "24" (24h trailing, via `deribit_ts`) or "all"
-        (every trade in the resolved expiration range, no `deribit_ts`
-        floor) are meaningful here, matching this page's own "Window"
-        dropdown, which offers only those two options; any other/
-        missing value falls back to 24 (same FOUR_LEG_DEFAULT_WINDOW_HOURS
-        default four_leg_gamma_json uses for its own malformed-?hours=
-        case).
+        window — "all" (every trade in the resolved expiration range,
+        no `deribit_ts` floor), or one of `_WM_VALID_HOURS` (4/8/12/24);
+        any other/missing value falls back to 24 (same
+        FOUR_LEG_DEFAULT_WINDOW_HOURS default four_leg_gamma_json uses
+        for its own malformed-?hours= case). Only 24/"all" are offered
+        by this page's own "Window" dropdown; 4/8/12 exist solely for
+        the "12h Avg"/"8h Avg"/"4h Avg" checkboxes (wm_chart_templates.xml),
+        which hit this same endpoint directly with a fixed `hours=`
+        independent of the Window dropdown, same principle as
+        `/4l/<asset>`'s own fixed-window AVG checkboxes against
+        `four_leg_gamma_json`.
 
         Returns `{asset, expiry_mode, instrument, window_hours,
         points}` — `instrument` is the resolved weekly/monthly cutoff
@@ -2805,7 +2818,15 @@ class ChartController(http.Controller):
         if expiry_mode not in ("weekly", "monthly"):
             expiry_mode = "weekly"
 
-        hours = 24 if request.httprequest.args.get("hours") != "all" else "all"
+        raw_hours = request.httprequest.args.get("hours")
+        if raw_hours == "all":
+            hours = "all"
+        else:
+            try:
+                parsed_hours = int(raw_hours)
+            except (TypeError, ValueError):
+                parsed_hours = None
+            hours = parsed_hours if parsed_hours in _WM_VALID_HOURS else 24
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -2873,10 +2894,15 @@ class ChartController(http.Controller):
         instrument the way /4l/<asset>'s own dropdown is — restoring
         the pre-product-decision cumulative Weekly/Monthly behavior
         four_leg_gamma_json used to have. Its own "Window" dropdown
-        only offers 24h/All (no Auto/00:00-UTC/1h-10d options). No
-        "AVG N+1" line and no instrument-scoped ("/<instrument>/wm")
-        variant — this page has no single-instrument concept to hang
-        either on.
+        only offers 24h/All (no Auto/00:00-UTC/1h-10d options). Also
+        has its own "12h Avg"/"8h Avg"/"4h Avg" checkboxes (right after
+        "Expiry", all unchecked by default), each drawing one more
+        present-leg-only AVG line pinned to a fixed trailing-hours
+        window via wm_gamma_json's own `?hours=4/8/12`, independent of
+        the "Window" dropdown — same principle as /4l/<asset>'s own
+        fixed-window AVG checkboxes. No "AVG N+1" line and no
+        instrument-scoped ("/<instrument>/wm") variant — this page has
+        no single-instrument concept to hang either on.
         """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):

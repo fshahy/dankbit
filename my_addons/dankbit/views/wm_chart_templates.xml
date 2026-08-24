@@ -3,7 +3,7 @@
 	     — its own file. A simpler sibling of /4l/<asset>
 	     (four_leg_gamma_chart_templates.xml): same Coinbase-spot candle
 	     source (dankbit.trade.get_candles_coinbase(), via
-	     /api/klines-coinbase/<asset>), same Timeframe (15m/1h/4h/1d, 1d
+	     /api/klines-coinbase/<asset>), same Timeframe (15m/1h/4h/1d, 4h
 	     default)/Theme/Ruler/Settings controls, same 4 horizontal
 	     BCG/BPG/SCG/SPG gamma-price lines plus the present-leg-only AVG
 	     line — but its own "Expiry" dropdown only ever offers two fixed
@@ -20,9 +20,15 @@
 	     fixed options, 24h and All (no Auto/00:00-UTC/1h-10d choices).
 	     No per-instrument-scoped ("/<instrument>/wm") variant and no
 	     "AVG N+1" forward-looking line — this page has no single-
-	     instrument concept to hang either on. Recomputed live on every
-	     poll via /api/wm-gamma/<asset> — no model/table behind this
-	     page. -->
+	     instrument concept to hang either on. Also has its own "12h
+	     Avg"/"8h Avg"/"4h Avg" checkboxes (right after "Expiry", all
+	     unchecked by default) — each draws one more present-leg-only
+	     AVG line pinned to a fixed trailing-hours window
+	     (?hours=4/8/12 on /api/wm-gamma/<asset>, see wm_gamma_json's
+	     own _WM_VALID_HOURS in main.py), independent of the "Window"
+	     dropdown, same principle as /4l/<asset>'s own fixed-window AVG
+	     checkboxes. Recomputed live on every poll via
+	     /api/wm-gamma/<asset> — no model/table behind this page. -->
 
 	<template id="dankbit_wm_chart" name="Dankbit WM Chart">
 		<html>
@@ -90,7 +96,8 @@
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
 					/* "Settings" button/dialog (see openSettingsModal() below) —
-					   color pickers for this page's own 4 gamma-leg lines.
+					   color pickers for this page's own 4 gamma-leg lines,
+					   the primary AVG line, and the 3 fixed-window AVG lines.
 					   Own localStorage key (WM_COLOR_STORAGE_KEY below),
 					   independent of every other page's own color settings
 					   in this addon. */
@@ -167,14 +174,26 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h">4h</option>
-						<option value="1d" selected="selected">1d</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 						<option value="weekly" selected="selected">Weekly</option>
 						<option value="monthly">Monthly</option>
 					</select>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg12h-toggle" onchange="onToggleFixedAvg('avg12h')"/>
+						12h Avg
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg8h-toggle" onchange="onToggleFixedAvg('avg8h')"/>
+						8h Avg
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg4h-toggle" onchange="onToggleFixedAvg('avg4h')"/>
+						4h Avg
+					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="24" selected="selected">24h</option>
@@ -205,6 +224,16 @@
 							<label class="color-row">Seller Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Seller Put (SP) <input type="color" id="color-spg"/></label>
 						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">AVG Line</div>
+							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Fixed-Window Averages</div>
+							<label class="color-row">12h Avg <input type="color" id="color-avg12h"/></label>
+							<label class="color-row">8h Avg <input type="color" id="color-avg8h"/></label>
+							<label class="color-row">4h Avg <input type="color" id="color-avg4h"/></label>
+						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
 							<button class="tf-btn" onclick="saveChartColors()">Save</button>
@@ -216,7 +245,7 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// "Timeframe" dropdown — same options/defaults as /4l/<asset>.
-					let INTERVAL = '1d';
+					let INTERVAL = '4h';
 					// Coinbase spot, same symbol convention /4l/<asset>/
 					// /aa/<asset> use (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -289,13 +318,18 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for
-					// this page's own 4 gamma-leg lines, persisted
+					// this page's own 4 gamma-leg lines, the primary AVG
+					// line, and the 3 fixed-window AVG lines, persisted
 					// per-browser to localStorage under this page's own key
 					// (independent of /4l's/the Delta Chart's own color
-					// settings). No line-style picker (these 4 lines are
-					// always solid createPriceLine()s).
+					// settings). No line-style picker (the 4 gamma-leg
+					// lines are always solid, the AVG lines always dashed,
+					// createPriceLine()s).
 					const COLOR_STORAGE_KEY = 'dankbit_wm_chart_colors';
-					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
+					const DEFAULT_COLORS = {
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc',
+						avg12h: '#1e88e5', avg8h: '#00897b', avg4h: '#d81b60',
+					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -303,11 +337,28 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
-					// Average of the 4 gamma legs' own price levels — fixed
-					// light violet (dashed line), same "gamma" color
-					// association this addon uses elsewhere — not part of
-					// the "Chart Appearance" color picker above.
-					const AVG_GAMMA_COLOR = '#c9a0dc';
+
+					// "12h Avg"/"8h Avg"/"4h Avg" checkboxes — each draws its
+					// own present-leg-only AVG line (identical averaging to
+					// the primary AVG line above) but pinned to a FIXED
+					// trailing-hours trade window, independent of this
+					// page's own "Window" dropdown (which only ever offers
+					// 24h/All) — same principle as /4l/<asset>'s own
+					// fixed-window AVG checkboxes. Domain (EXPIRY_MODE —
+					// Weekly/Monthly, always cumulative on this page, see
+					// wm_gamma_json) still follows the page's own current
+					// Expiry selection — only `hours` is pinned. Requires
+					// wm_gamma_json's own `_WM_VALID_HOURS` (main.py) to
+					// accept 4/8/12, not just 24/"all". All 3 off by
+					// default, same convention as every other opt-in
+					// checkbox on this page.
+					const FIXED_AVG_WINDOWS = [
+						{ hours: 12, id: 'avg12h', label: '12H' },
+						{ hours: 8,  id: 'avg8h',  label: '8H' },
+						{ hours: 4,  id: 'avg4h',  label: '4H' },
+					];
+					const fixedAvgState = {};
+					FIXED_AVG_WINDOWS.forEach(w => { fixedAvgState[w.id] = { show: false, line: null }; });
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -489,6 +540,7 @@
 					async function setExpiry(mode) {
 						EXPIRY_MODE = mode;
 						await refreshWmGamma();
+						await refreshAllFixedAvgs();
 					}
 
 					async function setWindow(hours) {
@@ -583,15 +635,58 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
+									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
+									axisLabelVisible: true, axisLabelColor: chartColors.avg,
 									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}
 						} finally {
 							hideSpinner();
 						}
+					}
+
+					// Same domain as wmGammaUrl() above (EXPIRY_MODE), just
+					// with `hours` pinned to the fixed window instead of
+					// WINDOW_HOURS.
+					function fixedAvgUrl(hours) {
+						return '/api/wm-gamma/' + ASSET + '?expiry=' + EXPIRY_MODE + '&hours=' + hours;
+					}
+
+					async function refreshFixedAvg(w) {
+						const state = fixedAvgState[w.id];
+						if (state.line) { series.removePriceLine(state.line); state.line = null; }
+						if (!state.show) return;
+						const data = await (await fetch(fixedAvgUrl(w.hours))).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						const color = chartColors[w.id];
+						state.line = series.createPriceLine({
+							price: avgPrice, color: color, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dashed,
+							axisLabelVisible: true, axisLabelColor: color,
+							title: 'AVG ' + w.label + ' ' + formatAbbreviated(avgValue),
+						});
+					}
+
+					async function refreshAllFixedAvgs() {
+						for (const w of FIXED_AVG_WINDOWS) { await refreshFixedAvg(w); }
+					}
+
+					function onToggleFixedAvg(id) {
+						const w = FIXED_AVG_WINDOWS.find(x => x.id === id);
+						fixedAvgState[id].show = document.getElementById(id + '-toggle').checked;
+						refreshFixedAvg(w);
 					}
 
 					function applyTheme() {
@@ -637,6 +732,7 @@
 						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
 						refreshWmGamma();
+						refreshAllFixedAvgs();
 						closeSettingsModal();
 					}
 
@@ -648,6 +744,7 @@
 							if (input) input.value = chartColors[key];
 						});
 						refreshWmGamma();
+						refreshAllFixedAvgs();
 					}
 
 					let rulerActive = false;
@@ -694,6 +791,7 @@
 						try {
 							await loadCandles();
 							await refreshWmGamma();
+							await refreshAllFixedAvgs();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -701,7 +799,10 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					setInterval(refreshWmGamma, REFRESH);
+					setInterval(() => {
+						refreshWmGamma();
+						refreshAllFixedAvgs();
+					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>

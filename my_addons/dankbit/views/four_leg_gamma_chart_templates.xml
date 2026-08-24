@@ -1,11 +1,12 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
-	     "Timeframe" dropdown (15m/1h/4h/1d, 1d default — 15m added to
+	     "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m added to
 	     match /aa/<asset>'s own dropdown, since Coinbase natively
 	     supports it too, and was originally also this page's own default
 	     until it was changed to 4h per product decision (matching the
 	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
-	     further product decision (2026-08-19)), candles
+	     further product decision (2026-08-19), then back to 4h per a
+	     still later product decision), candles
 	     from Coinbase spot (dankbit.trade.get_candles_coinbase(), same
 	     /api/klines-coinbase/<asset> proxy /aa/<asset> uses — Coinbase
 	     has no native 4h resolution, so "4h" is bucketed server-side from
@@ -243,8 +244,8 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h">4h</option>
-						<option value="1d" selected="selected">1d</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
 					</select>
 					<t t-if="not instrument">
 						<span class="tf-label">Expiry:</span>
@@ -255,11 +256,23 @@
 						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
 						Cumulative
 					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg12h-toggle" onchange="onToggleFixedAvg('avg12h')"/>
+						12h Avg
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg8h-toggle" onchange="onToggleFixedAvg('avg8h')"/>
+						8h Avg
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg4h-toggle" onchange="onToggleFixedAvg('avg4h')"/>
+						4h Avg
+					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
-						<option value="24">24h</option>
-						<option value="all" selected="selected">All</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -290,6 +303,12 @@
 							<div class="modal-section-title">AVG Line</div>
 							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
 						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Fixed-Window Averages</div>
+							<label class="color-row">12h Avg <input type="color" id="color-avg12h"/></label>
+							<label class="color-row">8h Avg <input type="color" id="color-avg8h"/></label>
+							<label class="color-row">4h Avg <input type="color" id="color-avg4h"/></label>
+						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
 							<button class="tf-btn" onclick="saveChartColors()">Save</button>
@@ -312,10 +331,11 @@
 					// "Timeframe" dropdown — same options as the Delta/Gamma/
 					// Strike Gamma charts' own dropdown; was 15m by default,
 					// then changed to 4h (matching those pages), then to 1d
-					// per a further product decision (2026-08-19) — see
+					// per a further product decision (2026-08-19), then back
+					// to 4h per a still later product decision — see
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
-					let INTERVAL = '1d';
+					let INTERVAL = '4h';
 					// Coinbase spot, same symbol convention /aa/<asset> uses
 					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -377,10 +397,12 @@
 					// "00:00 UTC", then "All" became the default in "Auto"'s
 					// place, then "Auto" was made the default again per a
 					// still later product decision, then "All" was made the
-					// default again per a further product decision — see
-					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES/
-					// _auto_window_hours for the current full history.)
-					let WINDOW_HOURS = 'all';
+					// default again per a further product decision, then
+					// "24h" was made the default per a still later product
+					// decision — see main.py's own
+					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
+					// the current full history.)
+					let WINDOW_HOURS = 24;
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
@@ -477,7 +499,10 @@
 					// Smart Liquidity colors, which are likewise fixed once
 					// chosen rather than swapping with the theme).
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
-					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc' };
+					const DEFAULT_COLORS = {
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc',
+						avg12h: '#1e88e5', avg8h: '#00897b', avg4h: '#d81b60',
+					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -505,6 +530,30 @@
 					// violet) so the two stay visually distinguishable when
 					// both are shown at once.
 					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
+
+					// "12h Avg"/"8h Avg"/"4h Avg" checkboxes — each draws its
+					// own present-leg-only AVG line (identical averaging to
+					// the primary AVG line above) but pinned to a FIXED
+					// trailing-hours trade window, independent of this
+					// page's own "Window" dropdown selection — so a short
+					// recent-flow average can be compared against whatever
+					// window the main lines are currently showing without
+					// changing that dropdown. Same trade domain (resolved
+					// instrument + Cumulative) as the primary AVG line,
+					// only `hours` is pinned — unlike "AVG N+1" above,
+					// which is also Window-independent but targets a
+					// different expiry entirely. All 3 off by default,
+					// same convention as every other opt-in checkbox on
+					// this page. 4/8/12 are all valid entries in
+					// FOUR_LEG_WINDOW_HOURS_CHOICES (main.py), so no
+					// backend change was needed for this.
+					const FIXED_AVG_WINDOWS = [
+						{ hours: 12, id: 'avg12h', label: '12H' },
+						{ hours: 8,  id: 'avg8h',  label: '8H' },
+						{ hours: 4,  id: 'avg4h',  label: '4H' },
+					];
+					const fixedAvgState = {};
+					FIXED_AVG_WINDOWS.forEach(w => { fixedAvgState[w.id] = { show: false, line: null }; });
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -615,6 +664,7 @@
 					function onToggleCumulative() {
 						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
 						refreshFourLegGamma();
+						refreshAllFixedAvgs();
 					}
 
 					async function refreshLastTrade() {
@@ -742,6 +792,7 @@
 						SELECTED_INSTRUMENT = instr;
 						await refreshFourLegGamma();
 						await refreshAvgGammaN1();
+						await refreshAllFixedAvgs();
 					}
 
 					// Populates the "Expiry" dropdown from every currently
@@ -979,6 +1030,51 @@
 						});
 					}
 
+					// Same trade-domain resolution as fourLegGammaUrl() above
+					// (resolved instrument + Cumulative), just with `hours`
+					// pinned to the fixed window instead of WINDOW_HOURS.
+					function fixedAvgUrl(hours) {
+						return '/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + hours
+							+ (CUMULATIVE ? '&cumulative=1' : '');
+					}
+
+					async function refreshFixedAvg(w) {
+						const state = fixedAvgState[w.id];
+						if (state.line) { series.removePriceLine(state.line); state.line = null; }
+						if (!state.show) return;
+						if (!(INSTRUMENT || SELECTED_INSTRUMENT)) return;
+						const data = await (await fetch(fixedAvgUrl(w.hours))).json();
+						const points = data.points || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						if (!latest) return;
+						const legs = [
+							{ price: latest.bcg_price, value: latest.bcg_value },
+							{ price: latest.bpg_price, value: latest.bpg_value },
+							{ price: latest.scg_price, value: latest.scg_value },
+							{ price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+						if (!legs.length) return;
+						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+						const color = chartColors[w.id];
+						state.line = series.createPriceLine({
+							price: avgPrice, color: color, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dashed,
+							axisLabelVisible: true, axisLabelColor: color,
+							title: 'AVG ' + w.label + ' ' + formatAbbreviated(avgValue),
+						});
+					}
+
+					async function refreshAllFixedAvgs() {
+						for (const w of FIXED_AVG_WINDOWS) { await refreshFixedAvg(w); }
+					}
+
+					function onToggleFixedAvg(id) {
+						const w = FIXED_AVG_WINDOWS.find(x => x.id === id);
+						fixedAvgState[id].show = document.getElementById(id + '-toggle').checked;
+						refreshFixedAvg(w);
+					}
+
 					function applyTheme() {
 						document.body.classList.toggle('dark', DARK_MODE);
 						chart.applyOptions({
@@ -1024,6 +1120,7 @@
 						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
 						refreshFourLegGamma();
+						refreshAllFixedAvgs();
 						closeSettingsModal();
 					}
 
@@ -1035,6 +1132,7 @@
 							if (input) input.value = chartColors[key];
 						});
 						refreshFourLegGamma();
+						refreshAllFixedAvgs();
 					}
 
 					let rulerActive = false;
@@ -1083,6 +1181,7 @@
 							await loadExpiries();
 							await refreshFourLegGamma();
 							await refreshAvgGammaN1();
+							await refreshAllFixedAvgs();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -1100,6 +1199,7 @@
 					setInterval(() => {
 						refreshFourLegGamma();
 						refreshAvgGammaN1();
+						refreshAllFixedAvgs();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
