@@ -1,14 +1,14 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
-	     "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m added to
-	     match /aa/<asset>'s own dropdown, since Coinbase natively
+	     "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m added
+	     since Coinbase natively
 	     supports it too, and was originally also this page's own default
 	     until it was changed to 4h per product decision (matching the
 	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
 	     further product decision (2026-08-19), then back to 4h per a
 	     still later product decision), candles
 	     from Coinbase spot (dankbit.trade.get_candles_coinbase(), same
-	     /api/klines-coinbase/<asset> proxy /aa/<asset> uses — Coinbase
+	     /api/klines-coinbase/<asset> proxy /tm/<asset> uses — Coinbase
 	     has no native 4h resolution, so "4h" is bucketed server-side from
 	     native 60-minute bars; 15m/1h/1d map directly onto Coinbase's own
 	     900/3600/86400-second granularities).
@@ -42,21 +42,17 @@
 	     expiry right after whichever one this page is currently
 	     showing — its own 4-leg gamma average, over that expiry's FULL
 	     trade history (?hours=all) regardless of the page's own Window
-	     selection. On /4l/<asset> it's drawn ONLY while the "Expiry"
+	     selection. Drawn ONLY while the "Expiry"
 	     dropdown is on "Nearest" (resolving Nearest+1 via
 	     ?expiry=nearest_plus_1, cleared whenever a different Expiry is
-	     selected); on /<instrument>/4l (see below) it's drawn
-	     unconditionally instead, resolving the expiry immediately after
-	     the URL's own fixed instrument via ?after_instrument= (labeled
-	     "AVG NEXT" there instead of "AVG N+1").
+	     selected).
 	     "Expiry" dropdown — dynamically loaded from every currently active
 	     (non-expired) instrument for the asset (loadExpiries(), sourced
 	     from /api/expiries/<asset>, dankbit.bands._distinct_expirations()/
 	     _format_instrument()), soonest-first, nearest expiry selected by
 	     default — each option ISOLATES trades to that one instrument's own
 	     trades via four_leg_gamma_json's own ?instrument= override (see
-	     that route's own docstring), the same one /<instrument>/4l already
-	     uses. Replaced a fixed Nearest/Weekly/Monthly option set (each
+	     that route's own docstring). Replaced a fixed Nearest/Weekly/Monthly option set (each
 	     resolved server-side via ?expiry= mode strings) per product
 	     decision (2026-08-20), so any real expiry can be picked directly
 	     instead of only through the weekly_expiry/monthly_expiry settings
@@ -84,27 +80,14 @@
 	     endpoint; "Auto" (?hours=auto) lets the server shrink the
 	     trailing-hours window as the selected Expiry's own settlement
 	     nears — see _auto_window_hours() in main.py for the bucket mapping
-	     and its rationale.
-
-	     Also rendered, mostly unchanged, by /<instrument>/4l
-	     (instrument_four_leg_gamma_chart in main.py) — the same page
-	     scoped to one specific instrument via the URL instead of the
-	     "Expiry" dropdown, which that variant omits entirely (the
-	     dropdown's markup and every SELECTED_INSTRUMENT-driven code path
-	     below are gated behind `t-if="not instrument"`/`if (INSTRUMENT)`,
-	     so /4l/<asset> itself is unaffected either way — see
-	     instrument_four_leg_gamma_chart's own docstring). The one
-	     exception is the "AVG N+1"/"AVG NEXT" line above, which behaves
-	     differently (but is still drawn by the exact same
-	     refreshAvgGammaN1() function) depending on whether INSTRUMENT is
-	     set. -->
+	     and its rationale. -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="instrument or asset"/> — Four Leg Gamma</title>
+				<title><t t-esc="asset"/> — Four Leg Gamma</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -120,6 +103,7 @@
 					#tf-bar {
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
+						flex-wrap: wrap; max-width: calc(100vw - 24px);
 					}
 					#exchange-label {
 						position: fixed; top: 8px; right: 80px;
@@ -234,7 +218,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-asset="asset" t-att-data-instrument="instrument" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
@@ -247,26 +231,12 @@
 						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
-					<t t-if="not instrument">
-						<span class="tf-label">Expiry:</span>
-						<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
-						</select>
-					</t>
+					<span class="tf-label">Expiry:</span>
+					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
+					</select>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
 						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
 						Cumulative
-					</label>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="avg12h-toggle" onchange="onToggleFixedAvg('avg12h')"/>
-						12h Avg
-					</label>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="avg8h-toggle" onchange="onToggleFixedAvg('avg8h')"/>
-						8h Avg
-					</label>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="avg4h-toggle" onchange="onToggleFixedAvg('avg4h')"/>
-						4h Avg
 					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
@@ -303,12 +273,6 @@
 							<div class="modal-section-title">AVG Line</div>
 							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
 						</div>
-						<div class="modal-section">
-							<div class="modal-section-title">Fixed-Window Averages</div>
-							<label class="color-row">12h Avg <input type="color" id="color-avg12h"/></label>
-							<label class="color-row">8h Avg <input type="color" id="color-avg8h"/></label>
-							<label class="color-row">4h Avg <input type="color" id="color-avg4h"/></label>
-						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
 							<button class="tf-btn" onclick="saveChartColors()">Save</button>
@@ -319,15 +283,6 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
-					// Set only by /<instrument>/4l (instrument_four_leg_gamma_chart)
-					// — /4l/<asset> itself renders `instrument: False`, which QWeb's
-					// t-att-* drops entirely, so cfg.instrument is undefined there
-					// and INSTRUMENT stays null, same as before this route existed.
-					// When set, this page has no "Expiry" dropdown at all (see
-					// SELECTED_INSTRUMENT below and the template's own
-					// t-if="not instrument") and fourLegGammaUrl() below
-					// isolates directly to this one instrument.
-					const INSTRUMENT = cfg.instrument || null;
 					// "Timeframe" dropdown — same options as the Delta/Gamma/
 					// Strike Gamma charts' own dropdown; was 15m by default,
 					// then changed to 4h (matching those pages), then to 1d
@@ -336,7 +291,7 @@
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
 					let INTERVAL = '4h';
-					// Coinbase spot, same symbol convention /aa/<asset> uses
+					// Coinbase spot, same symbol convention /tm/<asset> uses
 					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
@@ -354,10 +309,9 @@
 					// indirection or the nearest/nearest_plus_1/
 					// nearest_plus_2 ordinal family. Every option now
 					// ISOLATES trades to that one instrument's own trades
-					// via four_leg_gamma_json's own ?instrument= override
-					// (same one /<instrument>/4l already uses) — there is
-					// no cumulative "all expiries at once" option on this
-					// dropdown (never was). SELECTED_INSTRUMENT holds the
+					// via four_leg_gamma_json's own ?instrument= override —
+					// there is no cumulative "all expiries at once" option
+					// on this dropdown (never was). SELECTED_INSTRUMENT holds the
 					// currently chosen instrument string; NEAREST_INSTRUMENT
 					// (the first, soonest-expiring entry loadExpiries()
 					// receives) is tracked separately so refreshAvgGammaN1()
@@ -414,7 +368,7 @@
 					// "Cumulative" checkbox — off by default. When checked,
 					// /api/four-leg-gamma's own `?cumulative=1` (see
 					// four_leg_gamma_json in main.py) switches the resolved
-					// instrument (INSTRUMENT or SELECTED_INSTRUMENT, whichever
+					// instrument (SELECTED_INSTRUMENT — whichever
 					// fourLegGammaUrl() below is currently using) from an
 					// ISOLATED single-instrument trade domain to a CUMULATIVE
 					// one spanning every instrument whose own expiration falls
@@ -424,15 +378,10 @@
 					// instead of a user-picked As-Of moment (this page has no
 					// As-Of concept — it's always live). The Window dropdown's
 					// trailing-hours filter still applies on top, same as the
-					// isolated path. Works identically on /<instrument>/4l
-					// (cumulates up through the URL-fixed INSTRUMENT).
+					// isolated path.
 					let CUMULATIVE = false;
-					// INSTRUMENT (only set on /<instrument>/4l) takes priority
-					// over SELECTED_INSTRUMENT — both ultimately resolve to
-					// the same ?instrument= override server-side, just
-					// sourced from the URL vs. this page's own dropdown.
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + WINDOW_HOURS
+						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
 						+ (CUMULATIVE ? '&cumulative=1' : '');
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
@@ -501,7 +450,6 @@
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
 					const DEFAULT_COLORS = {
 						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc',
-						avg12h: '#1e88e5', avg8h: '#00897b', avg4h: '#d81b60',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -530,30 +478,6 @@
 					// violet) so the two stay visually distinguishable when
 					// both are shown at once.
 					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
-
-					// "12h Avg"/"8h Avg"/"4h Avg" checkboxes — each draws its
-					// own present-leg-only AVG line (identical averaging to
-					// the primary AVG line above) but pinned to a FIXED
-					// trailing-hours trade window, independent of this
-					// page's own "Window" dropdown selection — so a short
-					// recent-flow average can be compared against whatever
-					// window the main lines are currently showing without
-					// changing that dropdown. Same trade domain (resolved
-					// instrument + Cumulative) as the primary AVG line,
-					// only `hours` is pinned — unlike "AVG N+1" above,
-					// which is also Window-independent but targets a
-					// different expiry entirely. All 3 off by default,
-					// same convention as every other opt-in checkbox on
-					// this page. 4/8/12 are all valid entries in
-					// FOUR_LEG_WINDOW_HOURS_CHOICES (main.py), so no
-					// backend change was needed for this.
-					const FIXED_AVG_WINDOWS = [
-						{ hours: 12, id: 'avg12h', label: '12H' },
-						{ hours: 8,  id: 'avg8h',  label: '8H' },
-						{ hours: 4,  id: 'avg4h',  label: '4H' },
-					];
-					const fixedAvgState = {};
-					FIXED_AVG_WINDOWS.forEach(w => { fixedAvgState[w.id] = { show: false, line: null }; });
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -656,7 +580,7 @@
 					}
 
 					function statusText() {
-						return (INSTRUMENT || ASSET) + ' · Four Leg Gamma (' + windowLabel() + ', live)'
+						return ASSET + ' · Four Leg Gamma (' + windowLabel() + ', live)'
 							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
 							+ lastTradeSuffix() + tradeCountSuffix();
 					}
@@ -664,7 +588,6 @@
 					function onToggleCumulative() {
 						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
 						refreshFourLegGamma();
-						refreshAllFixedAvgs();
 					}
 
 					async function refreshLastTrade() {
@@ -792,18 +715,14 @@
 						SELECTED_INSTRUMENT = instr;
 						await refreshFourLegGamma();
 						await refreshAvgGammaN1();
-						await refreshAllFixedAvgs();
 					}
 
 					// Populates the "Expiry" dropdown from every currently
 					// active (non-expired) instrument for ASSET — see
 					// /api/expiries/<asset> and the SELECTED_INSTRUMENT
 					// comment above. Selects the nearest (first, soonest)
-					// entry by default. No-op on /<instrument>/4l (no
-					// "Expiry" dropdown/#expiry-select element there at
-					// all, since the instrument is already fixed by the
-					// URL). Called once from init(), before the first
-					// refreshFourLegGamma()/refreshAvgGammaN1() call, so
+					// entry by default. Called once from init(), before the
+					// first refreshFourLegGamma()/refreshAvgGammaN1() call, so
 					// SELECTED_INSTRUMENT/NEAREST_INSTRUMENT are resolved
 					// before either needs them.
 					async function loadExpiries() {
@@ -977,38 +896,18 @@
 					// independent of this page's own Window selection, so
 					// it stays a stable reference rather than
 					// thinning out/disappearing along with a short
-					// trailing window. Two different resolutions depending
-					// on page mode:
-					//  - /4l/&lt;asset&gt; (INSTRUMENT unset): only drawn while
-					//    the "Expiry" dropdown's current selection is the
-					//    nearest active expiry (SELECTED_INSTRUMENT ===
-					//    NEAREST_INSTRUMENT), resolving Nearest+1 via the
-					//    same ordinal endpoint the dropdown used to offer
-					//    directly (?expiry=nearest_plus_1).
-					//  - /&lt;instrument&gt;/4l (INSTRUMENT set, no "Expiry"
-					//    dropdown/"Nearest" concept at all — the
-					//    instrument is fixed by the URL): drawn
-					//    unconditionally, resolving the expiry immediately
-					//    after INSTRUMENT's own expiration instead
-					//    (?after_instrument=&lt;INSTRUMENT&gt;) — server-side,
-					//    since only the DB knows which expiry comes next
-					//    after an arbitrary instrument (see
-					//    four_leg_gamma_json's own docstring).
+					// trailing window. Only drawn while the "Expiry"
+					// dropdown's current selection is the nearest active
+					// expiry (SELECTED_INSTRUMENT === NEAREST_INSTRUMENT),
+					// resolving Nearest+1 via the same ordinal endpoint the
+					// dropdown used to offer directly (?expiry=nearest_plus_1).
 					// Removes its own previous line first, so switching
-					// Expiry away from the nearest expiry (on
-					// /4l/&lt;asset&gt;), or a failed/empty fetch (e.g.
-					// INSTRUMENT is already the last active expiry,
-					// nothing after it), never leaves a stale line drawn.
+					// Expiry away from the nearest expiry never leaves a
+					// stale line drawn.
 					async function refreshAvgGammaN1() {
 						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
-						let url;
-						if (INSTRUMENT) {
-							url = '/api/four-leg-gamma/' + ASSET + '?after_instrument=' + INSTRUMENT + '&hours=all';
-						} else if (SELECTED_INSTRUMENT && SELECTED_INSTRUMENT === NEAREST_INSTRUMENT) {
-							url = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
-						} else {
-							return;
-						}
+						if (!(SELECTED_INSTRUMENT && SELECTED_INSTRUMENT === NEAREST_INSTRUMENT)) return;
+						const url = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
 						const data = await (await fetch(url)).json();
 						const points = data.points || [];
 						const latest = points.length ? points[points.length - 1] : null;
@@ -1026,53 +925,8 @@
 							price: avgPrice, color: AVG_GAMMA_N1_COLOR, lineWidth: 2,
 							lineStyle: LightweightCharts.LineStyle.Dotted,
 							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_N1_COLOR,
-							title: (INSTRUMENT ? 'AVG NEXT ' : 'AVG N+1 ') + formatAbbreviated(avgValue),
+							title: 'AVG N+1 ' + formatAbbreviated(avgValue),
 						});
-					}
-
-					// Same trade-domain resolution as fourLegGammaUrl() above
-					// (resolved instrument + Cumulative), just with `hours`
-					// pinned to the fixed window instead of WINDOW_HOURS.
-					function fixedAvgUrl(hours) {
-						return '/api/four-leg-gamma/' + ASSET + '?instrument=' + (INSTRUMENT || SELECTED_INSTRUMENT) + '&hours=' + hours
-							+ (CUMULATIVE ? '&cumulative=1' : '');
-					}
-
-					async function refreshFixedAvg(w) {
-						const state = fixedAvgState[w.id];
-						if (state.line) { series.removePriceLine(state.line); state.line = null; }
-						if (!state.show) return;
-						if (!(INSTRUMENT || SELECTED_INSTRUMENT)) return;
-						const data = await (await fetch(fixedAvgUrl(w.hours))).json();
-						const points = data.points || [];
-						const latest = points.length ? points[points.length - 1] : null;
-						if (!latest) return;
-						const legs = [
-							{ price: latest.bcg_price, value: latest.bcg_value },
-							{ price: latest.bpg_price, value: latest.bpg_value },
-							{ price: latest.scg_price, value: latest.scg_value },
-							{ price: latest.spg_price, value: latest.spg_value },
-						].filter(leg => leg.price);
-						if (!legs.length) return;
-						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
-						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
-						const color = chartColors[w.id];
-						state.line = series.createPriceLine({
-							price: avgPrice, color: color, lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.Dashed,
-							axisLabelVisible: true, axisLabelColor: color,
-							title: 'AVG ' + w.label + ' ' + formatAbbreviated(avgValue),
-						});
-					}
-
-					async function refreshAllFixedAvgs() {
-						for (const w of FIXED_AVG_WINDOWS) { await refreshFixedAvg(w); }
-					}
-
-					function onToggleFixedAvg(id) {
-						const w = FIXED_AVG_WINDOWS.find(x => x.id === id);
-						fixedAvgState[id].show = document.getElementById(id + '-toggle').checked;
-						refreshFixedAvg(w);
 					}
 
 					function applyTheme() {
@@ -1120,7 +974,6 @@
 						});
 						localStorage.setItem(COLOR_STORAGE_KEY, JSON.stringify(chartColors));
 						refreshFourLegGamma();
-						refreshAllFixedAvgs();
 						closeSettingsModal();
 					}
 
@@ -1132,7 +985,6 @@
 							if (input) input.value = chartColors[key];
 						});
 						refreshFourLegGamma();
-						refreshAllFixedAvgs();
 					}
 
 					let rulerActive = false;
@@ -1181,7 +1033,6 @@
 							await loadExpiries();
 							await refreshFourLegGamma();
 							await refreshAvgGammaN1();
-							await refreshAllFixedAvgs();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -1199,7 +1050,6 @@
 					setInterval(() => {
 						refreshFourLegGamma();
 						refreshAvgGammaN1();
-						refreshAllFixedAvgs();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>

@@ -457,11 +457,11 @@ class Trade(models.Model):
     def get_candles_coinbase(self, asset, interval="4h", limit=500, as_of_ts=None):
         """Real Coinbase Exchange spot candles (BTC-USD/ETH-USD), oldest-
         first, same {t, o, h, l, c} shape get_candles() returns — used by
-        /4l/<asset> and /aa/<asset> (via klines_coinbase_proxy), per
-        product decision to move both pages off Deribit perpetual futures
+        /4l/<asset> (via klines_coinbase_proxy), per
+        product decision to move that page off Deribit perpetual futures
         onto Coinbase spot; every other TradingView page in this addon
         (/chart) keeps using get_candles()/Binance spot unchanged. Also
-        fixes the daily-timeframe discrepancy those two pages used to have
+        fixes the daily-timeframe discrepancy that page used to have
         against the Delta Chart: Deribit's own daily bars were bucketed on
         an 08:00 UTC boundary (its option-settlement time), so "today"'s
         bar didn't appear until 08:00 UTC — Coinbase's daily granularity is

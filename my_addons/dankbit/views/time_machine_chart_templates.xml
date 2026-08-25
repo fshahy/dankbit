@@ -229,8 +229,8 @@
 					// Empty string (not set) means "start at now", same as a
 					// bare /tm/<asset> visit.
 					const INITIAL_AS_OF = cfg.asOf || '';
-					// Coinbase spot, same symbol convention /4l/<asset>/
-					// /aa/<asset> use (server-side _COINBASE_SYMBOL_MAP).
+					// Coinbase spot, same symbol convention /4l/<asset>
+					// uses (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
 
@@ -387,7 +387,7 @@
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
-					// Watermark — this page only (not /4l/<asset>, /aa/<asset>, or the
+					// Watermark — this page only (not /4l/<asset> or the
 					// Delta Chart), via Lightweight Charts v4's own built-in
 					// `watermark` chart option (drawn directly onto the
 					// chart's own canvas, so it's properly clipped/resized
