@@ -41,13 +41,27 @@
 						padding: 2px 10px; border-radius: 4px;
 						z-index: 10; pointer-events: none;
 					}
+					/* --tf-bar-bottom is set by repositionBelowToolbar() below to
+					   #tf-bar's own measured bottom edge — the fallback values
+					   here (36/40px) match its original fixed single-row
+					   height, so nothing shifts before that first JS pass runs.
+					   #tf-bar wraps onto extra rows on a narrow viewport
+					   (flex-wrap below) rather than overflowing off-screen, and
+					   #exchange-label/#ruler-info (stacked underneath it) track
+					   that dynamic height instead of a hardcoded offset, so a
+					   taller (wrapped) toolbar can never overlap them. Its own
+					   max-width reserves 80px on the right (same margin
+					   #exchange-label's old right:80px slot used) so a wrapped
+					   row's last item never sits under Lightweight Charts' own
+					   right price scale, which has no fixed width of its own
+					   to measure against. */
 					#tf-bar {
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
-						flex-wrap: wrap; max-width: calc(100vw - 24px);
+						flex-wrap: wrap; max-width: calc(100vw - 12px - 80px);
 					}
 					#exchange-label {
-						position: fixed; top: 8px; right: 80px;
+						position: fixed; top: var(--tf-bar-bottom, 36px); left: 12px;
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
@@ -58,7 +72,7 @@
 						color: #555; padding: 0 2px;
 					}
 					#ruler-info {
-						position: fixed; top: 40px; left: 12px;
+						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 4px); left: 12px;
 						font-family: monospace; font-size: 12pt; font-weight: bold;
 						color: #222; background: rgba(255,255,255,0.92);
 						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
@@ -172,8 +186,8 @@
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
 						<option value="1h">1h</option>
-						<option value="4h">4h</option>
-						<option value="1d" selected="selected">1d</option>
+						<option value="4h" selected="selected">4h</option>
+						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
@@ -185,8 +199,10 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
-						<option value="24">24h</option>
-						<option value="all" selected="selected">All</option>
+						<option value="8">8h</option>
+						<option value="12">12h</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -195,7 +211,6 @@
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
-					<span class="tf-label" id="instrument-label" style="font-weight:bold;"/>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -209,10 +224,14 @@
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Gamma Lines</div>
-							<label class="color-row">Buyer Call (LC) <input type="color" id="color-bcg"/></label>
-							<label class="color-row">Buyer Put (LP) <input type="color" id="color-bpg"/></label>
-							<label class="color-row">Seller Call (SC) <input type="color" id="color-scg"/></label>
-							<label class="color-row">Seller Put (SP) <input type="color" id="color-spg"/></label>
+							<label class="color-row">Long Call (LC) <input type="color" id="color-bcg"/></label>
+							<label class="color-row">Long Put (LP) <input type="color" id="color-bpg"/></label>
+							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
+							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">AVG Line</div>
+							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -302,7 +321,7 @@
 					}
 
 					// "Timeframe" dropdown — same options/defaults as /4l/<asset>.
-					let INTERVAL = '1d';
+					let INTERVAL = '4h';
 					const klineUrl = (iv, limit) =>
 						'/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit + '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
@@ -319,7 +338,7 @@
 					// "now" — same choice set/semantics as /4l/<asset>'s own
 					// (see FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours in
 					// main.py), just relative to a past moment.
-					let WINDOW_HOURS = 'all';
+					let WINDOW_HOURS = 24;
 					let autoResolvedHours = null;
 
 					// "Cumulative" checkbox — off by default. When checked,
@@ -363,13 +382,13 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 4 gamma-leg lines, persisted per-browser under
-					// a key completely independent of /4l/<asset>'s own
-					// 'dankbit_4l_chart_colors' and the Delta Chart's
-					// 'dankbit_chart_colors', since Time Machine is its own
-					// page with its own settings.
+					// page's own 4 gamma-leg lines plus the AVG line, persisted
+					// per-browser under a key completely independent of
+					// /4l/<asset>'s own 'dankbit_4l_chart_colors' and the Delta
+					// Chart's 'dankbit_chart_colors', since Time Machine is its
+					// own page with its own settings.
 					const COLOR_STORAGE_KEY = 'dankbit_tm_chart_colors';
-					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
+					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -377,12 +396,6 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
-					// Average of the 4 gamma legs' own price levels — fixed
-					// light violet (dashed line), same "gamma" color
-					// association this addon uses elsewhere — not part of the
-					// "Chart Appearance" color picker above (that modal only
-					// covers the 4 raw BCG/BPG/SCG/SPG lines).
-					const AVG_GAMMA_COLOR = '#c9a0dc';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -426,6 +439,19 @@
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
 					});
+					// #tf-bar wraps onto extra rows on a narrow viewport (see its
+					// own CSS comment) — #exchange-label/#ruler-info (stacked
+					// underneath it) track its actual measured bottom edge via
+					// this custom property instead of a hardcoded offset, so a
+					// taller (wrapped) toolbar can never overlap them.
+					function repositionBelowToolbar() {
+						const bar = document.getElementById('tf-bar');
+						if (!bar) return;
+						const bottom = Math.ceil(bar.getBoundingClientRect().bottom);
+						document.documentElement.style.setProperty('--tf-bar-bottom', bottom + 'px');
+					}
+					window.addEventListener('resize', repositionBelowToolbar);
+					repositionBelowToolbar();
 
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
@@ -470,7 +496,7 @@
 					}
 
 					function statusText() {
-						return (SELECTED_INSTRUMENT || ASSET) + ' · Four Leg Gamma (Time Machine, ' + windowLabel() + ')'
+						return (SELECTED_INSTRUMENT || ASSET) + ' · 4L (Time Machine, ' + windowLabel() + ')'
 							+ (CUMULATIVE ? ' · Cumulative (As Of → Expiry)' : '')
 							+ '  ·  As of ' + (AS_OF_ISO || '?') + ' UTC' + tradeCountSuffix();
 					}
@@ -568,13 +594,8 @@
 						setStatus(statusText());
 					}
 
-					function updateInstrumentLabel() {
-						document.getElementById('instrument-label').textContent = SELECTED_INSTRUMENT || '';
-					}
-
 					async function setExpiry(instr) {
 						SELECTED_INSTRUMENT = instr;
-						updateInstrumentLabel();
 						await refreshFourLegGamma();
 					}
 
@@ -598,7 +619,10 @@
 						});
 						SELECTED_INSTRUMENT = expiries.length ? expiries[0] : null;
 						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
-						updateInstrumentLabel();
+						// The Expiry select's own width can change once real
+						// instrument strings replace its prior state, which can
+						// shift how #tf-bar wraps.
+						repositionBelowToolbar();
 					}
 
 					async function setWindow(hours) {
@@ -621,10 +645,8 @@
 					// Fetches and redraws the 4 gamma-leg lines (+ AVG) for the
 					// current SELECTED_INSTRUMENT/WINDOW_HOURS as of AS_OF_ISO —
 					// same shape as /4l/<asset>'s own refreshFourLegGamma(),
-					// minus the AVG N+1 forward-looking line (which has no clean
-					// meaning for a frozen past moment) and minus the periodic
-					// re-poll (this only ever runs in direct response to a
-					// control change on this page).
+					// minus the periodic re-poll (this only ever runs in direct
+					// response to a control change on this page).
 					async function refreshFourLegGamma() {
 						if (!SELECTED_INSTRUMENT) {
 							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
@@ -699,9 +721,9 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: AVG_GAMMA_COLOR, lineWidth: 2,
+									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: AVG_GAMMA_COLOR,
+									axisLabelVisible: true, axisLabelColor: chartColors.avg,
 									title: 'AVG ' + formatAbbreviated(avgGammaValue),
 								});
 							}

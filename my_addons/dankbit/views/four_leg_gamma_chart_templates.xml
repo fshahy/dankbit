@@ -36,16 +36,7 @@
 	     variant, then restored on its own (ALL AVG stays removed) per a
 	     further product decision, then put behind an opt-in checkbox per
 	     a still later product decision, then made unconditional again
-	     (checkbox removed) per a final product decision. A 6th line,
-	     darker-violet dotted "AVG N+1" (refreshAvgGammaN1() in the
-	     template's own script), is a forward-looking reference for the
-	     expiry right after whichever one this page is currently
-	     showing — its own 4-leg gamma average, over that expiry's FULL
-	     trade history (?hours=all) regardless of the page's own Window
-	     selection. Drawn ONLY while the "Expiry"
-	     dropdown is on "Nearest" (resolving Nearest+1 via
-	     ?expiry=nearest_plus_1, cleared whenever a different Expiry is
-	     selected).
+	     (checkbox removed) per a final product decision.
 	     "Expiry" dropdown — dynamically loaded from every currently active
 	     (non-expired) instrument for the asset (loadExpiries(), sourced
 	     from /api/expiries/<asset>, dankbit.bands._distinct_expirations()/
@@ -59,10 +50,8 @@
 	     indirection or the nearest/nearest_plus_1/nearest_plus_2 ordinal
 	     family — four_leg_gamma_json's own ?expiry=nearest/weekly/monthly/
 	     nearest_plus_1/nearest_plus_2/all server-side resolutions are all
-	     unchanged and still reachable by a direct API call (the AVG N+1
-	     line above still calls ?expiry=nearest_plus_1 directly on its own
-	     independent fetch whenever the current selection is the nearest
-	     expiry), just no longer offered from this page's dropdown. The
+	     unchanged and still reachable by a direct API call,
+	     just no longer offered from this page's dropdown. The
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
@@ -82,12 +71,12 @@
 	     nears — see _auto_window_hours() in main.py for the bucket mapping
 	     and its rationale. -->
 
-	<template id="dankbit_four_leg_gamma_chart" name="Dankbit Four Leg Gamma Chart">
+	<template id="dankbit_four_leg_gamma_chart" name="Dankbit 4L Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — Four Leg Gamma</title>
+				<title><t t-esc="asset"/> — 4L</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -254,8 +243,10 @@
 					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="auto" selected="selected">Auto (Time to Expiry)</option>
-						<option value="24">24h</option>
+						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="8">8h</option>
+						<option value="12">12h</option>
+						<option value="24" selected="selected">24h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -278,10 +269,10 @@
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Gamma Lines</div>
-							<label class="color-row">Buyer Call (LC) <input type="color" id="color-bcg"/></label>
-							<label class="color-row">Buyer Put (LP) <input type="color" id="color-bpg"/></label>
-							<label class="color-row">Seller Call (SC) <input type="color" id="color-scg"/></label>
-							<label class="color-row">Seller Put (SP) <input type="color" id="color-spg"/></label>
+							<label class="color-row">Long Call (LC) <input type="color" id="color-bcg"/></label>
+							<label class="color-row">Long Put (LP) <input type="color" id="color-bpg"/></label>
+							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
+							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">AVG Line</div>
@@ -325,14 +316,9 @@
 					// ISOLATES trades to that one instrument's own trades
 					// via four_leg_gamma_json's own ?instrument= override —
 					// there is no cumulative "all expiries at once" option
-					// on this dropdown (never was). SELECTED_INSTRUMENT holds the
-					// currently chosen instrument string; NEAREST_INSTRUMENT
-					// (the first, soonest-expiring entry loadExpiries()
-					// receives) is tracked separately so refreshAvgGammaN1()
-					// below can tell whether the current selection is the
-					// nearest expiry without re-deriving it.
+					// on this dropdown (never was). SELECTED_INSTRUMENT holds
+					// the currently chosen instrument string.
 					let SELECTED_INSTRUMENT = null;
-					let NEAREST_INSTRUMENT = null;
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
 					// SELECTED_INSTRUMENT. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
@@ -368,10 +354,11 @@
 					// default again per a further product decision, then
 					// "24h" was made the default per a still later product
 					// decision, then back to "Auto" per a still later
-					// product decision — see main.py's own
+					// product decision, then back to "24h" per a still
+					// later product decision — see main.py's own
 					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
 					// the current full history.)
-					let WINDOW_HOURS = 'auto';
+					let WINDOW_HOURS = 24;
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
@@ -480,19 +467,6 @@
 					// header, the Delta Chart's own dashed violet Gamma Band
 					// line), user-recolorable via the "Chart Appearance"
 					// modal's own "AVG Line" section (chartColors.avg).
-					// Nearest+1 expiry's own 4-leg gamma average — drawn
-					// ONLY while the "Expiry" dropdown is on "Nearest", as
-					// a forward-looking reference for what's coming up
-					// right after the currently-selected expiry (see
-					// refreshAvgGammaN1() below). Computed over Nearest+1's
-					// FULL trade history (?hours=all), independent of the
-					// page's own Window selection, so it stays a stable
-					// reference rather than thinning out/disappearing along
-					// with a short trailing window. Darker violet + a
-					// dotted style (vs. the primary AVG line's dashed light
-					// violet) so the two stay visually distinguishable when
-					// both are shown at once.
-					const AVG_GAMMA_N1_COLOR = '#6a1b9a';
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -560,7 +534,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, avgGammaN1PriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -608,7 +582,7 @@
 					}
 
 					function statusText() {
-						return ASSET + ' · Four Leg Gamma (' + windowLabel() + ', live)'
+						return ASSET + ' · 4L (' + windowLabel() + ', live)'
 							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
 							+ lastTradeSuffix() + tradeCountSuffix();
 					}
@@ -742,7 +716,6 @@
 					async function setExpiry(instr) {
 						SELECTED_INSTRUMENT = instr;
 						await refreshFourLegGamma();
-						await refreshAvgGammaN1();
 					}
 
 					// Populates the "Expiry" dropdown from every currently
@@ -750,9 +723,9 @@
 					// /api/expiries/<asset> and the SELECTED_INSTRUMENT
 					// comment above. Selects the nearest (first, soonest)
 					// entry by default. Called once from init(), before the
-					// first refreshFourLegGamma()/refreshAvgGammaN1() call, so
-					// SELECTED_INSTRUMENT/NEAREST_INSTRUMENT are resolved
-					// before either needs them.
+					// first refreshFourLegGamma() call, so
+					// SELECTED_INSTRUMENT is resolved
+					// before it's needed.
 					async function loadExpiries() {
 						const select = document.getElementById('expiry-select');
 						if (!select) return;
@@ -765,8 +738,7 @@
 							opt.textContent = instr;
 							select.appendChild(opt);
 						});
-						NEAREST_INSTRUMENT = expiries.length ? expiries[0] : null;
-						SELECTED_INSTRUMENT = NEAREST_INSTRUMENT;
+						SELECTED_INSTRUMENT = expiries.length ? expiries[0] : null;
 						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
 						// The Expiry select's own width can change once real
 						// instrument strings replace its initial empty state,
@@ -921,46 +893,6 @@
 						}
 					}
 
-					// Forward-looking reference for the expiry right after
-					// whichever one this page is currently showing — see
-					// AVG_GAMMA_N1_COLOR above. Always drawn over that
-					// resolved expiry's FULL trade history (&amp;hours=all),
-					// independent of this page's own Window selection, so
-					// it stays a stable reference rather than
-					// thinning out/disappearing along with a short
-					// trailing window. Only drawn while the "Expiry"
-					// dropdown's current selection is the nearest active
-					// expiry (SELECTED_INSTRUMENT === NEAREST_INSTRUMENT),
-					// resolving Nearest+1 via the same ordinal endpoint the
-					// dropdown used to offer directly (?expiry=nearest_plus_1).
-					// Removes its own previous line first, so switching
-					// Expiry away from the nearest expiry never leaves a
-					// stale line drawn.
-					async function refreshAvgGammaN1() {
-						if (avgGammaN1PriceLine) { series.removePriceLine(avgGammaN1PriceLine); avgGammaN1PriceLine = null; }
-						if (!(SELECTED_INSTRUMENT && SELECTED_INSTRUMENT === NEAREST_INSTRUMENT)) return;
-						const url = '/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=all';
-						const data = await (await fetch(url)).json();
-						const points = data.points || [];
-						const latest = points.length ? points[points.length - 1] : null;
-						if (!latest) return;
-						const legs = [
-							{ price: latest.bcg_price, value: latest.bcg_value },
-							{ price: latest.bpg_price, value: latest.bpg_value },
-							{ price: latest.scg_price, value: latest.scg_value },
-							{ price: latest.spg_price, value: latest.spg_value },
-						].filter(leg => leg.price);
-						if (!legs.length) return;
-						const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
-						const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
-						avgGammaN1PriceLine = series.createPriceLine({
-							price: avgPrice, color: AVG_GAMMA_N1_COLOR, lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.Dotted,
-							axisLabelVisible: true, axisLabelColor: AVG_GAMMA_N1_COLOR,
-							title: 'AVG N+1 ' + formatAbbreviated(avgValue),
-						});
-					}
-
 					function applyTheme() {
 						document.body.classList.toggle('dark', DARK_MODE);
 						chart.applyOptions({
@@ -1064,7 +996,6 @@
 							await loadCandles();
 							await loadExpiries();
 							await refreshFourLegGamma();
-							await refreshAvgGammaN1();
 							await refreshLastTrade();
 							setStatus(statusText());
 						}
@@ -1075,13 +1006,9 @@
 					// Every "Expiry" option now isolates to a single
 					// instrument (see SELECTED_INSTRUMENT above) — no more
 					// cumulative "all expiries at once" mode to skip polling
-					// for, so this always refreshes. refreshAvgGammaN1() is
-					// cheap to call unconditionally every tick — it no-ops
-					// (just clears its own line) whenever the current
-					// selection isn't the nearest expiry.
+					// for, so this always refreshes.
 					setInterval(() => {
 						refreshFourLegGamma();
-						refreshAvgGammaN1();
 					}, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
