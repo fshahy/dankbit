@@ -100,13 +100,27 @@
 						padding: 2px 10px; border-radius: 4px;
 						z-index: 10; pointer-events: none;
 					}
+					/* --tf-bar-bottom is set by repositionBelowToolbar() below to
+					   #tf-bar's own measured bottom edge — the fallback values
+					   here (36/40px) match its original fixed single-row
+					   height, so nothing shifts before that first JS pass runs.
+					   #tf-bar wraps onto extra rows on a narrow viewport
+					   (flex-wrap below) rather than overflowing off-screen, and
+					   #exchange-label/#ruler-info (stacked underneath it) track
+					   that dynamic height instead of a hardcoded offset, so a
+					   taller (wrapped) toolbar can never overlap them. Its own
+					   max-width reserves 80px on the right (same margin
+					   #exchange-label's old right:80px slot used) so a wrapped
+					   row's last item never sits under Lightweight Charts' own
+					   right price scale, which has no fixed width of its own
+					   to measure against. */
 					#tf-bar {
 						position: fixed; top: 8px; left: 12px;
 						display: flex; gap: 4px; align-items: center; z-index: 10;
-						flex-wrap: wrap; max-width: calc(100vw - 24px);
+						flex-wrap: wrap; max-width: calc(100vw - 12px - 80px);
 					}
 					#exchange-label {
-						position: fixed; top: 8px; right: 80px;
+						position: fixed; top: var(--tf-bar-bottom, 36px); left: 12px;
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 2px 10px; border-radius: 4px; border: 1px solid #ccc;
@@ -117,7 +131,7 @@
 						color: #555; padding: 0 2px;
 					}
 					#ruler-info {
-						position: fixed; top: 40px; left: 12px;
+						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 4px); left: 12px;
 						font-family: monospace; font-size: 12pt; font-weight: bold;
 						color: #222; background: rgba(255,255,255,0.92);
 						padding: 3px 12px; border-radius: 4px; border: 1px solid #ccc;
@@ -240,8 +254,8 @@
 					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="auto">Auto (Time to Expiry)</option>
-						<option value="24" selected="selected">24h</option>
+						<option value="auto" selected="selected">Auto (Time to Expiry)</option>
+						<option value="24">24h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -353,10 +367,11 @@
 					// still later product decision, then "All" was made the
 					// default again per a further product decision, then
 					// "24h" was made the default per a still later product
-					// decision — see main.py's own
+					// decision, then back to "Auto" per a still later
+					// product decision — see main.py's own
 					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
 					// the current full history.)
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 'auto';
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
@@ -504,6 +519,19 @@
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
 					});
+					// #tf-bar wraps onto extra rows on a narrow viewport (see its
+					// own CSS comment) — #exchange-label/#ruler-info (stacked
+					// underneath it) track its actual measured bottom edge via
+					// this custom property instead of a hardcoded offset, so a
+					// taller (wrapped) toolbar can never overlap them.
+					function repositionBelowToolbar() {
+						const bar = document.getElementById('tf-bar');
+						if (!bar) return;
+						const bottom = Math.ceil(bar.getBoundingClientRect().bottom);
+						document.documentElement.style.setProperty('--tf-bar-bottom', bottom + 'px');
+					}
+					window.addEventListener('resize', repositionBelowToolbar);
+					repositionBelowToolbar();
 
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
@@ -740,6 +768,10 @@
 						NEAREST_INSTRUMENT = expiries.length ? expiries[0] : null;
 						SELECTED_INSTRUMENT = NEAREST_INSTRUMENT;
 						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
+						// The Expiry select's own width can change once real
+						// instrument strings replace its initial empty state,
+						// which can shift how #tf-bar wraps.
+						repositionBelowToolbar();
 					}
 
 					async function setWindow(hours) {
