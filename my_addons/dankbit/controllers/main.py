@@ -2300,6 +2300,30 @@ class ChartController(http.Controller):
         ordinary isolated behavior if that instrument has no trades at
         all (nothing to resolve a cutoff expiration from).
 
+        A separate `?from_instrument=`/`?to_instrument=` query param pair —
+        both required together, and taking priority over `?instrument=`/
+        `?expiry=` entirely — switches to a CUMULATIVE domain spanning
+        every one of `asset`'s own instruments whose own `expiration` falls
+        between the two resolved expirations, inclusive (order-independent
+        — swapped if given backwards). Each side is resolved to its own
+        expiration via the same single-row trade lookup `?instrument=`'s
+        own `?hours=auto`/`?cumulative=` handling already performs; falling
+        back to the ordinary `?instrument=`/`?expiry=` resolution (or empty
+        trades if neither is set) if either side's lookup finds no trades
+        at all. Used by /ft/<asset> (the FT — "From/To" — Chart)'s own
+        "From"/"To" Expiry dropdowns, each populated the same way
+        /4l/<asset>'s own single "Expiry" dropdown is (`/api/expiries/<asset>`).
+        The trailing-hours Window (`?hours=`) still applies on top, same as
+        every other branch — including `?hours=auto`: the range's own
+        farther-out (later, post-swap) edge is used as the `_auto_window_hours()`
+        time-to-expiry reference, the same role a single resolved
+        instrument's own expiration plays for every other `?hours=auto`
+        path in this method. Response echoes the resolved
+        `from_instrument`/`to_instrument` strings (`None` on any other
+        path), alongside the existing `instrument` field (`None` here too,
+        since this is a range rather than a single instrument, same as the
+        cumulative "all" branch below).
+
         An optional `?as_of=` query param (see _parse_as_of_param)
         substitutes for "now" everywhere in this function — every
         `?expiry=`/`?instrument=`/`?hours=`
@@ -2362,45 +2386,86 @@ class ChartController(http.Controller):
         # ordinal Nearest/Nearest+1/Nearest+2 family below uses.
         instrument_override = (request.httprequest.args.get("instrument") or "").upper() or None
         cumulative_param = (request.httprequest.args.get("cumulative") or "").lower() in ("1", "true")
-        if instrument_override:
-            instrument = instrument_override
-            if hours_param == "auto" or cumulative_param:
-                exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
-                    [("name", "=ilike", f"{instrument}-%")], limit=1,
-                )
-                if exp_trade:
-                    target_expiration = exp_trade.expiration
-        elif expiry_mode in expiry_ordinals:
-            expiry_index = expiry_ordinals[expiry_mode]
-            expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
-            if len(expirations) > expiry_index:
-                target_expiration = expirations[expiry_index]
-                instrument = bands_model._format_instrument(asset, target_expiration)
-        elif expiry_mode in ("weekly", "monthly"):
-            # weekly/monthly — ISOLATED to that one configured instrument's
-            # own trades, same anchored `=ilike` domain (and active_test
-            # bypass, in case that instrument has since expired and been
-            # archived) the ordinal Nearest/Nearest+1/Nearest+2 family
-            # above uses. Previously CUMULATIVE through every active
-            # instrument up to that expiry's own date (the "all" branch
-            # below still is); changed per product decision so Weekly/
-            # Monthly line up with the ordinal family's single-instrument
-            # isolation instead.
-            if asset == "ETH":
-                expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+        # `?from_instrument=`/`?to_instrument=` — sent by /ft/<asset>'s own
+        # "From"/"To" Expiry dropdowns (each a real instrument string, same
+        # as `?instrument=` above, not a mode). Takes priority over both
+        # `?instrument=` and `?expiry=` entirely: trades are CUMULATIVE
+        # across every one of `asset`'s own instruments whose own
+        # `expiration` falls between the two resolved expirations,
+        # inclusive — order-independent (swapped if given backwards), so
+        # picking "From" after "To" in the UI still works. Each side is
+        # resolved to its own expiration the same way `?instrument=`'s own
+        # `?hours=auto`/`?cumulative=` lookup already does — a cheap
+        # single-row trade search, since every instrument this dropdown can
+        # offer (sourced from /api/expiries/<asset>, i.e.
+        # dankbit.bands._distinct_expirations()) has at least one trade by
+        # construction. Falls through to the ordinary `?instrument=`/
+        # `?expiry=` resolution below (empty trades if neither of those is
+        # set either) if either side's own trade lookup comes up empty —
+        # same nothing-computable-yet convention every other route in this
+        # file follows, rather than fabricating a one-sided range.
+        from_instrument_param = (request.httprequest.args.get("from_instrument") or "").upper() or None
+        to_instrument_param = (request.httprequest.args.get("to_instrument") or "").upper() or None
+        ft_range = bool(from_instrument_param and to_instrument_param)
+        from_expiration = None
+        to_expiration = None
+        if ft_range:
+            ft_trades = request.env["dankbit.trade"].with_context(active_test=False)
+            from_trade = ft_trades.search([("name", "=ilike", f"{from_instrument_param}-%")], limit=1)
+            to_trade = ft_trades.search([("name", "=ilike", f"{to_instrument_param}-%")], limit=1)
+            if from_trade and to_trade:
+                from_expiration, to_expiration = from_trade.expiration, to_trade.expiration
+                if from_expiration > to_expiration:
+                    from_expiration, to_expiration = to_expiration, from_expiration
+                # Feeds `?hours=auto` below (_auto_window_hours) — the
+                # range's own farthest-out (later) edge is the natural
+                # "time to expiry" reference for a cumulative range, same
+                # role the single resolved instrument's own expiration
+                # plays for every other `?hours=auto` path in this method.
+                target_expiration = to_expiration
             else:
-                expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
-            instrument = icp.get_param(expiry_param, default="").upper() or None
-            if instrument and hours_param == "auto":
-                # A cheap single-row lookup, only run when Auto actually
-                # needs a time-to-expiry — the weekly/monthly domain
-                # itself (below) never needed this instrument's own
-                # expiration datetime before Auto existed.
-                exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
-                    [("name", "=ilike", f"{instrument}-%")], limit=1,
-                )
-                if exp_trade:
-                    target_expiration = exp_trade.expiration
+                ft_range = False
+
+        if not ft_range:
+            if instrument_override:
+                instrument = instrument_override
+                if hours_param == "auto" or cumulative_param:
+                    exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                        [("name", "=ilike", f"{instrument}-%")], limit=1,
+                    )
+                    if exp_trade:
+                        target_expiration = exp_trade.expiration
+            elif expiry_mode in expiry_ordinals:
+                expiry_index = expiry_ordinals[expiry_mode]
+                expirations = bands_model._distinct_expirations(asset, as_of, expiry_index + 1)
+                if len(expirations) > expiry_index:
+                    target_expiration = expirations[expiry_index]
+                    instrument = bands_model._format_instrument(asset, target_expiration)
+            elif expiry_mode in ("weekly", "monthly"):
+                # weekly/monthly — ISOLATED to that one configured instrument's
+                # own trades, same anchored `=ilike` domain (and active_test
+                # bypass, in case that instrument has since expired and been
+                # archived) the ordinal Nearest/Nearest+1/Nearest+2 family
+                # above uses. Previously CUMULATIVE through every active
+                # instrument up to that expiry's own date (the "all" branch
+                # below still is); changed per product decision so Weekly/
+                # Monthly line up with the ordinal family's single-instrument
+                # isolation instead.
+                if asset == "ETH":
+                    expiry_param = "dankbit.eth_weekly_expiry" if expiry_mode == "weekly" else "dankbit.eth_monthly_expiry"
+                else:
+                    expiry_param = "dankbit.weekly_expiry" if expiry_mode == "weekly" else "dankbit.monthly_expiry"
+                instrument = icp.get_param(expiry_param, default="").upper() or None
+                if instrument and hours_param == "auto":
+                    # A cheap single-row lookup, only run when Auto actually
+                    # needs a time-to-expiry — the weekly/monthly domain
+                    # itself (below) never needed this instrument's own
+                    # expiration datetime before Auto existed.
+                    exp_trade = request.env["dankbit.trade"].with_context(active_test=False).search(
+                        [("name", "=ilike", f"{instrument}-%")], limit=1,
+                    )
+                    if exp_trade:
+                        target_expiration = exp_trade.expiration
 
         # "all" (?hours=all) skips the trailing-hours trade filter entirely;
         # "midnight" (?hours=midnight) restricts to trades since the most
@@ -2434,7 +2499,20 @@ class ChartController(http.Controller):
             window_start = as_of - timedelta(hours=hours)
 
         trades = request.env["dankbit.trade"]
-        if instrument_override:
+        if ft_range:
+            # From/To range — cumulative across every instrument whose own
+            # expiration falls between the two resolved expirations,
+            # inclusive. Same domain shape as the "all" cumulative branch
+            # below, just bounded on both ends instead of only a lower one.
+            domain = [
+                ("name", "=ilike", f"{asset}-%"),
+                ("expiration", ">=", from_expiration), ("expiration", "<=", to_expiration),
+                ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
+            ]
+            if window_start is not None:
+                domain.append(("deribit_ts", ">=", window_start))
+            trades = trades.with_context(active_test=False).search(domain)
+        elif instrument_override:
             if cumulative_param and instrument_override and target_expiration is not None:
                 # Cumulative from as_of through and including the selected
                 # expiry — every instrument in that expiration range, not
@@ -2516,7 +2594,11 @@ class ChartController(http.Controller):
         # echo of the request, but for "?hours=auto" it's the resolved
         # bucket _auto_window_hours() actually picked, which the client
         # has no other way to know (it only sent the literal "auto").
-        payload = {"asset": asset, "instrument": instrument, "window_hours": hours, "points": points}
+        payload = {
+            "asset": asset, "instrument": instrument, "window_hours": hours, "points": points,
+            "from_instrument": from_instrument_param if ft_range else None,
+            "to_instrument": to_instrument_param if ft_range else None,
+        }
         return request.make_response(
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
@@ -2627,6 +2709,96 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/ft/<string:asset>", type="http", auth="user", website=True)
+    def ft_chart(self, asset):
+        """"FT Chart" ("From/To" Chart) — a standalone TradingView page,
+        structurally a sibling of /4l/<asset> (four_leg_gamma_chart):
+        same Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/
+        SPG) + AVG line rendering, own "Timeframe"/"Theme"/"Ruler"/
+        "Settings" controls — but with /4l/<asset>'s single "Expiry"
+        dropdown replaced by a pair of "From"/"To" Expiry dropdowns, both
+        dynamically loaded from every currently active (non-expired)
+        instrument for the asset (loadExpiries(), same /api/expiries/<asset>
+        source /4l/<asset>'s own dropdown uses), each defaulting to the
+        nearest active expiry. Selecting both always draws the 4 gamma
+        legs + AVG CUMULATIVELY across every one of the asset's own
+        instruments whose own expiration falls between the two selected
+        expiries, inclusive (order-independent — picking them backwards
+        still works) — there is no per-instrument "isolate" mode on this
+        page, unlike /4l/<asset>'s own Expiry dropdown, and no separate
+        "Cumulative" checkbox, since cumulative-between-the-two-picks is
+        this page's only mode. Driven by /api/four-leg-gamma's own new
+        `?from_instrument=`/`?to_instrument=` param pair (see
+        four_leg_gamma_json's own docstring for the resolution/domain).
+        Own "Window" dropdown is deliberately narrower than /4l/<asset>'s
+        own (Auto/8h/12h/24h/All) — just "Auto", "24h" (default), and
+        "All" (FOUR_LEG_WINDOW_HOURS_CHOICES' own "24h" entry plus the
+        "Auto (Time to Expiry)" dynamic option and the "All" no-window-bound
+        option) — "Auto" (?hours=auto) sizes the trailing-hours window off
+        the selected range's own farther-out (later, post-swap) edge —
+        i.e. the "To" side's own settlement, or "From"'s if picked
+        backwards — via the same _auto_window_hours() bucket mapping
+        /4l/<asset>'s own "Auto" uses (see that function's docstring and
+        four_leg_gamma_json's own `?from_instrument=`/`?to_instrument=`
+        paragraph). Renders its own standalone template
+        (dankbit_ft_chart) — not dankbit_four_leg_gamma_chart, since the
+        From/To dropdown pair (and their own loadExpiries()-populated
+        option lists, dropdown ids, and fetch-URL construction) don't fit
+        that template's single-Expiry markup. Polls the 4 gamma-price
+        lines on the general dankbit.refresh_interval, same as /4l/<asset>
+        and every other page's own refresh rate — this page's own
+        cumulative-range computation is no heavier per-poll than /4l/
+        <asset>'s own "All"-Expiry cumulative mode already is, so there's
+        no reason to skip polling here the way that page skips it for its
+        Weekly/Monthly/All Expiry selections."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_ft_chart", ctx)
+
+    @http.route("/l24/<string:asset>", type="http", auth="user", website=True)
+    def l24_chart(self, asset):
+        """"L24" ("Last 24 Hours") — a standalone TradingView page, the
+        simplest sibling of /4l/<asset> (four_leg_gamma_chart): same
+        Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/SPG) +
+        AVG line rendering, own "Timeframe"/"Theme"/"Ruler"/"Settings"
+        controls — own "Timeframe" dropdown defaults to 1h here (was 4h,
+        matching /4l/<asset>'s own default, before a later product
+        decision) — no "Expiry" dropdown and no "Cumulative" checkbox at
+        all: the 4 gamma legs are always computed CUMULATIVELY across
+        every one of the asset's own active expiries. It does have its
+        own "Window" dropdown, though — 4h/8h/12h/24h, 24h default — that
+        picks the trailing-hours trade window for that computation, via
+        a `?expiry=all&hours=<N>` call against /api/four-leg-gamma/<asset>
+        (see four_leg_gamma_json's own docstring for both param's
+        resolution; 4/8/12/24 are already valid FOUR_LEG_WINDOW_HOURS_CHOICES
+        entries, so no route/query changes were needed here, just the
+        template wiring the dropdown to that existing `hours` param).
+        "L24" = "Last 24 Hours", still accurate as the dropdown's own
+        default. Also shades a light-orange fill between LP/SP (when LP
+        sits below SP) and between LC/SC (when LC sits above SC) — the
+        same `addBaselineSeries` flat-top/baseValue-bottom fill trick
+        `/4l/<asset>` originally carried before it was removed there
+        (2026-08-20); restored on this page only, per a later request.
+        Renders its own standalone template (dankbit_l24_chart) —
+        not dankbit_four_leg_gamma_chart, since that template's Expiry/
+        Cumulative markup and the JS state driving it (SELECTED_INSTRUMENT,
+        CUMULATIVE) don't apply here. Polls the 4 gamma-price lines on
+        the general dankbit.refresh_interval, same as /4l/<asset> and
+        every other page's own refresh rate."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_l24_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
