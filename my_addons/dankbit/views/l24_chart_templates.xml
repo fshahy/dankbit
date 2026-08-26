@@ -78,6 +78,17 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+					/* Checkbox toggle pill — same shape/class the Delta Chart's
+					   own S/D, Zones, Bands, etc. toggles use
+					   (dankbit_templates.xml). */
+					.toggle-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+						display: flex; align-items: center; gap: 4px;
+					}
+					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
@@ -162,11 +173,22 @@
 					}
 					body.dark #spinner { border-color: rgba(255,255,255,0.15); border-top-color: #ccc; }
 					@keyframes dankbit-spin { to { transform: rotate(360deg); } }
+
+					/* Vertical line marking the candle exactly 24 hours ago —
+					   see updateL24VLine() below for why this is a plain
+					   fixed-position DOM overlay rather than a chart series. */
+					#l24-vline {
+						position: fixed; top: 0; height: 100vh; width: 1px;
+						background: rgba(100,100,100,0.55);
+						z-index: 5; pointer-events: none; display: none;
+					}
+					body.dark #l24-vline { background: rgba(210,210,210,0.45); }
 				</style>
 			</head>
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="l24-vline"/>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -190,6 +212,10 @@
 						<option value="light">Light</option>
 						<option value="dark">Dark</option>
 					</select>
+					<label class="toggle-label">
+						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
+						24h Line
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
@@ -333,7 +359,9 @@
 
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
+						updateL24VLine();
 					});
+					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateL24VLine());
 					// #tf-bar wraps onto extra rows on a narrow viewport (see its
 					// own CSS comment) — #exchange-label/#ruler-info (stacked
 					// underneath it) track its actual measured bottom edge via
@@ -492,6 +520,74 @@
 							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
 						}
 						futureAxisSeries.setData(futureTicks);
+						updateL24VLine();
+					}
+
+					// Vertical line marking the candle exactly 24 hours ago —
+					// the fixed reference point this page's "L24" name still
+					// refers to, regardless of the selected Window/Timeframe.
+					// Lightweight Charts v4 has no native vertical-line
+					// primitive, so this is a plain fixed-position DOM overlay
+					// (same technique the Delta Chart's own Smart Liquidity
+					// term markers use — see CLAUDE.md), repositioned via
+					// chart.timeScale().timeToCoordinate() rather than drawn
+					// onto the chart's own canvas. Recomputes "24 hours ago"
+					// against the real current time on every call, so the
+					// line keeps advancing as time passes, not just on redraw.
+					//
+					// timeToCoordinate() only resolves a coordinate for a time
+					// that exactly matches an existing data/whitespace point
+					// on some series sharing this time axis (verified: it
+					// returns null for an arbitrary "now - 24h" instant, but a
+					// valid pixel for any real candle's own timestamp) — it
+					// does NOT interpolate an isolated point in between. So
+					// "24 hours ago" is first snapped to the nearest loaded
+					// candle at-or-before that instant (a binary search over
+					// realCandles, already sorted ascending) and that exact
+					// candle time is what's actually queried; the resulting
+					// line can be up to half a bar-interval off "24h ago",
+					// which is immaterial at this line's scale.
+					function nearestCandleTimeAtOrBefore(t) {
+						if (!realCandles.length) return null;
+						let lo = 0, hi = realCandles.length - 1, ans = -1;
+						while (lo <= hi) {
+							const mid = (lo + hi) >> 1;
+							if (realCandles[mid].time <= t) { ans = mid; lo = mid + 1; }
+							else hi = mid - 1;
+						}
+						return ans === -1 ? realCandles[0].time : realCandles[ans].time;
+					}
+
+					// "24h Line" checkbox (right after "Theme", checked by
+					// default) — a plain client-side show/hide flag, same
+					// pattern the Delta Chart's own S/D/Zones/Bands toggles
+					// use. Unchecking it just stops updateL24VLine() from
+					// showing the line (still recomputed on every call, no
+					// fetch involved either way, so there's no server-load
+					// reason to skip computation while off).
+					let SHOW_VLINE = true;
+					function onToggleVLine() {
+						SHOW_VLINE = document.getElementById('vline-toggle').checked;
+						updateL24VLine();
+					}
+
+					function updateL24VLine() {
+						const vline = document.getElementById('l24-vline');
+						if (!vline) return;
+						if (!SHOW_VLINE) {
+							vline.style.display = 'none';
+							return;
+						}
+						const t = Math.floor(Date.now() / 1000) - 24 * 3600 + tzOffset;
+						const snapped = nearestCandleTimeAtOrBefore(t);
+						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
+						if (x === null || x === undefined) {
+							vline.style.display = 'none';
+							return;
+						}
+						const rect = chartContainerEl.getBoundingClientRect();
+						vline.style.left = Math.round(rect.left + x) + 'px';
+						vline.style.display = 'block';
 					}
 
 					function resetChartView() {
@@ -536,6 +632,12 @@
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
 						applyVisibleRange();
+						// rebuildSeriesData() already calls updateL24VLine() once,
+						// but that happens BEFORE applyVisibleRange() establishes
+						// the real visible window on first load — recompute here
+						// too so the line reflects the actual window immediately
+						// rather than waiting for the next pan/zoom/resize/5s poll.
+						updateL24VLine();
 					}
 
 					async function updateLatestCandle() {
@@ -825,6 +927,7 @@
 					setInterval(updateLatestCandle, 5000);
 					setInterval(refreshFourLegGamma, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
+					setInterval(updateL24VLine, 5000);
 				//]]></script>
 			</body>
 		</html>
