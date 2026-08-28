@@ -327,16 +327,12 @@
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
-						<option value="1h" selected="selected">1h</option>
-						<option value="4h">4h</option>
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="2">2h</option>
-						<option value="4">4h</option>
-						<option value="8">8h</option>
-						<option value="12">12h</option>
 						<option value="24" selected="selected">24h</option>
 						<option value="48">48h</option>
 						<option value="72">3d</option>
@@ -356,7 +352,7 @@
 						24h Line
 					</label>
 					<label class="toggle-label">
-						<input type="checkbox" id="vline48-toggle" checked="checked" onchange="onToggleVLine(48)"/>
+						<input type="checkbox" id="vline48-toggle" onchange="onToggleVLine(48)"/>
 						48h Line
 					</label>
 					<label class="toggle-label">
@@ -419,10 +415,10 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// "Timeframe" dropdown — same options as /4l/<asset>'s own
-					// dropdown, default 1h here (was 4h) — see TF_WINDOW below
-					// for the per-timeframe visible-window convention this page
+					// dropdown, default 4h — see TF_WINDOW below for the
+					// per-timeframe visible-window convention this page
 					// shares with it.
-					let INTERVAL = '1h';
+					let INTERVAL = '4h';
 					// Coinbase spot, same symbol convention /4l/<asset> and
 					// /tm/<asset> use (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -431,7 +427,8 @@
 					// This page has no "Expiry"/"Cumulative" controls at all — the
 					// 4 gamma legs are always computed cumulatively across every
 					// one of ASSET's own active expiries — but it does have its
-					// own "Window" dropdown (4h/8h/12h/24h/48h, 24h default)
+					// own "Window" dropdown (24h/48h/3d/4d/5d/10d/20d/30d/All,
+					// 24h default)
 					// restricting the trailing-hours trade window, via the same
 					// ?hours= param /4l/<asset>'s own Window dropdown uses (see
 					// four_leg_gamma_json's own docstring in main.py).
@@ -730,10 +727,8 @@
 					// {hours, elementId, checkboxId, defaultShown} — driving
 					// the checkboxes right after "Theme" ("24h Line"/
 					// "48h Line"/"3d Line"/"4d Line"/"5d Line"/"10d Line"/
-					// "20d Line"/"30d Line"; 24h/48h checked by default,
-					// every other one unchecked; there is no "2h Line"
-					// checkbox — the Window dropdown's own "2h" option has
-					// no matching reference-line marker). Table-driven
+					// "20d Line"/"30d Line"; 24h checked by default, every
+					// other one unchecked). Table-driven
 					// (rather than a hand-duplicated flag/toggle-function/
 					// update-function triplet per line, the original
 					// pattern through 5 lines) since this list keeps
@@ -746,7 +741,7 @@
 					// reason to skip computation while off).
 					const VLINE_DEFS = [
 						{ hours: 24, elementId: 'l24-vline', checkboxId: 'vline-toggle', defaultShown: true },
-						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: true },
+						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: false },
 						{ hours: 72, elementId: 'l72-vline', checkboxId: 'vline72-toggle', defaultShown: false },
 						{ hours: 96, elementId: 'l96-vline', checkboxId: 'vline96-toggle', defaultShown: false },
 						{ hours: 120, elementId: 'l120-vline', checkboxId: 'vline120-toggle', defaultShown: false },

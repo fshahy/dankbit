@@ -8,9 +8,12 @@
 	     controls, same always-CUMULATIVE-across-every-active-expiry 4-leg
 	     computation (no "Expiry" dropdown/"Cumulative" checkbox — those were
 	     this page's own /4l-based controls before the rebuild, removed since
-	     /l24 has neither), same light-orange LP/SP+LC/SC fill, same 8
-	     togglable "N ago" vertical reference lines + labels, and the same
-	     "Refresh Lines" button. The one structural difference from /l24
+	     /l24 has neither), same light-orange LP/SP+LC/SC fill, and same 8
+	     togglable "N ago" vertical reference lines + labels — but no
+	     "Refresh Lines" button: unlike /l24, this page never polls, so
+	     there is no live state to force a re-fetch of (see below); manually
+	     changing As Of/Timeframe/Window is already how a fresh read happens
+	     here. The one structural difference from /l24
 	     itself: everything on this page is anchored to a user-picked "As Of"
 	     date/time instead of "now" — candles end at that moment instead of
 	     the live present, the 4-leg gamma computation is cumulative across
@@ -188,7 +191,7 @@
 					/* Shown while any fetch driven by As Of/Timeframe/Window is
 					   in flight — this page has no live poll, so a fetch only
 					   ever happens in direct response to the user changing one
-					   of those controls (or the "Refresh Lines" button). */
+					   of those controls. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -347,10 +350,6 @@
 					</select>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="2">2h</option>
-						<option value="4">4h</option>
-						<option value="8">8h</option>
-						<option value="12">12h</option>
 						<option value="24" selected="selected">24h</option>
 						<option value="48">48h</option>
 						<option value="72">3d</option>
@@ -370,7 +369,7 @@
 						24h Line
 					</label>
 					<label class="toggle-label">
-						<input type="checkbox" id="vline48-toggle" checked="checked" onchange="onToggleVLine(48)"/>
+						<input type="checkbox" id="vline48-toggle" onchange="onToggleVLine(48)"/>
 						48h Line
 					</label>
 					<label class="toggle-label">
@@ -398,7 +397,6 @@
 						30d Line
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
-					<button class="tf-btn" id="refresh-lines-btn" onclick="refreshFourLegGamma()">Refresh Lines</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
@@ -536,10 +534,10 @@
 					// (removed in the /l24-based rebuild) — the 4 gamma legs
 					// are always computed cumulatively across every one of
 					// ASSET's own expiries active AS OF AS_OF_ISO. It does
-					// have its own "Window" dropdown (2h/4h/8h/12h/24h/48h/
-					// 3d/4d/5d/10d/20d/30d, 24h default), same choice set
-					// /l24/<asset>'s own uses, restricting the trailing-hours
-					// trade window ending at AS_OF_ISO instead of "now".
+					// have its own "Window" dropdown (24h/48h/3d/4d/5d/10d/
+					// 20d/30d, 24h default), same choice set /l24/<asset>'s
+					// own uses, restricting the trailing-hours trade window
+					// ending at AS_OF_ISO instead of "now".
 					let WINDOW_HOURS = 24;
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + WINDOW_HOURS
@@ -684,8 +682,7 @@
 					// The 4 gamma "lines" are horizontal reference lines at the
 					// resolved As-Of/Window reading — same createPriceLine()
 					// pattern /l24/<asset> uses — redrawn fresh whenever As
-					// Of/Timeframe/Window changes (or "Refresh Lines" is
-					// clicked).
+					// Of/Timeframe/Window changes.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
@@ -770,14 +767,13 @@
 
 					// "N ago" reference-line definitions — same table-driven
 					// shape/8-line set/checkbox-default split /l24/<asset>
-					// uses (24h/48h checked by default, the rest unchecked;
-					// no "2h Line" checkbox, since the Window dropdown's own
-					// "2h" option has no matching marker). The one difference
-					// from /l24: "ago" is measured back from AS_OF_ISO here,
-					// not real "now" — see positionVLine() below.
+					// uses (24h checked by default, the rest unchecked). The
+					// one difference from /l24: "ago" is measured back from
+					// AS_OF_ISO here, not real "now" — see positionVLine()
+					// below.
 					const VLINE_DEFS = [
 						{ hours: 24, elementId: 'l24-vline', checkboxId: 'vline-toggle', defaultShown: true },
-						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: true },
+						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: false },
 						{ hours: 72, elementId: 'l72-vline', checkboxId: 'vline72-toggle', defaultShown: false },
 						{ hours: 96, elementId: 'l96-vline', checkboxId: 'vline96-toggle', defaultShown: false },
 						{ hours: 120, elementId: 'l120-vline', checkboxId: 'vline120-toggle', defaultShown: false },

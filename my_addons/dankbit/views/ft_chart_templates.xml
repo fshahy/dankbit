@@ -182,6 +182,10 @@
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
 						<option value="24" selected="selected">24h</option>
+						<option value="48">48h</option>
+						<option value="72">3d</option>
+						<option value="96">4d</option>
+						<option value="120">5d</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -190,6 +194,7 @@
 						<option value="dark">Dark</option>
 					</select>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
+					<button class="tf-btn" id="refresh-lines-btn" onclick="refreshFourLegGamma()">Refresh Lines</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
@@ -646,40 +651,42 @@
 								});
 							}
 							if (latest.scg_price) {
-								const smartLiqCall = Math.abs(latest.bcg_value) + Math.abs(latest.scg_value);
 								scgPriceLine = series.createPriceLine({
 									price: latest.scg_price, color: chartColors.scg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: chartColors.scg,
-									title: 'SC ' + formatAbbreviated(latest.scg_value) + ' | ' + formatAbbreviated(smartLiqCall),
+									title: 'SC ' + formatAbbreviated(latest.scg_value),
 								});
 							}
 							if (latest.spg_price) {
-								const smartLiqPut = Math.abs(latest.bpg_value) + Math.abs(latest.spg_value);
 								spgPriceLine = series.createPriceLine({
 									price: latest.spg_price, color: chartColors.spg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: chartColors.spg,
-									title: 'SP ' + formatAbbreviated(latest.spg_value) + ' | ' + formatAbbreviated(smartLiqPut),
+									title: 'SP ' + formatAbbreviated(latest.spg_value),
 								});
 							}
 							// Average of the legs' own gamma PRICE levels, over
 							// whichever legs are actually present (0.0 = absent) —
 							// same convention /4l/<asset>'s own AVG line uses.
 							const gammaLegs = [
-								{ price: latest.bcg_price, value: latest.bcg_value },
-								{ price: latest.bpg_price, value: latest.bpg_value },
-								{ price: latest.scg_price, value: latest.scg_value },
-								{ price: latest.spg_price, value: latest.spg_value },
+								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
+								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
+								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
+								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
 							].filter(leg => leg.price);
 							if (gammaLegs.length) {
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
+								// Dominant leg — whichever present leg has the largest
+								// |gamma value| — appended to the label so the AVG line
+								// also communicates which single leg is driving it.
+								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
 								avgGammaPriceLine = series.createPriceLine({
 									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
 									axisLabelVisible: true, axisLabelColor: chartColors.avg,
-									title: 'AVG ' + formatAbbreviated(avgGammaValue),
+									title: 'AVG ' + formatAbbreviated(avgGammaValue) + ' | ' + dominantLeg.name,
 								});
 							}
 						} finally {
