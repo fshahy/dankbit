@@ -8,32 +8,46 @@
 	     controls, same always-CUMULATIVE-across-every-active-expiry 4-leg
 	     computation (no "Expiry" dropdown/"Cumulative" checkbox — those were
 	     this page's own /4l-based controls before the rebuild, removed since
-	     /l24 has neither), same light-orange LP/SP+LC/SC fill, and same 8
-	     togglable "N ago" vertical reference lines + labels — but no
-	     "Refresh Lines" button: unlike /l24, this page never polls, so
-	     there is no live state to force a re-fetch of (see below); manually
-	     changing As Of/Timeframe/Window is already how a fresh read happens
-	     here. The one structural difference from /l24
+	     /l24 has neither), same light-orange LP/SP+LC/SC fill, same
+	     "Window" dropdown (1h..72h in 1-hour steps then 4d/5d, 24h default,
+	     options from the `window_hours` context list), and the same single vertical
+	     reference line + label at the start of the currently selected
+	     trailing Window (this replaced an earlier set of 8 per-duration
+	     "N Line" checkboxes on both pages, per product decision
+	     (2026-08-29)), shown/hidden via the same "Window Line" checkbox
+	     (right after "Theme", checked by default; VLINE_SHOWN — a plain
+	     client-side toggle, no fetch effect) — but no "Refresh Lines"
+	     button: unlike /l24, this
+	     page never polls, so there is no live state to force a re-fetch of
+	     (see below); manually changing As Of/Timeframe/Window is already how
+	     a fresh read happens here. The one structural difference from /l24
 	     itself: everything on this page is anchored to a user-picked "As Of"
-	     date/time instead of "now" — candles end at that moment instead of
+	     date/time instead of "now". That picker (and the URL's own `?as_of=`)
+	     is EUROPE/BERLIN wall-clock time, DST-aware — per product decision,
+	     since this Thales tool's users think in Berlin time; it is converted
+	     to UTC client-side (berlinNaiveToUtcIso(), the single conversion
+	     point) before any backend call, so the server still only ever
+	     receives UTC (AS_OF_ISO), matching this addon's UTC-anchored
+	     trade-window convention. Candles end at that moment instead of
 	     the live present, the 4-leg gamma computation is cumulative across
 	     every expiry active AS OF that moment (`?expiry=all&hours=<N>
 	     &as_of=<AS_OF_ISO>` against /api/four-leg-gamma/<asset> — the same
 	     `?expiry=all` cumulative branch /l24/<asset> uses, its own
 	     `active_test=False` bypass and `expiration >= as_of` condition
 	     already built to serve exactly this historical case even before this
-	     page's own rebuild — no backend change was needed here), and the 8
-	     "N ago" vertical lines are each measured back from AS_OF_ISO instead
-	     of real "now" (so "24h Line" shows what the chart looked like 24h
-	     before the inspected moment, not 24h before actual current time) —
-	     per explicit product decision, since "testing the past" only makes
-	     sense relative to the moment being inspected. A past "as of" moment
-	     is frozen by definition, so unlike /l24/<asset> this page has NO
-	     auto-refresh timer at all (no periodic candle/gamma-leg/vline poll):
-	     every fetch (candles/gamma legs) and every vline reposition only
-	     re-runs when the user changes As Of/Timeframe/Window by hand, or
-	     pans/zooms/resizes the chart — there's nothing to keep advancing in
-	     real time once AS_OF_ISO stops moving. See main.py's
+	     page's own rebuild — no backend change was needed here), and the
+	     Window vertical line is measured back from AS_OF_ISO instead of
+	     real "now" (so Window=24h shows where the trailing window started
+	     24h before the inspected moment, not 24h before actual current
+	     time) — per explicit product decision, since "testing the past"
+	     only makes sense relative to the moment being inspected. A past
+	     "as of" moment is frozen by definition, so unlike /l24/<asset>
+	     this page has NO auto-refresh timer at all (no periodic
+	     candle/gamma-leg/vline poll): every fetch (candles/gamma legs) and
+	     every vline reposition only re-runs when the user changes As
+	     Of/Timeframe/Window by hand, or pans/zooms/resizes the chart —
+	     there's nothing to keep advancing in real time once AS_OF_ISO
+	     stops moving. See main.py's
 	     time_machine_chart for the full route docstring — this page adds no
 	     new backend computation of its own, it just asks
 	     /api/klines-coinbase and /api/four-leg-gamma (the same 2 endpoints
@@ -111,8 +125,8 @@
 					}
 					/* Checkbox toggle pill — same shape/class the Delta Chart's
 					   own S/D, Zones, Bands, etc. toggles use
-					   (dankbit_templates.xml), and /l24/&lt;asset&gt;'s own "N ago"
-					   line checkboxes. */
+					   (dankbit_templates.xml). Used here for the "Window Line"
+					   show/hide checkbox. */
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -121,7 +135,6 @@
 						display: flex; align-items: center; gap: 4px;
 					}
 					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
-
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
 					   other standalone TV page in this addon. */
@@ -203,107 +216,45 @@
 					body.dark #spinner { border-color: rgba(255,255,255,0.15); border-top-color: #ccc; }
 					@keyframes dankbit-spin { to { transform: rotate(360deg); } }
 
-					/* Vertical line marking the candle exactly 24 hours before
-					   AS_OF_ISO (not real "now" — see this file's own top
-					   docstring for why) — see positionVLine()/VLINE_DEFS
-					   below for why this is a plain fixed-position DOM overlay
-					   rather than a chart series. Each line's own text label
-					   (".vline-label", e.g. "#l24-vline-label") is a sibling
-					   overlay rather than baked into the line itself,
-					   positioned/shown by the same positionVLine() call — see
-					   the shared ".vline-label" rule below for its common
-					   shape; only each id's own text COLOR is set here,
-					   matching that line's own hue (solid, not the line's own
-					   translucent alpha) so the label stays legible against
-					   the chart background. Same 8-line set/colors
-					   /l24/&lt;asset&gt; uses. */
-					#l24-vline {
+					/* Single vertical line marking the start of the currently
+					   selected trailing Window, measured back from AS_OF_ISO
+					   (not real "now" — see this file's own top docstring for
+					   why) — e.g. Window=24h puts it at the candle 24h before
+					   the inspected moment. Redrawn on every Window change, no
+					   checkbox (this replaced an earlier set of 8 per-duration
+					   "N Line" checkboxes on both this page and /l24/&lt;asset&gt;).
+					   Lightweight Charts v4 has no native vertical-line
+					   primitive, so this is a plain fixed-position DOM overlay
+					   (same technique the Delta Chart's own Smart Liquidity
+					   term markers use), repositioned via
+					   chart.timeScale().timeToCoordinate() — see
+					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
+					   Its label ("#window-vline-label", ".vline-label" class)
+					   shows the selected window (e.g. "12h"/"48h") and is
+					   positioned/shown by the same call. */
+					#window-vline {
 						position: fixed; top: 0; height: 100vh; width: 1px;
 						background: rgba(100,100,100,0.55);
 						z-index: 5; pointer-events: none; display: none;
 					}
-					body.dark #l24-vline { background: rgba(210,210,210,0.45); }
-					#l24-vline-label { color: #646464; }
-					body.dark #l24-vline-label { color: #d2d2d2; }
+					body.dark #window-vline { background: rgba(210,210,210,0.45); }
+					#window-vline-label { color: #646464; }
+					body.dark #window-vline-label { color: #d2d2d2; }
 
-					#l48-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(33,150,243,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l48-vline { background: rgba(100,181,246,0.55); }
-					#l48-vline-label { color: #2196f3; }
-					body.dark #l48-vline-label { color: #64b5f6; }
-
-					#l72-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(156,39,176,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l72-vline { background: rgba(206,147,216,0.55); }
-					#l72-vline-label { color: #9c27b0; }
-					body.dark #l72-vline-label { color: #ce93d8; }
-
-					#l96-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(233,30,99,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l96-vline { background: rgba(240,152,180,0.55); }
-					#l96-vline-label { color: #e91e63; }
-					body.dark #l96-vline-label { color: #f098b4; }
-
-					#l120-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(245,124,0,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l120-vline { background: rgba(255,183,77,0.55); }
-					#l120-vline-label { color: #f57c00; }
-					body.dark #l120-vline-label { color: #ffb74d; }
-
-					#l240-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(56,142,60,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l240-vline { background: rgba(129,199,132,0.55); }
-					#l240-vline-label { color: #388e3c; }
-					body.dark #l240-vline-label { color: #81c784; }
-
-					#l480-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(63,81,181,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l480-vline { background: rgba(159,168,218,0.55); }
-					#l480-vline-label { color: #3f51b5; }
-					body.dark #l480-vline-label { color: #9fa8da; }
-
-					#l720-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(121,85,72,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l720-vline { background: rgba(188,170,164,0.55); }
-					#l720-vline-label { color: #795548; }
-					body.dark #l720-vline-label { color: #bcaaa4; }
-
-					/* Shared shape for every "N ago" line's own text label
-					   (e.g. "24h"/"3d") — positioned just below the toolbar/
+					/* Shape for the Window line's own text label (e.g.
+					   "24h"/"48h") — positioned just below the toolbar/
 					   exchange-label stack (same --tf-bar-bottom var those
 					   use, see its own comment above, plus extra clearance
 					   so it sits under #ruler-info too whether or not the
 					   ruler is active) rather than near the line's own full-
 					   height span, so it can never end up buried behind a
 					   candle mid-chart. Horizontally centered on the line's
-					   own x coordinate (positionVLine() sets `left` to that
-					   x; the translateX below does the centering) and hidden
-					   by default — shown/hidden and repositioned by the same
-					   positionVLine() call that already drives the line
-					   itself, so the two can never drift out of sync. Each
-					   id's own text color is set above, next to that same
-					   id's own #lNNN-vline background color. */
+					   own x coordinate (updateWindowVLine() sets `left` to
+					   that x; the translateX below does the centering) and
+					   hidden by default — shown/hidden and repositioned by
+					   the same updateWindowVLine() call that already drives
+					   the line itself, so the two can never drift out of
+					   sync. */
 					.vline-label {
 						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 34px);
 						transform: translateX(-50%);
@@ -318,46 +269,32 @@
 			<body>
 				<div t-att-data-asset="asset" t-att-data-as-of="as_of" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
-				<div id="l24-vline"/>
-				<div id="l24-vline-label" class="vline-label">24h</div>
-				<div id="l48-vline"/>
-				<div id="l48-vline-label" class="vline-label">48h</div>
-				<div id="l72-vline"/>
-				<div id="l72-vline-label" class="vline-label">3d</div>
-				<div id="l96-vline"/>
-				<div id="l96-vline-label" class="vline-label">4d</div>
-				<div id="l120-vline"/>
-				<div id="l120-vline-label" class="vline-label">5d</div>
-				<div id="l240-vline"/>
-				<div id="l240-vline-label" class="vline-label">10d</div>
-				<div id="l480-vline"/>
-				<div id="l480-vline-label" class="vline-label">20d</div>
-				<div id="l720-vline"/>
-				<div id="l720-vline-label" class="vline-label">30d</div>
+				<div id="window-vline"/>
+				<div id="window-vline-label" class="vline-label">24h</div>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="tf-bar">
-					<span class="tf-label">As Of (UTC):</span>
+					<span class="tf-label">As Of (Berlin):</span>
 					<input type="datetime-local" id="as-of-input" onchange="onAsOfChange()"/>
 					<button class="tf-btn" id="now-btn" onclick="jumpToNow()">Now</button>
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
-						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
+						<option value="1h" selected="selected">1h</option>
+						<option value="4h">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
+					<!-- 1h..72h in 1-hour steps, then 4d/5d — options are
+					     (hours, label) pairs from the `window_hours` context
+					     list (time_machine_chart -> _l24_window_options() in
+					     main.py); `window_default` is 24 (24h). Same dropdown
+					     as /l24/<asset>. -->
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="24" selected="selected">24h</option>
-						<option value="48">48h</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
-						<option value="240">10d</option>
-						<option value="480">20d</option>
-						<option value="720">30d</option>
+						<t t-foreach="window_hours" t-as="wh">
+							<option t-att-value="wh[0]" t-att-selected="'selected' if wh[0] == window_default else False"><t t-esc="wh[1]"/></option>
+						</t>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -365,36 +302,8 @@
 						<option value="dark">Dark</option>
 					</select>
 					<label class="toggle-label">
-						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine(24)"/>
-						24h Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline48-toggle" onchange="onToggleVLine(48)"/>
-						48h Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline72-toggle" onchange="onToggleVLine(72)"/>
-						3d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline96-toggle" onchange="onToggleVLine(96)"/>
-						4d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline120-toggle" onchange="onToggleVLine(120)"/>
-						5d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline240-toggle" onchange="onToggleVLine(240)"/>
-						10d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline480-toggle" onchange="onToggleVLine(480)"/>
-						20d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline720-toggle" onchange="onToggleVLine(720)"/>
-						30d Line
+						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
+						Window Line
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
@@ -432,101 +341,137 @@
 					// Server-rendered `?as_of=` from the page's own URL (see
 					// time_machine_chart's own docstring) — pre-fills the "As
 					// Of" input so a specific historical view is bookmarkable.
-					// Empty string (not set) means "start at now", same as a
-					// bare /tm/<asset> visit.
+					// Interpreted as EUROPE/BERLIN wall-clock time (the picker's
+					// own zone — see setAsOfInput()/berlinNaiveToUtcIso()
+					// below), same as a value the user types; it is converted
+					// to UTC client-side before any backend call. Empty string
+					// (not set) means "start at now", same as a bare
+					// /tm/<asset> visit.
 					const INITIAL_AS_OF = cfg.asOf || '';
 					// Coinbase spot, same symbol convention /l24/<asset>
 					// uses (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
 
-					// "As Of" — the single moment this whole page is frozen
-					// at. AS_OF_ISO is always "YYYY-MM-DDTHH:MM:SS" (seconds
-					// forced to :00 client-side — the <input type="datetime-
-					// local">'s own .value has no seconds — so the server's
+					// "As Of" — the single moment this whole page is frozen at.
+					// The <input type="datetime-local"> and the URL's own
+					// `?as_of=` are both EUROPE/BERLIN wall-clock time (DST-
+					// aware — the picker's label says "As Of (Berlin)"), per
+					// product decision, since this Thales tool's users think in
+					// Berlin time. AS_OF_ISO, by contrast, is always the
+					// equivalent naive-UTC "YYYY-MM-DDTHH:MM:SS" (converted from
+					// the Berlin input by berlinNaiveToUtcIso() in
+					// setAsOfInput(); seconds forced to :00 so the server's
 					// _parse_as_of_param (main.py) always gets a fully-formed
 					// ISO string regardless of Python's own fromisoformat
 					// version quirks around omitted seconds). Every fetch on
-					// this page appends `&as_of=` + this value, and the 8
-					// vertical reference lines below are measured back from
-					// it too (asOfEpochSeconds()), not from real "now".
+					// this page appends `&as_of=` + AS_OF_ISO (so the backend
+					// always receives UTC, matching this addon's UTC-anchored
+					// trade-window convention), and the Window vertical line
+					// below is measured back from it too (asOfEpochSeconds()),
+					// not from real "now".
 					let AS_OF_ISO = null;
 
 					function pad(n) { return String(n).padStart(2, '0'); }
 
-					// Formats a JS Date as the UTC "YYYY-MM-DDTHH:MM" string
-					// <input type="datetime-local"> expects for its own
-					// .value/default — the input has no timezone concept of
-					// its own, so this addon's usual UTC-anchored convention
-					// is applied by simply reading the UTC getters, not the
-					// local ones.
+					// Formats a JS Date as a naive-UTC "YYYY-MM-DDTHH:MM"
+					// string (UTC getters, not local) — used only as the tail
+					// end of berlinNaiveToUtcIso() below.
 					function toDatetimeLocalUTC(date) {
 						return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate())
 							+ 'T' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes());
 					}
 
-					// Europe/Berlin's current UTC offset in seconds (Berlin -
-					// UTC, positive), DST-aware (CET/CEST) via Intl's own
-					// timezone data rather than a fixed UTC+1/+2 guess — same
-					// "diff two toLocaleString renderings of the same instant"
-					// idiom the page-wide `tzOffset` above uses, just for
-					// Berlin instead of the viewer's own browser zone.
+					// Formats a JS Date as the Europe/Berlin wall-clock
+					// "YYYY-MM-DDTHH:00" string the <input type="datetime-
+					// local"> shows — DST-aware via Intl ('sv-SE' renders an
+					// ISO-like "YYYY-MM-DD HH:MM:SS"; the space becomes 'T').
+					// Minutes are ALWAYS truncated to :00 (per product
+					// decision — the picker only ever operates at hour
+					// granularity, matching the Window dropdown's own
+					// whole-hour steps and the hour-granular trade filtering
+					// downstream). Used for the "Now" button and, via
+					// defaultAsOfBerlinNaive(), the page's own default.
+					function toDatetimeLocalBerlin(date) {
+						return date.toLocaleString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(' ', 'T').slice(0, 13) + ':00';
+					}
+
+					// Europe/Berlin's UTC offset in seconds (Berlin - UTC,
+					// positive) at `refDate`, DST-aware (CET/CEST) via Intl's
+					// own timezone data rather than a fixed UTC+1/+2 guess —
+					// same "diff two toLocaleString renderings of the same
+					// instant" idiom the page-wide `tzOffset` above uses, just
+					// for Berlin instead of the viewer's own browser zone.
 					function berlinOffsetSeconds(refDate) {
 						const utc = new Date(refDate.toLocaleString('en-US', { timeZone: 'UTC' }));
 						const berlin = new Date(refDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
 						return (berlin - utc) / 1000;
 					}
 
+					// Converts a Berlin wall-clock "YYYY-MM-DDTHH:MM[:SS]"
+					// string (what the picker / URL `?as_of=` carry) to the
+					// equivalent naive-UTC "YYYY-MM-DDTHH:MM:SS" string
+					// (AS_OF_ISO — what every backend call and asOfEpochSeconds()
+					// expect). DST-aware: the offset is resolved for the TARGET
+					// date itself (CET vs CEST), not "now", by building a
+					// first-guess UTC instant from the wall-clock components and
+					// reading Berlin's offset at that instant. The ~1h
+					// ambiguity right at a DST transition (a nonexistent
+					// spring-forward hour, a doubled fall-back hour) is inherent
+					// to any naive-local→instant conversion and immaterial for a
+					// historical-inspection tool.
+					function berlinNaiveToUtcIso(berlinNaive) {
+						const [datePart, timePart] = berlinNaive.slice(0, 16).split('T');
+						const [y, m, d] = datePart.split('-').map(Number);
+						const [H, M] = timePart.split(':').map(Number);
+						const guessUTC = Date.UTC(y, m - 1, d, H, M, 0);
+						const offsetSec = berlinOffsetSeconds(new Date(guessUTC));
+						return toDatetimeLocalUTC(new Date(guessUTC - offsetSec * 1000)) + ':00';
+					}
+
 					// The page's own default "As Of" when no `?as_of=` was
-					// given on the URL — today's date at 15:30 Europe/Berlin
-					// local time, not the exact current instant (that's what
-					// the "Now" button is for). Uses BERLIN's own calendar
-					// day (via toLocaleDateString('en-CA', ...), which yields
-					// "YYYY-MM-DD"), not the browser's or UTC's, since those
-					// can disagree with Berlin's "today" for part of the day
-					// near midnight. Builds a UTC instant for 15:30 on that
-					// same calendar day, then shifts it back by Berlin's own
-					// current offset so the result is the real UTC moment
-					// that reads as 15:30 on a Berlin clock.
-					function defaultAsOfBerlin1530() {
-						const now = new Date();
-						const offsetSec = berlinOffsetSeconds(now);
-						const [y, m, d] = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }).split('-').map(Number);
-						const guessUTC = Date.UTC(y, m - 1, d, 15, 30, 0);
-						return new Date(guessUTC - offsetSec * 1000);
+					// given on the URL — the current Europe/Berlin date and
+					// hour, minutes truncated to :00 (e.g. 11:37 Berlin →
+					// "…T11:00"), per product decision. Just
+					// toDatetimeLocalBerlin(now), which already zeroes the
+					// minutes and resolves Berlin's own wall clock (DST-aware,
+					// and Berlin's own calendar day near midnight) for us.
+					function defaultAsOfBerlinNaive() {
+						return toDatetimeLocalBerlin(new Date());
 					}
 
 					function setAsOfInput(value) {
-						document.getElementById('as-of-input').value = value;
-						// Normalized to exactly "YYYY-MM-DDTHH:MM:SS" regardless
-						// of whether `value` already carries seconds (e.g. a
-						// server-rendered `?as_of=` from the page's own URL,
-						// which isn't guaranteed to match the plain "YYYY-MM-
-						// DDTHH:MM" shape the <input>'s own .value getter always
-						// produces) — sliced to the first 16 chars (dropping any
-						// existing seconds) before re-appending ':00', so this
-						// never produces a malformed double-seconds string.
-						AS_OF_ISO = value.slice(0, 16) + ':00';
+						// `value` is a Berlin wall-clock string — a typed value,
+						// the "Now" button's toDatetimeLocalBerlin(), or a
+						// server-rendered URL `?as_of=` (not guaranteed to match
+						// the plain "YYYY-MM-DDTHH:MM" shape the <input>'s own
+						// .value getter produces, so sliced to 16 chars first).
+						const berlin = value.slice(0, 16);
+						document.getElementById('as-of-input').value = berlin;
+						// AS_OF_ISO is the equivalent naive-UTC instant — this is
+						// the single Berlin→UTC conversion point on the page.
+						AS_OF_ISO = berlinNaiveToUtcIso(berlin);
 					}
 
-					// AS_OF_ISO has no explicit UTC suffix (this addon's usual
-					// naive-string-means-UTC convention), so a bare
-					// `new Date(AS_OF_ISO)` would parse it as browser-LOCAL
-					// time in most engines — appending 'Z' forces UTC parsing
-					// instead. Returns null if AS_OF_ISO isn't set yet (before
-					// setAsOfInput()'s first call), so callers can treat that
-					// as "nothing to position against" rather than NaN.
+					// AS_OF_ISO is a naive-UTC string (berlinNaiveToUtcIso()'s
+					// output), so a bare `new Date(AS_OF_ISO)` would parse it as
+					// browser-LOCAL time in most engines — appending 'Z' forces
+					// UTC parsing instead. Returns null if AS_OF_ISO isn't set
+					// yet (before setAsOfInput()'s first call), so callers can
+					// treat that as "nothing to position against" rather than
+					// NaN.
 					function asOfEpochSeconds() {
 						if (!AS_OF_ISO) return null;
 						return Math.floor(Date.parse(AS_OF_ISO + 'Z') / 1000);
 					}
 
 					// "Timeframe" dropdown — same options as /l24/<asset>'s
-					// own, still defaulting to 4h here (unchanged from this
-					// page's own pre-rebuild default) — see TF_WINDOW below
-					// for the per-timeframe visible-window convention this
-					// page shares with it.
-					let INTERVAL = '4h';
+					// own, defaulting to 1h here (was 4h — this page's own
+					// pre-rebuild default — changed per product decision to
+					// match /l24/<asset>'s own 1h default) — see TF_WINDOW
+					// below for the per-timeframe visible-window convention
+					// this page shares with it.
+					let INTERVAL = '1h';
 					const klineUrl = (iv, limit) =>
 						'/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit + '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
@@ -534,10 +479,11 @@
 					// (removed in the /l24-based rebuild) — the 4 gamma legs
 					// are always computed cumulatively across every one of
 					// ASSET's own expiries active AS OF AS_OF_ISO. It does
-					// have its own "Window" dropdown (24h/48h/3d/4d/5d/10d/
-					// 20d/30d, 24h default), same choice set /l24/<asset>'s
-					// own uses, restricting the trailing-hours trade window
-					// ending at AS_OF_ISO instead of "now".
+					// have its own "Window" dropdown (1h..72h in 1-hour steps
+					// then 4d/5d, 24h default — options rendered server-side
+					// from the `window_hours` context list, same as
+					// /l24/<asset>), restricting the trailing-hours trade
+					// window ending at AS_OF_ISO instead of "now".
 					let WINDOW_HOURS = 24;
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + WINDOW_HOURS
@@ -625,9 +571,9 @@
 
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
-						updateVLines();
+						updateWindowVLine();
 					});
-					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateVLines());
+					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateWindowVLine());
 					// #tf-bar wraps onto extra rows on a narrow viewport (see its
 					// own CSS comment) — #exchange-label/#ruler-info (stacked
 					// underneath it) track its actual measured bottom edge via
@@ -692,8 +638,13 @@
 					}
 
 					function statusText() {
+						// The picker is Berlin wall-clock — show that, plus the
+						// UTC instant it resolved to (what actually filters
+						// trades) in parentheses, so both are visible at a glance.
+						const berlin = document.getElementById('as-of-input').value || '?';
+						const utc = AS_OF_ISO ? AS_OF_ISO + 'Z' : '?';
 						return ASSET + ' · L24 (Time Machine, all expiries, ' + WINDOW_HOURS + 'h trailing window)'
-							+ '  ·  As of ' + (AS_OF_ISO || '?') + ' UTC' + tradeCountSuffix();
+							+ '  ·  As of ' + berlin + ' Berlin (' + utc + ')' + tradeCountSuffix();
 					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
@@ -744,7 +695,7 @@
 							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
 						}
 						futureAxisSeries.setData(futureTicks);
-						updateVLines();
+						updateWindowVLine();
 					}
 
 					// Snaps an arbitrary instant to the nearest loaded candle
@@ -753,7 +704,7 @@
 					// coordinate for a time that exactly matches an existing
 					// data/whitespace point on the shared time axis, it does
 					// NOT interpolate an isolated point in between — see
-					// positionVLine() below).
+					// updateWindowVLine() below).
 					function nearestCandleTimeAtOrBefore(t) {
 						if (!realCandles.length) return null;
 						let lo = 0, hi = realCandles.length - 1, ans = -1;
@@ -765,47 +716,55 @@
 						return ans === -1 ? realCandles[0].time : realCandles[ans].time;
 					}
 
-					// "N ago" reference-line definitions — same table-driven
-					// shape/8-line set/checkbox-default split /l24/<asset>
-					// uses (24h checked by default, the rest unchecked). The
-					// one difference from /l24: "ago" is measured back from
-					// AS_OF_ISO here, not real "now" — see positionVLine()
-					// below.
-					const VLINE_DEFS = [
-						{ hours: 24, elementId: 'l24-vline', checkboxId: 'vline-toggle', defaultShown: true },
-						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: false },
-						{ hours: 72, elementId: 'l72-vline', checkboxId: 'vline72-toggle', defaultShown: false },
-						{ hours: 96, elementId: 'l96-vline', checkboxId: 'vline96-toggle', defaultShown: false },
-						{ hours: 120, elementId: 'l120-vline', checkboxId: 'vline120-toggle', defaultShown: false },
-						{ hours: 240, elementId: 'l240-vline', checkboxId: 'vline240-toggle', defaultShown: false },
-						{ hours: 480, elementId: 'l480-vline', checkboxId: 'vline480-toggle', defaultShown: false },
-						{ hours: 720, elementId: 'l720-vline', checkboxId: 'vline720-toggle', defaultShown: false },
-					];
-					const vlineShow = {};
-					VLINE_DEFS.forEach((def) => { vlineShow[def.hours] = def.defaultShown; });
+					// Formats the selected Window for the line's own text label
+					// — "<N>h" up to 72h, "<N>d" for the whole-day entries above
+					// it (4d/5d), matching the Window dropdown's own option
+					// labels exactly (see _l24_window_options() in main.py),
+					// same as /l24/<asset>.
+					function formatWindowLabel(hours) {
+						return (hours > 72 && hours % 24 === 0) ? (hours / 24) + 'd' : hours + 'h';
+					}
 
-					// Shared positioning logic for every reference line AND
-					// its own text label (elementId + '-label') — the two are
-					// always shown/hidden/positioned together so they can
-					// never drift out of sync, same as /l24/<asset>. The one
-					// difference from /l24's own positionVLine(): "hoursAgo"
-					// is measured back from AS_OF_ISO (via asOfEpochSeconds())
-					// instead of Date.now(), per this page's own "testing the
-					// past" design — an As-Of moment is frozen, so unlike
-					// /l24 these lines never need to keep creeping forward on
-					// a timer once positioned (no setInterval(updateVLines)
-					// on this page at all — see init()/reloadForAsOf() below).
-					function positionVLine(elementId, hoursAgo, show) {
-						const vline = document.getElementById(elementId);
-						const label = document.getElementById(elementId + '-label');
+					// "Window Line" checkbox (right after "Theme", checked by
+					// default) — a plain client-side show/hide flag for the
+					// single Window vertical line + label; no effect on the
+					// Window dropdown or any fetch. Lets the user hide the line
+					// to see the candles under it.
+					let VLINE_SHOWN = true;
+					function onToggleVLine() {
+						VLINE_SHOWN = document.getElementById('vline-toggle').checked;
+						updateWindowVLine();
+					}
+
+					// Positions the single Window reference line (and its
+					// label) at the candle WINDOW_HOURS hours before AS_OF_ISO
+					// — the start of the currently selected trailing Window,
+					// relative to the inspected moment rather than real "now"
+					// (per this page's "testing the past" design; asOfEpochSeconds()
+					// instead of Date.now(), the one difference from /l24's own
+					// updateWindowVLine()). An As-Of moment is frozen, so unlike
+					// /l24 this line never needs to keep creeping forward on a
+					// timer once positioned (no setInterval on this page at all
+					// — see init()/reloadForAsOf() below). The line and its
+					// label are always shown/hidden/positioned together so they
+					// can never drift out of sync. Fully hidden when the
+					// "Window Line" checkbox is unchecked (VLINE_SHOWN false).
+					function updateWindowVLine() {
+						const vline = document.getElementById('window-vline');
+						const label = document.getElementById('window-vline-label');
 						if (!vline) return;
-						const asOfEpoch = asOfEpochSeconds();
-						if (!show || asOfEpoch === null) {
+						if (!VLINE_SHOWN) {
 							vline.style.display = 'none';
 							if (label) label.style.display = 'none';
 							return;
 						}
-						const t = asOfEpoch - hoursAgo * 3600 + tzOffset;
+						const asOfEpoch = asOfEpochSeconds();
+						if (asOfEpoch === null) {
+							vline.style.display = 'none';
+							if (label) label.style.display = 'none';
+							return;
+						}
+						const t = asOfEpoch - WINDOW_HOURS * 3600 + tzOffset;
 						const snapped = nearestCandleTimeAtOrBefore(t);
 						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
 						if (x === null || x === undefined) {
@@ -818,22 +777,10 @@
 						vline.style.left = left + 'px';
 						vline.style.display = 'block';
 						if (label) {
+							label.textContent = formatWindowLabel(WINDOW_HOURS);
 							label.style.left = left + 'px';
 							label.style.display = 'block';
 						}
-					}
-
-					// Called from each checkbox's own onchange, e.g.
-					// onchange="onToggleVLine(24)" for the "24h Line" box.
-					function onToggleVLine(hours) {
-						const def = VLINE_DEFS.find((d) => d.hours === hours);
-						if (!def) return;
-						vlineShow[hours] = document.getElementById(def.checkboxId).checked;
-						positionVLine(def.elementId, def.hours, vlineShow[hours]);
-					}
-
-					function updateVLines() {
-						VLINE_DEFS.forEach((def) => positionVLine(def.elementId, def.hours, vlineShow[def.hours]));
 					}
 
 					function resetChartView() {
@@ -878,11 +825,11 @@
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
 						applyVisibleRange();
-						// rebuildSeriesData() already calls updateVLines() once,
+						// rebuildSeriesData() already calls updateWindowVLine() once,
 						// but that happens BEFORE applyVisibleRange() establishes
 						// the real visible window on first load — recompute here
 						// too so the lines reflect the actual window immediately.
-						updateVLines();
+						updateWindowVLine();
 					}
 
 					async function setTf(iv) {
@@ -893,6 +840,7 @@
 
 					async function setWindow(hours) {
 						WINDOW_HOURS = parseInt(hours, 10);
+						updateWindowVLine();
 						await refreshFourLegGamma();
 						setStatus(statusText());
 					}
@@ -1149,14 +1097,16 @@
 						reloadForAsOf();
 					}
 
+					// Jumps the picker to the current Berlin date and hour
+					// (minutes zeroed, via toDatetimeLocalBerlin()).
 					function jumpToNow() {
-						setAsOfInput(toDatetimeLocalUTC(new Date()));
+						setAsOfInput(toDatetimeLocalBerlin(new Date()));
 						reloadForAsOf();
 					}
 
 					async function init() {
 						try {
-							setAsOfInput(INITIAL_AS_OF || toDatetimeLocalUTC(defaultAsOfBerlin1530()));
+							setAsOfInput(INITIAL_AS_OF || defaultAsOfBerlinNaive());
 							await loadCandles();
 							await refreshFourLegGamma();
 							setStatus(statusText());

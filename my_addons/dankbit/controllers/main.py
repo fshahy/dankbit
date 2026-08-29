@@ -37,7 +37,22 @@ from . import next_candle_forecast
 # validate a "2h" selection against this same shared tuple. 480/720
 # (20d/30d) were added the same way still later, again not for this
 # page's own dropdown but for /l24/<asset>'s own "20d"/"30d" options —
-# this tuple's largest entry was 240 (10d) until then. "All"
+# this tuple's largest entry was 240 (10d) until then. 6/10/16 were
+# added per a product decision (2026-08-29) for /l24/<asset>'s own new
+# "6h"/"10h"/"16h" options. Then every integer 1..72 was added per a
+# further product decision (2026-08-29) so BOTH /l24/<asset>'s and
+# /tm/<asset>'s "Window" dropdowns could offer a plain 1h..72h /
+# 1-hour-step range (24h default) — the sub-72h non-integer-step gaps
+# this tuple used to have (no 1h/3h/5h/7h/9h/…) were an artifact of
+# which specific dropdown entries had been requested over time, never
+# a deliberate restriction. 96/120 were then re-appended to /l24/<asset>'s
+# and /tm/<asset>'s dropdowns as "4d"/"5d" per a further product decision,
+# so _l24_window_options() takes every choice <= 120; 96/120 also back
+# /4l/<asset>'s and /ft/<asset>'s own "4d"/"5d" entries.
+# 144/168/192/216/240/480/720 are no longer offered by any page's own
+# dropdown (they were /tm/<asset>'s 6d-30d lookbacks before its own
+# 2026-08-29 narrowing), only still reachable by a direct ?hours= API
+# call. "All"
 # (`?hours=all`), "midnight" (`?hours=midnight`, since-00:00-UTC), and
 # "auto" (`?hours=auto`, dynamic time-to-expiry sizing — see
 # _auto_window_hours) are each handled as their own string sentinel in
@@ -46,7 +61,7 @@ from . import next_candle_forecast
 # of hours, "midnight" maps to options.day_window_start() instead of a
 # fixed hour count, and "auto" resolves to one of this tuple's own
 # values by calling _auto_window_hours() rather than being one itself.
-FOUR_LEG_WINDOW_HOURS_CHOICES = (2, 4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240, 480, 720)
+FOUR_LEG_WINDOW_HOURS_CHOICES = tuple(range(1, 73)) + (96, 120, 144, 168, 192, 216, 240, 480, 720)
 
 # /4l/<asset>'s own "Window" dropdown default — also the fallback used
 # by four_leg_gamma_json when `?hours=` is missing/malformed, same as
@@ -61,6 +76,21 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = (2, 4, 8, 12, 24, 48, 72, 96, 120, 144, 168, 192
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
+
+def _l24_window_options():
+    """(hours, label) pairs for the /l24 and /tm "Window" dropdowns — a
+    plain 1h..72h range in 1-hour steps, then 4d and 5d (96h/120h)
+    appended at the end, 24h default. Labels are "<N>h" up to 72h and
+    "<N>d" for the whole-day entries above it, matching the templates'
+    own formatWindowLabel(). Drawn from FOUR_LEG_WINDOW_HOURS_CHOICES so
+    every value is a member the `?hours=` param already validates."""
+    return [
+        (h, ("%dd" % (h // 24)) if h > 72 and h % 24 == 0 else ("%dh" % h))
+        for h in FOUR_LEG_WINDOW_HOURS_CHOICES
+        if h <= 120
+    ]
+
+
 def _auto_window_hours(dte_hours):
     """`?hours=auto` on /api/four-leg-gamma resolves to this — the
     smallest FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers
@@ -74,7 +104,7 @@ def _auto_window_hours(dte_hours):
     flow is more likely already rolled/closed as expiry nears, so a
     shrinking lookback keeps the 4 gamma legs weighted toward genuinely
     current positioning instead of stale history. Naturally floors at
-    this tuple's own smallest bucket (2h) for anything at/past expiry
+    this tuple's own smallest bucket (1h) for anything at/past expiry
     and caps at its largest (720h/30d) for a Weekly/Monthly expiry with
     weeks left, without any separate min/max clamp needed. `None` (no
     resolvable expiration — e.g. Expiry=All, which has no single
@@ -92,14 +122,18 @@ def _parse_as_of_param(raw):
     Machine page, see time_machine_chart below) into a naive-UTC datetime,
     clamped to not exceed "now" (a future as_of has no real historical
     meaning here — every one of this param's consumers already treats
-    "now" as the live/default case). `raw` is the value the page's own
-    `<input type="datetime-local">` produces, e.g. "2026-03-01T14:30" — no
-    timezone suffix, interpreted as UTC directly (matching this addon's
-    UTC-anchored trade-window convention throughout, see
-    options.day_window_start). Returns None for a missing/malformed value,
-    same as every other query param in this file — callers fall back to
-    "now" in that case, so a Time Machine URL with no `as_of` still
-    behaves exactly like the live page it's based on."""
+    "now" as the live/default case). `raw` is a naive-UTC ISO string,
+    e.g. "2026-03-01T14:30" — no timezone suffix, interpreted as UTC
+    directly (matching this addon's UTC-anchored trade-window convention
+    throughout, see options.day_window_start). The /tm/<asset> page's own
+    "As Of" picker is Europe/Berlin wall-clock time, but its template
+    converts that to UTC client-side (berlinNaiveToUtcIso()) before
+    appending `&as_of=` to any fetch, so this function still always
+    receives a UTC value (a tz-aware string is also normalised below, but
+    the /tm client never sends one). Returns None for a missing/malformed
+    value, same as every other query param in this file — callers fall
+    back to "now" in that case, so a Time Machine URL with no `as_of`
+    still behaves exactly like the live page it's based on."""
     if not raw:
         return None
     try:
@@ -2262,9 +2296,10 @@ class ChartController(http.Controller):
         Any other/missing `?expiry=` value falls back to "nearest". The
         trailing-hours trade window is independently user-selectable via
         the page's own "Window" dropdown — an optional `?hours=` query
-        param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (4/8/12/24/
-        48/72/96/120/144/168/192/216/240, shown on the dropdown as
-        4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/10d — or the literal string
+        param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (every
+        integer 1..72 plus 96/120/144/168/192/216/240/480/720; each
+        page's own "Window" dropdown offers a different subset of these
+        — see the constant's own comment above — or the literal string
         "all", skipping the trailing-hours trade filter entirely, or the
         literal string "midnight", restricting to trades since the most
         recent UTC midnight (options.day_window_start) instead of a
@@ -2687,9 +2722,10 @@ class ChartController(http.Controller):
         behavior in the interim) was folded back into this one and
         removed. Own "Window"
         dropdown (00:00 UTC/Auto/4h/8h/12h/1d/2d/3d/4d/5d/6d/7d/8d/9d/
-        10d/All — FOUR_LEG_WINDOW_HOURS_CHOICES (raw hours 4/8/12/24/48/
-        72/96/120/144/168/192/216/240, the 1d-10d entries displayed as
-        days rather than hours — see four_leg_gamma_chart_templates.xml's
+        10d/All — drawn from FOUR_LEG_WINDOW_HOURS_CHOICES (every integer
+        1..72 plus 96/120/144/168/192/216/240/480/720; this page offers
+        only a subset), the multi-day entries displayed as days rather
+        than hours — see four_leg_gamma_chart_templates.xml's
         windowLabel()) plus the "00:00 UTC" since-midnight option
         (?hours=midnight — trades since the most recent UTC midnight,
         options.day_window_start, same day-boundary convention
@@ -2798,33 +2834,34 @@ class ChartController(http.Controller):
         simplest sibling of /4l/<asset> (four_leg_gamma_chart): same
         Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/SPG) +
         AVG line rendering, own "Timeframe"/"Theme"/"Ruler"/"Settings"
-        controls — own "Timeframe" dropdown defaults to 1h here (was 4h,
-        matching /4l/<asset>'s own default, before a later product
-        decision) — no "Expiry" dropdown and no "Cumulative" checkbox at
+        controls — own "Timeframe" dropdown defaults to 1h here (was 4h
+        to match /4l/<asset>, then 1h, then back to 4h, then 1h again
+        per successive product decisions) — no "Expiry" dropdown and no
+        "Cumulative" checkbox at
         all: the 4 gamma legs are always computed CUMULATIVELY across
         every one of the asset's own active expiries. It does have its
-        own "Window" dropdown, though — 2h/4h/8h/12h/24h/48h/3d/4d/5d/
-        10d/20d/30d, 24h default — that picks the trailing-hours trade
-        window for that computation, via a `?expiry=all&hours=<N>` call
-        against /api/four-leg-gamma/<asset> (see four_leg_gamma_json's
-        own docstring for both param's resolution; 2/4/8/12/24/48/72/
-        96/120/240 are already valid FOUR_LEG_WINDOW_HOURS_CHOICES
-        entries — 2/480/720 were added there specifically for this
-        dropdown's own "2h"/"20d"/"30d" options, the others were already
-        present — so no route/query changes were needed beyond that,
-        just the template wiring the dropdown to that existing `hours`
-        param). "L24" = "Last 24 Hours", still accurate as the
-        dropdown's own default. Also draws up to 8 vertical reference
-        lines — 24h/48h/3d/4d/5d/10d/20d/30d ago — each a plain
-        fixed-position DOM overlay (see updateVLines()/positionVLine()
-        in the template, since Lightweight Charts v4 has no native
-        vertical-line primitive), toggled independently via their own
-        "24h Line"/"48h Line"/"3d Line"/"4d Line"/"5d Line"/"10d Line"/
-        "20d Line"/"30d Line" checkboxes (24h/48h checked by default,
-        every other one unchecked) — there is no equivalent "2h Line"
-        checkbox, since 2h only exists as a Window choice here, not a
-        reference-line marker. Also shades a light-orange fill between
-        LP/SP (when LP
+        own "Window" dropdown, though — 1h..72h in 1-hour steps, then
+        4d/5d (96h/120h) appended, 24h default (populated from the
+        `window_hours` context list below — (hours, label) pairs from
+        _l24_window_options()) — that picks the trailing-hours
+        trade window for that computation, via a `?expiry=all&hours=<N>`
+        call against /api/four-leg-gamma/<asset> (see four_leg_gamma_json's
+        own docstring for both param's resolution). The dropdown was
+        2h/4h/6h/8h/10h/12h/16h/24h/48h/3d/4d/5d through 2026-08-29,
+        then simplified to a uniform 1h..72h range the same day (every
+        integer 1..72 added to FOUR_LEG_WINDOW_HOURS_CHOICES for it), then
+        4d/5d re-appended per a further product decision — no route/query
+        changes needed, just the template loop. "L24" = "Last 24 Hours",
+        still accurate as the dropdown's own default. Also draws
+        a single vertical reference line + label at the start of the
+        currently selected trailing Window (Window=12h → a line at the
+        candle 12h ago) — a plain fixed-position DOM overlay (see
+        updateWindowVLine() in the template, since Lightweight Charts v4
+        has no native vertical-line primitive), redrawn on every Window
+        change, no checkbox — this replaced an earlier set of 8
+        per-duration "N Line" checkboxes (24h/48h/3d/4d/5d/10d/20d/30d)
+        per product decision (2026-08-29). Also shades a light-orange
+        fill between LP/SP (when LP
         sits below SP) and between LC/SC (when LC sits above SC) — the
         same `addBaselineSeries` flat-top/baseValue-bottom fill trick
         `/4l/<asset>` originally carried before it was removed there
@@ -2841,7 +2878,14 @@ class ChartController(http.Controller):
 
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        # "Window" dropdown — (hours, label) pairs: 1h..72h in 1-hour
+        # steps, then 4d/5d appended; 24h default. See _l24_window_options().
+        ctx = {
+            "asset": asset,
+            "refresh_interval": refresh_interval,
+            "window_hours": _l24_window_options(),
+            "window_default": FOUR_LEG_DEFAULT_WINDOW_HOURS,
+        }
         return request.render("dankbit.dankbit_l24_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
@@ -2853,22 +2897,36 @@ class ChartController(http.Controller):
         suffix, AVG label with the dominant leg's name), same always-
         CUMULATIVE-across-every-active-expiry 4-leg computation (no
         "Expiry" dropdown/"Cumulative" checkbox), same "Window" dropdown
-        (2h/4h/8h/12h/24h/48h/3d/4d/5d/10d/20d/30d, 24h default), same
-        light-orange LP/SP+LC/SC fill, same 8 togglable "N ago" vertical
-        reference lines + labels + checkboxes, and the same "Refresh
-        Lines" button — this page was rebuilt around /l24/<asset>'s own
-        feature set (previously structured around /4l/<asset> instead,
-        with an "Expiry" dropdown/"Cumulative" checkbox and a narrower
-        Auto/8h/12h/24h/All Window set; that rebuild is what removed both
-        controls and widened the Window set to match /l24/<asset>). Own
-        Timeframe default stays 4h (not changed to /l24/<asset>'s own 1h)
-        — everything else is anchored to a user-picked past "As Of" date
+        (1h..72h in 1-hour steps then 4d/5d, 24h default — options from
+        the `window_hours` context list, _l24_window_options(), same as
+        /l24/<asset>), same
+        light-orange LP/SP+LC/SC fill, and a single vertical reference
+        line + label at the start of the currently selected trailing
+        Window (measured back from the As-Of moment, not real "now" —
+        see the template's updateWindowVLine()) — this page was rebuilt
+        around /l24/<asset>'s own feature set (previously structured
+        around /4l/<asset> instead, with an "Expiry" dropdown/
+        "Cumulative" checkbox and a narrower Auto/8h/12h/24h/All Window
+        set; that rebuild is what removed both controls). The 8
+        per-duration "N Line" checkboxes it used to carry were replaced
+        by that single Window-tracking line per product decision
+        (2026-08-29), same as /l24/<asset>; there is no "Refresh Lines"
+        button (a frozen As-Of view has nothing to force a re-fetch of).
+        Own Timeframe defaults to 1h (was 4h — this page's own pre-rebuild
+        default — changed per product decision to match /l24/<asset>'s own
+        1h default) — everything else is anchored to a user-picked past "As Of" date
         instead of "now", using this addon's ~9 months of retained trade
         history (including long-expired, archived instruments) to let a
         user scroll back and study how the 4-leg gamma structure lined up
-        against price for a past moment. The one deliberate difference
-        from /l24/<asset>'s own 8 vertical lines: each is measured back
-        from AS_OF_ISO (asOfEpochSeconds(), Date.parse(AS_OF_ISO + 'Z'))
+        against price for a past moment. The "As Of" picker (and this
+        page's own URL `?as_of=`) is EUROPE/BERLIN wall-clock time,
+        DST-aware — per product decision, since this Thales tool's users
+        think in Berlin time; the template converts it to UTC client-side
+        (berlinNaiveToUtcIso()) before any backend call, so every endpoint
+        still receives UTC (AS_OF_ISO), matching this addon's UTC-anchored
+        trade-window convention. The one deliberate difference from
+        /l24/<asset>'s own Window vertical line: it is measured back from
+        AS_OF_ISO (asOfEpochSeconds(), Date.parse(AS_OF_ISO + 'Z'))
         rather than real "now", since "testing the past" only makes sense
         relative to the moment being inspected, not actual current time.
 
@@ -2879,12 +2937,13 @@ class ChartController(http.Controller):
         definition, so nothing here polls on a timer — no candle poll, no
         gamma-leg poll, and unlike /l24/<asset>'s own 5s vline-advance
         tick, no periodic vline reposition either, since none of those
-        need to keep moving once AS_OF_ISO stops changing; every fetch and
-        every vline reposition is re-triggered only when the user changes
-        As Of/Timeframe/Window by hand, or pans/zooms/resizes the chart).
+        need to keep moving once AS_OF_ISO stops changing; the Window
+        line is re-positioned only when the user changes As Of/Timeframe/
+        Window by hand, or pans/zooms/resizes the chart).
         This rebuild needed zero backend/controller changes: every fetch
-        just adds `?as_of=<ISO-8601, no tz — treated as UTC>` to the same
-        2 endpoints /l24/<asset> already uses (one fewer than before this
+        just adds `?as_of=<naive-UTC ISO-8601>` (the Berlin picker value
+        already converted to UTC client-side) to the same 2 endpoints
+        /l24/<asset> already uses (one fewer than before this
         rebuild — /api/expiries/<asset> is no longer called at all, now
         that the Expiry dropdown is gone) — /api/klines-coinbase/<asset>
         (historical candles ending at that moment, via
@@ -2900,18 +2959,28 @@ class ChartController(http.Controller):
         this page just asks those same 2 endpoints about a different
         point in time.
 
-        `?as_of=` on this page's own URL (e.g. /tm/BTC?as_of=2026-03-01T00:00)
-        pre-fills the "As Of" input so a specific historical view is
-        bookmarkable/shareable; missing/malformed defaults to "now" (the
-        input's own value, not a server-side default), so a bare /tm/BTC
-        starts out looking like a frozen snapshot of the live page before
-        the user picks an earlier date."""
+        `?as_of=` on this page's own URL (e.g. /tm/BTC?as_of=2026-03-01T00:00,
+        read as 00:00 BERLIN on that date) pre-fills the "As Of" input so a
+        specific historical view is bookmarkable/shareable; missing/malformed
+        defaults to the current Berlin date and hour with minutes zeroed
+        (client-side, not a server-side default — the picker only ever
+        operates at hour granularity), so a bare /tm/BTC starts out looking
+        like a frozen snapshot of the live page before the user picks an
+        earlier date."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
 
         as_of_param = request.httprequest.args.get("as_of") or ""
-        ctx = {"asset": asset, "as_of": as_of_param}
+        # "Window" dropdown — (hours, label) pairs: 1h..72h in 1-hour
+        # steps, then 4d/5d appended; 24h default — same as /l24/<asset>.
+        # See _l24_window_options().
+        ctx = {
+            "asset": asset,
+            "as_of": as_of_param,
+            "window_hours": _l24_window_options(),
+            "window_default": FOUR_LEG_DEFAULT_WINDOW_HOURS,
+        }
         return request.render("dankbit.dankbit_time_machine_chart", ctx)
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)

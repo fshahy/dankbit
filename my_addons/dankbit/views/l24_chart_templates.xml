@@ -6,16 +6,26 @@
 	     rendering, own "Timeframe"/"Theme"/"Ruler"/"Settings" controls — no
 	     "Expiry" dropdown/"Cumulative" checkbox (the 4 gamma legs are always
 	     computed CUMULATIVELY across every one of the asset's own active
-	     expiries), but it does have its own "Window" dropdown (2h/4h/8h/12h/
-	     24h/48h/3d/4d/5d/10d/20d/30d, 24h default) restricting the
-	     trailing-hours trade window used for that computation — a
-	     ?expiry=all&hours=<N> call against /api/four-leg-gamma/<asset> (see
-	     four_leg_gamma_json's own docstring in main.py for both param's
-	     resolution; 4/8/12/24/48/72/96/120/240 were already valid
-	     FOUR_LEG_WINDOW_HOURS_CHOICES entries, and 2/480/720 were added
-	     there specifically for this dropdown's own "2h"/"20d"/"30d" options
-	     — see that constant's own comment in main.py). "L24" = "Last 24
-	     Hours", still accurate as the dropdown's own default. -->
+	     expiries), but it does have its own "Window" dropdown — 1h..72h in
+	     1-hour steps, then 4d/5d (96h/120h) appended, 24h default (options
+	     are (hours, label) pairs from the `window_hours` context list,
+	     _l24_window_options() in main.py) — restricting the trailing-hours
+	     trade window used for that computation, a ?expiry=all&hours=<N>
+	     call against /api/four-leg-gamma/<asset> (see four_leg_gamma_json's
+	     own docstring in main.py for both param's resolution). The dropdown
+	     was 2h/4h/6h/8h/10h/12h/16h/24h/48h/3d/4d/5d through 2026-08-29,
+	     then simplified to a uniform 1h..72h range the same day, then 4d/5d
+	     re-appended per a further product decision. "L24" = "Last 24 Hours",
+	     still accurate as the dropdown's own default.
+
+	     A single vertical reference line + label marks the start of the
+	     currently selected trailing Window (Window=12h → a line at the
+	     candle 12 hours ago), redrawn automatically on every Window change
+	     — this replaced the earlier set of 8 per-duration "N Line"
+	     checkboxes (24h/48h/3d/4d/5d/10d/20d/30d). A "Window Line" checkbox
+	     (right after "Theme", checked by default) shows/hides that one line
+	     — a plain client-side toggle (VLINE_SHOWN), no effect on the Window
+	     dropdown or any fetch, just so the candles under it can be seen. -->
 
 	<template id="dankbit_l24_chart" name="Dankbit L24 Chart">
 		<html>
@@ -82,7 +92,8 @@
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
 					/* Checkbox toggle pill — same shape/class the Delta Chart's
 					   own S/D, Zones, Bands, etc. toggles use
-					   (dankbit_templates.xml). */
+					   (dankbit_templates.xml). Used here for the "Window Line"
+					   show/hide checkbox. */
 					.toggle-label {
 						font-family: monospace; font-size: 11pt;
 						color: #555; background: rgba(255,255,255,0.88);
@@ -176,120 +187,43 @@
 					body.dark #spinner { border-color: rgba(255,255,255,0.15); border-top-color: #ccc; }
 					@keyframes dankbit-spin { to { transform: rotate(360deg); } }
 
-					/* Vertical line marking the candle exactly 24 hours ago —
-					   see positionVLine()/VLINE_DEFS below for why this is a
-					   plain fixed-position DOM overlay rather than a chart
-					   series. Each line's own text label (".vline-label",
-					   e.g. "#l24-vline-label") is a sibling overlay rather
-					   than baked into the line itself, positioned/shown by
-					   the same positionVLine() call — see the shared
-					   ".vline-label" rule below for its common shape; only
-					   each id's own text COLOR is set here, matching that
-					   line's own hue (solid, not the line's own translucent
-					   alpha) so the label stays legible against the chart
-					   background. */
-					#l24-vline {
+					/* Single vertical line marking the start of the currently
+					   selected trailing Window (Window=12h → a line at the
+					   candle 12 hours ago) — redrawn automatically on every
+					   Window change, no checkbox (this replaced an earlier set
+					   of 8 per-duration "N Line" checkboxes). Lightweight
+					   Charts v4 has no native vertical-line primitive, so this
+					   is a plain fixed-position DOM overlay (same technique the
+					   Delta Chart's own Smart Liquidity term markers use — see
+					   CLAUDE.md), repositioned via
+					   chart.timeScale().timeToCoordinate() — see
+					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
+					   Its own text label ("#window-vline-label", ".vline-label"
+					   class) shows the selected window (e.g. "12h"/"48h") and
+					   is positioned/shown by the same call. */
+					#window-vline {
 						position: fixed; top: 0; height: 100vh; width: 1px;
 						background: rgba(100,100,100,0.55);
 						z-index: 5; pointer-events: none; display: none;
 					}
-					body.dark #l24-vline { background: rgba(210,210,210,0.45); }
-					#l24-vline-label { color: #646464; }
-					body.dark #l24-vline-label { color: #d2d2d2; }
+					body.dark #window-vline { background: rgba(210,210,210,0.45); }
+					#window-vline-label { color: #646464; }
+					body.dark #window-vline-label { color: #d2d2d2; }
 
-					/* Same mechanism as #l24-vline, at 48h ago instead — a
-					   distinct blue-ish tint so the two lines stay visually
-					   distinguishable when both are shown at once. */
-					#l48-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(33,150,243,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l48-vline { background: rgba(100,181,246,0.55); }
-					#l48-vline-label { color: #2196f3; }
-					body.dark #l48-vline-label { color: #64b5f6; }
-
-					/* Same mechanism as #l24-vline, at 3 days (72h) ago —
-					   its own purple tint, distinct from every other vline. */
-					#l72-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(156,39,176,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l72-vline { background: rgba(206,147,216,0.55); }
-					#l72-vline-label { color: #9c27b0; }
-					body.dark #l72-vline-label { color: #ce93d8; }
-
-					/* Same mechanism as #l24-vline, at 4 days (96h) ago —
-					   its own pink/red tint, distinct from every other vline. */
-					#l96-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(233,30,99,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l96-vline { background: rgba(240,152,180,0.55); }
-					#l96-vline-label { color: #e91e63; }
-					body.dark #l96-vline-label { color: #f098b4; }
-
-					/* Same mechanism as #l24-vline, at 5 days (120h) ago —
-					   its own amber/gold tint, distinct from every other vline. */
-					#l120-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(245,124,0,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l120-vline { background: rgba(255,183,77,0.55); }
-					#l120-vline-label { color: #f57c00; }
-					body.dark #l120-vline-label { color: #ffb74d; }
-
-					/* Same mechanism as #l24-vline, at 10 days (240h) ago —
-					   its own dark-green tint, distinct from every other vline. */
-					#l240-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(56,142,60,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l240-vline { background: rgba(129,199,132,0.55); }
-					#l240-vline-label { color: #388e3c; }
-					body.dark #l240-vline-label { color: #81c784; }
-
-					/* Same mechanism as #l24-vline, at 20 days (480h) ago —
-					   its own indigo tint, distinct from every other vline. */
-					#l480-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(63,81,181,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l480-vline { background: rgba(159,168,218,0.55); }
-					#l480-vline-label { color: #3f51b5; }
-					body.dark #l480-vline-label { color: #9fa8da; }
-
-					/* Same mechanism as #l24-vline, at 30 days (720h) ago —
-					   its own brown tint, distinct from every other vline. */
-					#l720-vline {
-						position: fixed; top: 0; height: 100vh; width: 1px;
-						background: rgba(121,85,72,0.55);
-						z-index: 5; pointer-events: none; display: none;
-					}
-					body.dark #l720-vline { background: rgba(188,170,164,0.55); }
-					#l720-vline-label { color: #795548; }
-					body.dark #l720-vline-label { color: #bcaaa4; }
-
-					/* Shared shape for every "N ago" line's own text label
-					   (e.g. "24h"/"3d") — positioned just below the toolbar/
+					/* Shape for the Window line's own text label (e.g.
+					   "24h"/"48h") — positioned just below the toolbar/
 					   exchange-label stack (same --tf-bar-bottom var those
 					   use, see its own comment above, plus extra clearance
 					   so it sits under #ruler-info too whether or not the
 					   ruler is active) rather than near the line's own full-
 					   height span, so it can never end up buried behind a
 					   candle mid-chart. Horizontally centered on the line's
-					   own x coordinate (positionVLine() sets `left` to that
-					   x; the translateX below does the centering) and hidden
-					   by default — shown/hidden and repositioned by the same
-					   positionVLine() call that already drives the line
-					   itself, so the two can never drift out of sync. Each
-					   id's own text color is set above, next to that same
-					   id's own #lNNN-vline background color. */
+					   own x coordinate (updateWindowVLine() sets `left` to
+					   that x; the translateX below does the centering) and
+					   hidden by default — shown/hidden and repositioned by
+					   the same updateWindowVLine() call that already drives
+					   the line itself, so the two can never drift out of
+					   sync. */
 					.vline-label {
 						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 34px);
 						transform: translateX(-50%);
@@ -304,22 +238,8 @@
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
-				<div id="l24-vline"/>
-				<div id="l24-vline-label" class="vline-label">24h</div>
-				<div id="l48-vline"/>
-				<div id="l48-vline-label" class="vline-label">48h</div>
-				<div id="l72-vline"/>
-				<div id="l72-vline-label" class="vline-label">3d</div>
-				<div id="l96-vline"/>
-				<div id="l96-vline-label" class="vline-label">4d</div>
-				<div id="l120-vline"/>
-				<div id="l120-vline-label" class="vline-label">5d</div>
-				<div id="l240-vline"/>
-				<div id="l240-vline-label" class="vline-label">10d</div>
-				<div id="l480-vline"/>
-				<div id="l480-vline-label" class="vline-label">20d</div>
-				<div id="l720-vline"/>
-				<div id="l720-vline-label" class="vline-label">30d</div>
+				<div id="window-vline"/>
+				<div id="window-vline-label" class="vline-label">24h</div>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -327,20 +247,19 @@
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
-						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
+						<option value="1h" selected="selected">1h</option>
+						<option value="4h">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
+					<!-- 1h..72h in 1-hour steps, then 4d/5d — options are
+					     (hours, label) pairs from the `window_hours` context
+					     list (l24_chart -> _l24_window_options() in main.py);
+					     `window_default` is 24 (24h). -->
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="24" selected="selected">24h</option>
-						<option value="48">48h</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
-						<option value="240">10d</option>
-						<option value="480">20d</option>
-						<option value="720">30d</option>
+						<t t-foreach="window_hours" t-as="wh">
+							<option t-att-value="wh[0]" t-att-selected="'selected' if wh[0] == window_default else False"><t t-esc="wh[1]"/></option>
+						</t>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -348,36 +267,8 @@
 						<option value="dark">Dark</option>
 					</select>
 					<label class="toggle-label">
-						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine(24)"/>
-						24h Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline48-toggle" onchange="onToggleVLine(48)"/>
-						48h Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline72-toggle" onchange="onToggleVLine(72)"/>
-						3d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline96-toggle" onchange="onToggleVLine(96)"/>
-						4d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline120-toggle" onchange="onToggleVLine(120)"/>
-						5d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline240-toggle" onchange="onToggleVLine(240)"/>
-						10d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline480-toggle" onchange="onToggleVLine(480)"/>
-						20d Line
-					</label>
-					<label class="toggle-label">
-						<input type="checkbox" id="vline720-toggle" onchange="onToggleVLine(720)"/>
-						30d Line
+						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
+						Window Line
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="refreshFourLegGamma()">Refresh Lines</button>
@@ -415,10 +306,10 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// "Timeframe" dropdown — same options as /4l/<asset>'s own
-					// dropdown, default 4h — see TF_WINDOW below for the
+					// dropdown, default 1h — see TF_WINDOW below for the
 					// per-timeframe visible-window convention this page
 					// shares with it.
-					let INTERVAL = '4h';
+					let INTERVAL = '1h';
 					// Coinbase spot, same symbol convention /4l/<asset> and
 					// /tm/<asset> use (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -427,11 +318,12 @@
 					// This page has no "Expiry"/"Cumulative" controls at all — the
 					// 4 gamma legs are always computed cumulatively across every
 					// one of ASSET's own active expiries — but it does have its
-					// own "Window" dropdown (24h/48h/3d/4d/5d/10d/20d/30d/All,
-					// 24h default)
-					// restricting the trailing-hours trade window, via the same
-					// ?hours= param /4l/<asset>'s own Window dropdown uses (see
-					// four_leg_gamma_json's own docstring in main.py).
+					// own "Window" dropdown (1h..72h in 1-hour steps then 4d/5d,
+					// 24h default — options rendered server-side from the
+					// `window_hours` context list) restricting the trailing-hours
+					// trade window, via the same ?hours= param /4l/<asset>'s own
+					// Window dropdown uses (see four_leg_gamma_json's own docstring
+					// in main.py).
 					let WINDOW_HOURS = 24;
 					const fourLegGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + WINDOW_HOURS;
 					// Same "Last trade:" footer field the Delta Chart/4l pages
@@ -524,9 +416,9 @@
 
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
-						updateVLines();
+						updateWindowVLine();
 					});
-					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateVLines());
+					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateWindowVLine());
 					// #tf-bar wraps onto extra rows on a narrow viewport (see its
 					// own CSS comment) — #exchange-label/#ruler-info (stacked
 					// underneath it) track its actual measured bottom edge via
@@ -616,6 +508,7 @@
 
 					function setWindow(hours) {
 						WINDOW_HOURS = parseInt(hours, 10);
+						updateWindowVLine();
 						refreshFourLegGamma();
 					}
 
@@ -685,33 +578,34 @@
 							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
 						}
 						futureAxisSeries.setData(futureTicks);
-						updateVLines();
+						updateWindowVLine();
 					}
 
-					// Vertical line marking the candle exactly 24 hours ago —
-					// the fixed reference point this page's "L24" name still
-					// refers to, regardless of the selected Window/Timeframe.
-					// Lightweight Charts v4 has no native vertical-line
-					// primitive, so this is a plain fixed-position DOM overlay
-					// (same technique the Delta Chart's own Smart Liquidity
-					// term markers use — see CLAUDE.md), repositioned via
+					// Single vertical line marking the start of the currently
+					// selected trailing Window (Window=12h → the candle 12
+					// hours ago) — redrawn automatically whenever the Window
+					// dropdown changes, no checkbox. Lightweight Charts v4 has
+					// no native vertical-line primitive, so this is a plain
+					// fixed-position DOM overlay (same technique the Delta
+					// Chart's own Smart Liquidity term markers use — see
+					// CLAUDE.md), repositioned via
 					// chart.timeScale().timeToCoordinate() rather than drawn
-					// onto the chart's own canvas. Recomputes "24 hours ago"
-					// against the real current time on every call, so the
-					// line keeps advancing as time passes, not just on redraw.
+					// onto the chart's own canvas. Recomputes the target
+					// instant against the real current time on every call, so
+					// the line keeps advancing as time passes, not just on
+					// redraw.
 					//
 					// timeToCoordinate() only resolves a coordinate for a time
 					// that exactly matches an existing data/whitespace point
 					// on some series sharing this time axis (verified: it
-					// returns null for an arbitrary "now - 24h" instant, but a
+					// returns null for an arbitrary "now - N h" instant, but a
 					// valid pixel for any real candle's own timestamp) — it
-					// does NOT interpolate an isolated point in between. So
-					// "24 hours ago" is first snapped to the nearest loaded
-					// candle at-or-before that instant (a binary search over
-					// realCandles, already sorted ascending) and that exact
-					// candle time is what's actually queried; the resulting
-					// line can be up to half a bar-interval off "24h ago",
-					// which is immaterial at this line's scale.
+					// does NOT interpolate an isolated point in between. So the
+					// target instant is first snapped to the nearest loaded
+					// candle at-or-before it (a binary search over realCandles,
+					// already sorted ascending) and that exact candle time is
+					// what's actually queried; the resulting line can be up to
+					// half a bar-interval off, immaterial at this line's scale.
 					function nearestCandleTimeAtOrBefore(t) {
 						if (!realCandles.length) return null;
 						let lo = 0, hi = realCandles.length - 1, ans = -1;
@@ -723,54 +617,44 @@
 						return ans === -1 ? realCandles[0].time : realCandles[ans].time;
 					}
 
-					// "N ago" reference-line definitions — one entry per
-					// {hours, elementId, checkboxId, defaultShown} — driving
-					// the checkboxes right after "Theme" ("24h Line"/
-					// "48h Line"/"3d Line"/"4d Line"/"5d Line"/"10d Line"/
-					// "20d Line"/"30d Line"; 24h checked by default, every
-					// other one unchecked). Table-driven
-					// (rather than a hand-duplicated flag/toggle-function/
-					// update-function triplet per line, the original
-					// pattern through 5 lines) since this list keeps
-					// growing on request; each show/hide flag is a plain
-					// client-side state entry, same pattern the Delta
-					// Chart's own S/D/Zones/Bands toggles use. Unchecking
-					// one just stops positionVLine() from showing that
-					// line (still recomputed on every call, no fetch
-					// involved either way, so there's no server-load
-					// reason to skip computation while off).
-					const VLINE_DEFS = [
-						{ hours: 24, elementId: 'l24-vline', checkboxId: 'vline-toggle', defaultShown: true },
-						{ hours: 48, elementId: 'l48-vline', checkboxId: 'vline48-toggle', defaultShown: false },
-						{ hours: 72, elementId: 'l72-vline', checkboxId: 'vline72-toggle', defaultShown: false },
-						{ hours: 96, elementId: 'l96-vline', checkboxId: 'vline96-toggle', defaultShown: false },
-						{ hours: 120, elementId: 'l120-vline', checkboxId: 'vline120-toggle', defaultShown: false },
-						{ hours: 240, elementId: 'l240-vline', checkboxId: 'vline240-toggle', defaultShown: false },
-						{ hours: 480, elementId: 'l480-vline', checkboxId: 'vline480-toggle', defaultShown: false },
-						{ hours: 720, elementId: 'l720-vline', checkboxId: 'vline720-toggle', defaultShown: false },
-					];
-					const vlineShow = {};
-					VLINE_DEFS.forEach((def) => { vlineShow[def.hours] = def.defaultShown; });
+					// Formats the selected Window for the line's own text label —
+					// "<N>h" up to 72h, "<N>d" for the whole-day entries above
+					// it (4d/5d), matching the Window dropdown's own option
+					// labels exactly (see _l24_window_options() in main.py).
+					function formatWindowLabel(hours) {
+						return (hours > 72 && hours % 24 === 0) ? (hours / 24) + 'd' : hours + 'h';
+					}
 
-					// Shared positioning logic for every reference line AND
-					// its own text label (elementId + '-label', e.g.
-					// "l24-vline-label" for "l24-vline" — see the
-					// ".vline-label" CSS rule above) — the two are always
-					// shown/hidden/positioned together so they can never
-					// drift out of sync. See nearestCandleTimeAtOrBefore()
-					// above for why this snaps to the nearest loaded candle
-					// rather than querying the exact "N hours ago" instant
-					// directly.
-					function positionVLine(elementId, hoursAgo, show) {
-						const vline = document.getElementById(elementId);
-						const label = document.getElementById(elementId + '-label');
+					// "Window Line" checkbox (right after "Theme", checked by
+					// default) — a plain client-side show/hide flag for the
+					// single Window vertical line + label; no effect on the
+					// Window dropdown or any fetch. Lets the user hide the line
+					// to see the candles under it.
+					let VLINE_SHOWN = true;
+					function onToggleVLine() {
+						VLINE_SHOWN = document.getElementById('vline-toggle').checked;
+						updateWindowVLine();
+					}
+
+					// Positions the single Window reference line (and its
+					// label) at the candle WINDOW_HOURS hours before now — the
+					// start of the currently selected trailing Window. See
+					// nearestCandleTimeAtOrBefore() above for why the target
+					// instant is snapped to the nearest loaded candle rather
+					// than queried directly. The line and its label are always
+					// shown/hidden/positioned together so they can never drift
+					// out of sync. Fully hidden when the "Window Line" checkbox
+					// is unchecked (VLINE_SHOWN false).
+					function updateWindowVLine() {
+						const vline = document.getElementById('window-vline');
+						const label = document.getElementById('window-vline-label');
 						if (!vline) return;
-						if (!show) {
+						if (!VLINE_SHOWN) {
 							vline.style.display = 'none';
 							if (label) label.style.display = 'none';
 							return;
 						}
-						const t = Math.floor(Date.now() / 1000) - hoursAgo * 3600 + tzOffset;
+						const t = Math.floor(Date.now() / 1000) - WINDOW_HOURS * 3600 + tzOffset;
 						const snapped = nearestCandleTimeAtOrBefore(t);
 						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
 						if (x === null || x === undefined) {
@@ -783,22 +667,10 @@
 						vline.style.left = left + 'px';
 						vline.style.display = 'block';
 						if (label) {
+							label.textContent = formatWindowLabel(WINDOW_HOURS);
 							label.style.left = left + 'px';
 							label.style.display = 'block';
 						}
-					}
-
-					// Called from each checkbox's own onchange, e.g.
-					// onchange="onToggleVLine(24)" for the "24h Line" box.
-					function onToggleVLine(hours) {
-						const def = VLINE_DEFS.find((d) => d.hours === hours);
-						if (!def) return;
-						vlineShow[hours] = document.getElementById(def.checkboxId).checked;
-						positionVLine(def.elementId, def.hours, vlineShow[hours]);
-					}
-
-					function updateVLines() {
-						VLINE_DEFS.forEach((def) => positionVLine(def.elementId, def.hours, vlineShow[def.hours]));
 					}
 
 					function resetChartView() {
@@ -843,12 +715,12 @@
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
 						applyVisibleRange();
-						// rebuildSeriesData() already calls updateVLines() once,
+						// rebuildSeriesData() already calls updateWindowVLine() once,
 						// but that happens BEFORE applyVisibleRange() establishes
 						// the real visible window on first load — recompute here
 						// too so the lines reflect the actual window immediately
 						// rather than waiting for the next pan/zoom/resize/5s poll.
-						updateVLines();
+						updateWindowVLine();
 					}
 
 					async function updateLatestCandle() {
@@ -1138,7 +1010,7 @@
 					setInterval(updateLatestCandle, 5000);
 					setInterval(refreshFourLegGamma, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
-					setInterval(updateVLines, 5000);
+					setInterval(updateWindowVLine, 5000);
 				//]]></script>
 			</body>
 		</html>
