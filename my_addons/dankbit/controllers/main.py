@@ -3120,6 +3120,52 @@ class ChartController(http.Controller):
         }
         return request.render("dankbit.dankbit_l24_chart", ctx)
 
+    @http.route("/sli/<string:asset>", type="http", auth="user", website=True)
+    def sli_chart(self, asset):
+        """"SLI" ("Single Line Indicator") — a standalone TradingView page,
+        the most stripped-down sibling of /l24/<asset> (l24_chart): same
+        Coinbase-spot candle source, same always-cumulative-across-every-
+        active-expiry 4-leg gamma computation, own "Timeframe"/"Theme"/
+        "Ruler"/"Update Line" controls (Timeframe defaults to 1h; the
+        dropdown adds a 5m option not offered elsewhere). Differences from
+        /l24/<asset>:
+
+          - No "Window" dropdown — the trailing trade window is fixed at
+            8 hours (?expiry=all&hours=8 against /api/four-leg-gamma/
+            <asset>).
+          - No "Window Line" checkbox — the single vertical reference line
+            + "8h" label marking the window start is always drawn (still
+            positioned by the same updateWindowVLine() the /l24/<asset>
+            template carries, just with no toggle).
+          - No "Settings" button/modal — the single line's color is
+            derived, not user-set (see below).
+          - None of the 4 per-leg gamma reference lines (LC/LP/SC/SP) are
+            drawn, and neither is the light-orange LP/SP+LC/SC fill — the
+            page shows ONLY one dashed line at the present-leg-only average
+            of those 4 leg PRICE levels, labelled
+            "<dominant leg> <avg gamma VALUE> | <dominant leg PRICE>"
+            (e.g. "LC 157M | 81,300"). Its color is derived from the
+            dominant leg: a call-side one (LC/SC) is light green, a
+            put-side one (LP/SP) light red. The 4 leg values are still
+            fetched (that's how AVG/dominant-leg are computed), just not
+            rendered as their own lines.
+          - A bold "Next Update: MM:SS" countdown to the next automatic
+            line refresh sits after the "Update Line" button.
+
+        Renders its own standalone template (dankbit_sli_chart). Polls on
+        the general dankbit.refresh_interval, same as /l24/<asset>. No
+        route/query changes were needed — it drives the exact same
+        /api/klines-coinbase/<asset> and /api/four-leg-gamma/<asset>
+        (?expiry=all&hours=8) endpoints /l24/<asset> already uses."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_sli_chart", ctx)
+
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
         """"Time Machine" — a standalone TradingView page, structurally a

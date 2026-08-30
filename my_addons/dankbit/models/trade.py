@@ -450,8 +450,10 @@ class Trade(models.Model):
     # 4h bucket (same gap Deribit perpetuals had), so "4h" resolves to the
     # native 3600 (1h) granularity here and gets bucketed in Python
     # afterward, same technique as the old Deribit-perpetual path this
-    # replaced. 15m/1h/1d map directly onto Coinbase's own 900/3600/86400.
-    _COINBASE_GRANULARITY_SECONDS = {"15m": 900, "1h": 3600, "4h": 3600, "1d": 86400}
+    # replaced. 5m/15m/1h/1d map directly onto Coinbase's own
+    # 300/900/3600/86400. (5m added for /sli/<asset>'s own Timeframe
+    # dropdown — no other page requests it.)
+    _COINBASE_GRANULARITY_SECONDS = {"5m": 300, "15m": 900, "1h": 3600, "4h": 3600, "1d": 86400}
     _COINBASE_MAX_CANDLES_PER_REQUEST = 300
 
     def get_candles_coinbase(self, asset, interval="4h", limit=500, as_of_ts=None):

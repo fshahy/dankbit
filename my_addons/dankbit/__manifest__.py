@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "Dankbit",
-    "version": "18.0.0.0.66",
+    "version": "18.0.0.0.67",
     "category": "Options Greeks",
     "author": "Farid Shahy <fshahy@gmail.com>",
     "license": "Other OSI approved licence",
@@ -27,6 +27,7 @@
         "views/time_machine_chart_templates.xml",
         "views/ft_chart_templates.xml",
         "views/l24_chart_templates.xml",
+        "views/sli_chart_templates.xml",
         "wizard/plot_wizard_view.xml",
         "wizard/zones_wizard_view.xml",
     ],
