@@ -44,15 +44,6 @@
                         <setting>
                             <field name="zones_box_window_hours" placeholder="Zones Box Trailing Window (h)"/>
                         </setting>
-                        <setting>
-                            <field name="show_daily_lines"/>
-                        </setting>
-                        <setting>
-                            <field name="show_weekly_lines"/>
-                        </setting>
-                        <setting>
-                            <field name="show_monthly_lines"/>
-                        </setting>
                     </block>
 
                     <block title="ETH Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">

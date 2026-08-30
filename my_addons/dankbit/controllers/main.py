@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -1497,6 +1498,212 @@ class ChartController(http.Controller):
     # JSON API endpoints
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _gamma_horizon_is_last_friday(day):
+        """True for the last Friday of ``day``'s calendar month."""
+        return day.weekday() == 4 and (day + timedelta(days=7)).month != day.month
+
+    @staticmethod
+    def _gamma_horizon_peak(STs, trades):
+        """Return the strongest absolute Gamma price and its strength.
+
+        Buyer and seller portfolios are evaluated independently by the caller;
+        taking the absolute curve here therefore works for both signs without
+        changing any of the existing Gamma/Forecast engines.
+        """
+        if not trades:
+            return None, 0.0
+        curve = np.asarray(gamma.portfolio_gamma(STs, trades, 0.05), dtype=float)
+        finite = np.isfinite(curve)
+        if not finite.any():
+            return None, 0.0
+        magnitude = np.where(finite, np.abs(curve), -np.inf)
+        idx = int(np.argmax(magnitude))
+        strength = float(magnitude[idx])
+        if not np.isfinite(strength) or strength <= 0:
+            return None, 0.0
+        return float(STs[idx]), strength
+
+    @http.route("/api/gamma-horizon/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def gamma_horizon_json(self, asset):
+        """Display-only term Gamma levels for tomorrow/week/month/year-end.
+
+        This endpoint deliberately has no persistence and is not imported by
+        Forecast, Bands, Smart Liquidity, Greeks Flow, FOMO, Anchors or Signal
+        Bot.  Each Deribit trade is already unique in ``dankbit_trade`` and is
+        counted once.  Its amount receives a 40% permanent component plus a
+        60% exponential freshness component; the half-life varies by horizon.
+        """
+        asset = asset.upper()
+        if asset not in ("BTC", "ETH"):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        tomorrow = (now + timedelta(days=1)).date()
+        cr = request.env.cr
+        cr.execute("""
+            SELECT DISTINCT expiration
+              FROM dankbit_trade
+             WHERE name ILIKE %s
+               AND expiration > %s
+               AND active = TRUE
+               AND iv <> 0
+             ORDER BY expiration
+        """, (f"{asset}-%", now))
+        expirations = [row[0] for row in cr.fetchall() if row[0]]
+
+        daily_targets = [exp for exp in expirations if exp.date() == tomorrow][:1]
+        weekly_targets = [
+            exp for exp in expirations
+            if exp.date().weekday() == 4
+            and not self._gamma_horizon_is_last_friday(exp.date())
+        ][:3]
+        monthly_targets = [
+            exp for exp in expirations
+            if self._gamma_horizon_is_last_friday(exp.date())
+            and not (exp.date().month == 12)
+        ][:3]
+        year_end_targets = [
+            exp for exp in expirations
+            if self._gamma_horizon_is_last_friday(exp.date())
+            and exp.date().month == 12
+        ][:1]
+
+        specs = []
+        specs += [("D1", exp, 24.0, 72.0) for exp in daily_targets]
+        specs += [("W", exp, 6.0 * 24.0, None) for exp in weekly_targets]
+        specs += [("M", exp, 15.0 * 24.0, None) for exp in monthly_targets]
+        specs += [("YE", exp, 75.0 * 24.0, None) for exp in year_end_targets]
+        selected = sorted(set(exp for _, exp, _, _ in specs))
+
+        if not selected:
+            payload = {"asset": asset, "levels": [], "trade_count": 0,
+                       "generated_at": datetime.now(timezone.utc).isoformat()}
+            return request.make_response(
+                json.dumps(payload),
+                headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+            )
+
+        # Hourly aggregation preserves time-decay accuracy while keeping the
+        # endpoint bounded even for a heavily traded year-end expiry.
+        cr.execute("""
+            SELECT expiration, strike, option_type, direction,
+                   date_trunc('hour', deribit_ts) AS trade_hour,
+                   SUM(amount),
+                   SUM(iv * amount) / NULLIF(SUM(amount), 0),
+                   COUNT(*)
+              FROM dankbit_trade
+             WHERE name ILIKE %s
+               AND expiration = ANY(%s)
+               AND active = TRUE
+               AND iv <> 0
+               AND deribit_ts IS NOT NULL
+               AND deribit_ts <= %s
+             GROUP BY expiration, strike, option_type, direction, trade_hour
+             ORDER BY expiration, trade_hour
+        """, (f"{asset}-%", selected, now))
+        rows = cr.fetchall()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            base_from = float(icp.get_param("dankbit.from_price", default=100000))
+            base_to = float(icp.get_param("dankbit.to_price", default=150000))
+            base_step = max(50.0, float(icp.get_param("dankbit.steps", default=100)))
+        else:
+            base_from = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            base_to = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            base_step = max(5.0, float(icp.get_param("dankbit.eth_steps", default=50)))
+        index_price = float(request.env["dankbit.trade"].get_index_price(asset) or 0.0)
+
+        levels = []
+        total_trade_count = 0
+        for kind, expiry, half_life_hours, max_age_hours in specs:
+            relevant = [row for row in rows if row[0] == expiry]
+            if max_age_hours is not None:
+                relevant = [
+                    row for row in relevant
+                    if max(0.0, (now - row[4]).total_seconds() / 3600.0) <= max_age_hours
+                ]
+            if not relevant:
+                continue
+
+            # Combine hourly rows into Gamma inputs after applying freshness.
+            grouped = {}
+            first_seen = None
+            trade_count = 0
+            for row in relevant:
+                _, strike, option_type, direction, trade_hour, amount, avg_iv, count = row
+                age_hours = max(0.0, (now - trade_hour).total_seconds() / 3600.0)
+                freshness = 0.40 + 0.60 * math.pow(2.0, -age_hours / half_life_hours)
+                weighted_amount = float(amount or 0.0) * freshness
+                if weighted_amount <= 0:
+                    continue
+                key = (int(strike), option_type, direction)
+                bucket = grouped.setdefault(key, {"amount": 0.0, "iv_amount": 0.0})
+                bucket["amount"] += weighted_amount
+                bucket["iv_amount"] += float(avg_iv or 0.0) * weighted_amount
+                trade_count += int(count or 0)
+                first_seen = trade_hour if first_seen is None else min(first_seen, trade_hour)
+
+            if not grouped:
+                continue
+            strikes = [key[0] for key in grouped]
+            low_anchor = min(strikes + ([index_price] if index_price > 0 else []))
+            high_anchor = max(strikes + ([index_price] if index_price > 0 else []))
+            pad = max(base_step * 5.0, (high_anchor - low_anchor) * 0.08)
+            grid_from = min(base_from, low_anchor - pad)
+            grid_to = max(base_to, high_anchor + pad)
+            step = max(base_step, (grid_to - grid_from) / 1800.0)
+            STs = np.arange(grid_from, grid_to + step, step)
+
+            buyer_trades, seller_trades = [], []
+            for (strike, option_type, direction), bucket in grouped.items():
+                amount = bucket["amount"]
+                trd = _AggTrade(
+                    strike=strike, option_type=option_type, direction=direction,
+                    expiration=expiry, amount=amount,
+                    iv=bucket["iv_amount"] / amount if amount else 0.0,
+                )
+                (buyer_trades if direction == "buy" else seller_trades).append(trd)
+
+            buyer_price, buyer_strength = self._gamma_horizon_peak(STs, buyer_trades)
+            seller_price, seller_strength = self._gamma_horizon_peak(STs, seller_trades)
+            prices = [p for p in (buyer_price, seller_price) if p is not None]
+            if not prices:
+                continue
+            # Same semantic as Thales's existing mean Gamma: midpoint of the
+            # strongest buyer/seller Gamma prices, never injected back into it.
+            mean_price = float(sum(prices) / len(prices))
+            total_trade_count += trade_count
+            levels.append({
+                "kind": kind,
+                "expiry": expiry.replace(tzinfo=timezone.utc).isoformat(),
+                "price": mean_price,
+                "buyer_price": buyer_price,
+                "seller_price": seller_price,
+                "buyer_strength": buyer_strength,
+                "seller_strength": seller_strength,
+                "trade_count": trade_count,
+                "first_seen": first_seen.replace(tzinfo=timezone.utc).isoformat() if first_seen else None,
+                "half_life_hours": half_life_hours,
+            })
+
+        payload = {
+            "asset": asset,
+            "levels": levels,
+            "trade_count": total_trade_count,
+            "index_price": index_price,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "display_only": True,
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/api/delta-zero/<string:instrument>", type="http", auth="user", website=False, csrf=False)
     def delta_zero_json(self, instrument):
         parts = instrument.upper().split("-", 1)
@@ -1985,14 +2192,29 @@ class ChartController(http.Controller):
             )
 
         hours_param = request.httprequest.args.get("hours")
-        try:
-            hours = int(hours_param) if hours_param else None
-        except (TypeError, ValueError):
-            hours = None
-        # Prevent malformed/manual requests from creating an unbounded trade
-        # query.  The chart currently sends 2, 4, or the configured window.
-        if hours is not None and not 1 <= hours <= 168:
-            hours = None
+        if hours_param == "auto":
+            # "Auto" in the Delta Chart's Option Flow dropdown — size the
+            # trailing trade window off the nearest expiry's own time to
+            # settlement, the same shrink-as-expiry-nears sizing
+            # /4l/<asset>'s own "Auto" window uses (see _auto_window_hours).
+            # Resolved server-side so the client doesn't need the expiry.
+            bands_model = request.env["dankbit.bands"]
+            as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+            expirations = bands_model._distinct_expirations(asset, as_of, 1)
+            dte_hours = (
+                (expirations[0] - as_of).total_seconds() / 3600.0
+                if expirations else None
+            )
+            hours = _auto_window_hours(dte_hours)
+        else:
+            try:
+                hours = int(hours_param) if hours_param else None
+            except (TypeError, ValueError):
+                hours = None
+            # Prevent malformed/manual requests from creating an unbounded trade
+            # query.  The chart currently sends 2, 4, or the configured window.
+            if hours is not None and not 1 <= hours <= 168:
+                hours = None
 
         data = request.env["dankbit.bands"].get_box(asset, hours=hours)
         if not data:
@@ -2013,6 +2235,10 @@ class ChartController(http.Controller):
                 "buyer_max_loss": float(data["buyer_max_loss"]),
                 "zone_confirmation_mode": data.get("zone_confirmation_mode", "unknown"),
             }
+        # Resolved trailing window in hours (None on the default 00:00-UTC
+        # path) — echoed so the Delta Chart footer can show what "Auto (Time
+        # to Expiry)" actually picked, same as /4l/<asset>'s own window_hours.
+        payload["window_hours"] = hours
         payload["generated_at"] = datetime.now(timezone.utc).isoformat()
         return request.make_response(
             json.dumps(payload),
@@ -2066,9 +2292,15 @@ class ChartController(http.Controller):
             last_trade.deribit_ts.replace(tzinfo=timezone.utc).isoformat()
             if last_trade and last_trade.deribit_ts else None
         )
+        active_trade_count = request.env["dankbit.trade"].search_count([
+            ("name", "=ilike", f"{asset}-%"),
+            ("expiration", ">", datetime.now(timezone.utc).replace(tzinfo=None)),
+            ("active", "=", True),
+        ])
         payload = {
             "asset": asset,
             "last_trade_ts": last_trade_ts,
+            "active_trade_count": active_trade_count,
         }
         return request.make_response(
             json.dumps(payload),
@@ -3560,14 +3792,6 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         zones_box_refresh_interval = int(icp.get_param("dankbit.zones_box_refresh_interval", default=3600))
         zones_box_window_hours = int(icp.get_param("dankbit.zones_box_window_hours", default=8))
-        # QWeb's t-att-* omits the attribute entirely when the value is a
-        # falsy Python bool/None, so pass "true"/"false" strings (always
-        # truthy) rather than real booleans — otherwise data-show-daily=false
-        # would render as no attribute at all, indistinguishable from unset.
-        show_daily_lines = "true" if icp.get_param("dankbit.show_daily_lines", default="True") == "True" else "false"
-        show_weekly_lines = "true" if icp.get_param("dankbit.show_weekly_lines", default="True") == "True" else "false"
-        show_monthly_lines = "true" if icp.get_param("dankbit.show_monthly_lines", default="True") == "True" else "false"
-
         # Thales Forecast candle colors — rendering-only, read here (not
         # dankbit.forecast.snapshot.get_forecast_cfg()) since they only
         # affect the client-side forecastSeries, not simulate_forecast()'s
@@ -3616,9 +3840,6 @@ class ChartController(http.Controller):
             "refresh_interval": refresh_interval,
             "zones_box_refresh_interval": zones_box_refresh_interval,
             "zones_box_window_hours": zones_box_window_hours,
-            "show_daily_lines": show_daily_lines,
-            "show_weekly_lines": show_weekly_lines,
-            "show_monthly_lines": show_monthly_lines,
             "show_gamma_point": "false",
             "show_strike_gamma": "false",
             "strike_gamma_instrument": "",

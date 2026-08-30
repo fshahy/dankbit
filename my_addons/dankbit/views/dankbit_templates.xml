@@ -280,6 +280,31 @@
 					#signal-bot-panel .signal-neutral { color:#777; }
 					#signal-bot-panel .signal-grid { display:grid; grid-template-columns:auto auto; gap:1px 14px; margin-top:4px; }
 					#signal-bot-panel .signal-reason { margin-top:5px; color:#666; white-space:normal; }
+					#strategy-radar-panel {
+						position:fixed; top:calc(var(--tf-bar-bottom, 36px) + 8px); right:72px;
+						width:min(560px, calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom, 36px) - 28px);
+						display:none; flex-direction:column; overflow:hidden; z-index:20;
+						font:10.5pt/1.35 monospace; color:#333; background:rgba(255,255,255,0.97);
+						border:1px solid #aaa; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,0.24);
+					}
+					.strategy-radar-head { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #ddd; font-weight:bold; }
+					.strategy-radar-head button { margin-left:auto; border:0; background:transparent; font-size:15pt; cursor:pointer; color:inherit; }
+					.strategy-radar-controls { display:flex; gap:6px; padding:7px 10px; flex-wrap:wrap; border-bottom:1px solid #ddd; }
+					.strategy-radar-controls select { padding:3px 5px; font:10pt monospace; }
+					#strategy-radar-summary { padding:5px 10px; color:#666; border-bottom:1px solid #ddd; }
+					.strategy-radar-body { display:grid; grid-template-columns:210px minmax(0,1fr); min-height:360px; overflow:hidden; }
+					#strategy-radar-list { overflow-y:auto; border-right:1px solid #ddd; padding:5px; }
+					.strategy-card { width:100%; padding:7px; margin-bottom:5px; text-align:left; border:1px solid #ccc; border-radius:5px; background:#fff; cursor:pointer; font:9.5pt/1.35 monospace; }
+					.strategy-card.active { border-color:#7e57c2; background:#f3eafa; }
+					.strategy-card .confirmed { color:#16833b; font-weight:bold; }
+					.strategy-card .probable { color:#ef6c00; font-weight:bold; }
+					#strategy-radar-detail { overflow-y:auto; padding:9px 11px; }
+					.strategy-title { font-weight:bold; font-size:11.5pt; margin-bottom:5px; }
+					.strategy-meta { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin-bottom:8px; }
+					.strategy-payoff-svg { width:100%; height:210px; display:block; border:1px solid #ddd; background:#fff; }
+					.strategy-leg { padding:4px 0; border-bottom:1px dotted #ccc; }
+					.strategy-note { color:#777; font-size:9pt; margin-top:6px; }
+					@media (max-width:760px) { .strategy-radar-body { grid-template-columns:1fr; overflow-y:auto; } #strategy-radar-list { max-height:150px; border-right:0; border-bottom:1px solid #ddd; } }
 					.signal-bot-control { position:relative; display:flex; align-items:stretch; }
 					.signal-bot-control .toggle-label { border-radius:4px 0 0 4px; border-right:0; }
 					.signal-bot-summary { max-width:165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777; font-size:9.5pt; }
@@ -340,7 +365,8 @@
 					.modal-box {
 						background: #fff; border-radius: 6px; padding: 16px 20px;
 						font-family: monospace; font-size: 11pt; color: #333;
-						min-width: 280px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+						min-width: 280px; max-height: 90vh; overflow-y: auto;
+						box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 					}
 					.modal-header {
 						display: flex; justify-content: space-between; align-items: center;
@@ -361,6 +387,13 @@
 					}
 					.line-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
 					.line-row select { width: 92px; padding: 3px 4px; }
+					.gamma-horizon-row {
+						display: grid; grid-template-columns: minmax(105px, 1fr) 26px 44px 92px 58px;
+						align-items: center; gap: 8px; padding: 3px 0;
+					}
+					.gamma-horizon-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
+					.gamma-horizon-row select { width: 92px; padding: 3px 4px; }
+					.gamma-horizon-row input[type="number"] { width: 52px; padding: 3px; }
 					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
@@ -375,6 +408,11 @@
 					body.dark #forecast-status-label.forecast-risk-warning { color:#ffe0b2; background:rgba(183,75,0,0.94); border-color:#ff9800; }
 					body.dark #signal-bot-panel { color:#ddd; background:rgba(0,0,0,0.88); border-color:#555; box-shadow:0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #signal-bot-panel .signal-reason { color:#aaa; }
+					body.dark #strategy-radar-panel { color:#ddd; background:rgba(12,12,12,0.97); border-color:#555; }
+					body.dark .strategy-radar-head, body.dark .strategy-radar-controls, body.dark #strategy-radar-summary, body.dark #strategy-radar-list { border-color:#444; }
+					body.dark .strategy-card { color:#ddd; background:#1b1b1b; border-color:#555; }
+					body.dark .strategy-card.active { background:#30233a; border-color:#a778c4; }
+					body.dark .strategy-payoff-svg { background:#111; border-color:#444; }
 					body.dark .signal-bot-menu { background:rgba(20,20,20,0.98); border-color:#555; }
 					body.dark .signal-bot-menu button, body.dark .signal-bot-menu a { color:#ddd; }
 					body.dark .signal-bot-menu button:hover, body.dark .signal-bot-menu a:hover { background:#333; }
@@ -393,13 +431,22 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-daily="show_daily_lines" t-att-data-show-weekly="show_weekly_lines" t-att-data-show-monthly="show_monthly_lines" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
+				<div t-att-data-instrument="instrument" t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-zones-box-refresh="zones_box_refresh_interval" t-att-data-zones-box-window-hours="zones_box_window_hours" t-att-data-monthly="monthly_instrument" t-att-data-show-gamma-point="show_gamma_point" t-att-data-show-strike-gamma="show_strike_gamma" t-att-data-strike-gamma-instrument="strike_gamma_instrument" t-att-data-forecast-up-color="forecast_up_color" t-att-data-forecast-down-color="forecast_down_color" t-att-data-forecast-wick-up-color="forecast_wick_up_color" t-att-data-forecast-wick-down-color="forecast_wick_down_color" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="rsi-container"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="forecast-status-label" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
 				<div id="signal-bot-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'"/>
+				<div id="strategy-radar-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+					<div class="strategy-radar-head"><span>Option Strategy Radar</span><button type="button" onclick="closeStrategyRadar()">&#10005;</button></div>
+					<div class="strategy-radar-controls">
+						<select id="strategy-radar-expiry" onchange="renderStrategyRadar()"><option value="all">All Expiries</option></select>
+						<select id="strategy-radar-source" onchange="renderStrategyRadar()"><option value="all">All Sources</option><option value="confirmed_block">Confirmed Blocks</option><option value="probable_screen">Probable Screen</option></select>
+					</div>
+					<div id="strategy-radar-summary">Loading…</div>
+					<div class="strategy-radar-body"><div id="strategy-radar-list"/><div id="strategy-radar-detail"/></div>
+				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -414,8 +461,12 @@
 					</select>
 					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
 						<label class="toggle-label">
-							<input type="checkbox" id="lines-toggle" onchange="onToggleLines()"/>
-							S/D
+							<input type="checkbox" id="gamma-horizon-toggle" onchange="onToggleGammaHorizon()"/>
+							Gamma Horizon
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="strategy-radar-toggle" onchange="onToggleStrategyRadar()"/>
+							Strategy Radar
 						</label>
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
@@ -454,6 +505,7 @@
 							<option value="midnight">00:00 UTC</option>
 							<option value="2">Last 2 Hours</option>
 							<option value="4">Last 4 Hours</option>
+							<option value="auto">Auto (Time to Expiry)</option>
 							<option value="configured"><t t-esc="zones_box_window_hours"/>h (Configured)</option>
 						</select>
 					</t>
@@ -488,6 +540,16 @@
 							<label class="line-row"><span>Lower</span><input type="color" id="color-smartLiqLower"/><select id="style-smartLiqLower"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
 						</div>
 						<div class="modal-section">
+							<div class="modal-section-title">Gamma Horizon</div>
+							<label class="gamma-horizon-row"><span>Tomorrow (D1)</span><input type="checkbox" id="gh-visible-D1"/><input type="color" id="gh-color-D1"/><select id="gh-style-D1"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-D1" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Weekly (W)</span><input type="checkbox" id="gh-visible-W"/><input type="color" id="gh-color-W"/><select id="gh-style-W"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-W" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Monthly (M)</span><input type="checkbox" id="gh-visible-M"/><input type="color" id="gh-color-M"/><select id="gh-style-M"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-M" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Year End (YE)</span><input type="checkbox" id="gh-visible-YE"/><input type="color" id="gh-color-YE"/><select id="gh-style-YE"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-YE" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="color-row"><span>Weekly Line Count (0–3)</span><input type="number" id="gh-weekly-count" min="0" max="3" step="1"/></label>
+							<label class="color-row"><span>Monthly Line Count (0–3)</span><input type="number" id="gh-monthly-count" min="0" max="3" step="1"/></label>
+							<label class="color-row"><span>Show Expiry Date Labels</span><input type="checkbox" id="gh-show-labels"/></label>
+						</div>
+						<div class="modal-section">
 							<div class="modal-section-title" id="forecast-settings-title">Forecast Candles (4H)</div>
 							<label class="color-row"><span id="forecast-count-label">Candle Count (1–18)</span> <input type="number" id="forecast-candle-count" min="1" max="18" step="1"/></label>
 							<label class="color-row" title="Body color of bullish forecast candles">Bullish Body <input type="color" id="color-forecastUp"/></label>
@@ -516,9 +578,6 @@
 					// below) — not just the Zones boxes despite the name/setting.
 					const ZONES_BOX_REFRESH = parseInt(cfg.zonesBoxRefresh, 10) * 1000;
 					const ZONES_BOX_WINDOW_HOURS = parseInt(cfg.zonesBoxWindowHours, 10);
-					const SHOW_DAILY_LINES   = cfg.showDaily !== 'false';
-					const SHOW_WEEKLY_LINES  = cfg.showWeekly !== 'false';
-					const SHOW_MONTHLY_LINES = cfg.showMonthly !== 'false';
 					// Always "false" now — /oi/<asset> (its own "Top OI(s)"
 					// checkbox) has been removed; kept as an explicit context
 					// key/flag since MINIMAL_CHART below still reads it.
@@ -537,25 +596,17 @@
 					const FORECAST_WICK_DOWN_COLOR = cfg.forecastWickDownColor || '#e57373';
 					// /oi/<asset> and /mp/<instrument> are the minimal pages
 					// (candles + exactly one gamma indicator each — no
-					// Weekly/Monthly/All/Daily delta=0 lines, no zones
-					// boxes/extrema, no S/D (Lines)/Zones/Bands/Thales Forecast
+					// Gamma Horizon, zones, bands and Thales Forecast overlays
+					// are not rendered on the two minimal chart pages
 					// checkboxes); the footer (trade count/nearest expiry) is
 					// untouched either way.
 					const MINIMAL_CHART = SHOW_GAMMA_POINT || SHOW_STRIKE_GAMMA;
-					// User-toggleable via the "S/D" checkbox next to the Ruler
-					// button (Delta Chart only — the Gamma Chart has its own,
-					// unrelated "Top OI(s)" checkbox instead) — hides every
-					// horizontal price-line indicator (delta=0 sets) and, to
-					// actually cut server load rather than just hiding the result
-					// client-side, makes each of their refresh*() functions skip
-					// the fetch entirely while off (see onToggleLines() below).
-					// refreshMonthlyDeltaZero() is the one exception — it always
-					// fetches regardless, since its trade_count feeds the footer.
-					// Unchecked/off by default, matching the checkbox's own
-					// default (unchecked) state above.
-					let SHOW_ALL_LINES = false;
-					// User-toggleable via the "Zones" checkbox (Delta Chart only,
-					// right after "S/D") — controls the yellow top/bottom
+					// Gamma Horizon is a display-only term-Gamma overlay. It owns
+					// no backend dependency from Forecast/Bands/Greeks/Robot and is
+					// deliberately off by default.
+					let SHOW_GAMMA_HORIZON = false;
+					// User-toggleable via the "Zones" checkbox (Delta Chart only)
+					// — controls the yellow top/bottom
 					// zero-crossing boxes (High Zone/Low Zone) and the teal Seller
 					// Max Profit/Buyer Max Loss box (Middle Zone), i.e. everything
 					// refreshZonesBoxes()/clearZonesBoxes() draw. Checked/on by
@@ -585,6 +636,13 @@
 					// original since-00:00-UTC-through-now default; '2'/'4' select
 					// fixed trailing windows, while 'configured' uses
 					// ZONES_BOX_WINDOW_HOURS (see dankbit.zones_box_window_hours).
+					// 'auto' is a zones-boxes-only mode — it sends ?hours=auto and
+					// lets the server size the trailing window off the nearest
+					// expiry's own time-to-settlement (see _auto_window_hours /
+					// zones_box_json), the same behaviour /4l/<asset>'s own "Auto"
+					// window has; every other Option Flow consumer (Bands, Smart
+					// Liquidity, Forecast) treats 'auto' exactly like the default
+					// 00:00-UTC view (selectedOptionFlowHours() returns null for it).
 					// Only a trailing-window selection is ever
 					// sent as a query param (see refreshZonesBoxes()) — a live,
 					// non-persisted override on the server side (see get_box()'s
@@ -593,7 +651,7 @@
 					// unaffected either way.
 					let ZONES_BOX_WINDOW_MODE = 'midnight';
 					function selectedOptionFlowHours() {
-						if (ZONES_BOX_WINDOW_MODE === 'midnight') return null;
+						if (ZONES_BOX_WINDOW_MODE === 'midnight' || ZONES_BOX_WINDOW_MODE === 'auto') return null;
 						return ZONES_BOX_WINDOW_MODE === 'configured'
 							? ZONES_BOX_WINDOW_HOURS
 							: parseInt(ZONES_BOX_WINDOW_MODE, 10);
@@ -645,6 +703,7 @@
 					const FORECAST_COUNT_STORAGE_KEY = 'dankbit_forecast_candle_counts';
 					const BAND_SMOOTHING_STORAGE_KEY = 'dankbit_band_adaptive_smoothing';
 					const BAND_SMOOTHING_STATE_KEY = 'dankbit_band_smoothing_state_' + ASSET;
+					const GAMMA_HORIZON_SETTINGS_KEY = 'dankbit_gamma_horizon_settings';
 					const FORECAST_MAX_COUNTS = { '1h': 72, '4h': 18, '1d': 3 };
 					const DEFAULT_COLORS = {
 						zonesBox: '#fbc02d',
@@ -666,8 +725,18 @@
 						smartLiqUpper: 'dashed',
 						smartLiqLower: 'dashed',
 					};
+					const DEFAULT_GAMMA_HORIZON_SETTINGS = {
+						D1: { visible:true, color:'#ff9800', style:'dashed', width:1 },
+						W:  { visible:true, color:'#7e57c2', style:'solid', width:1 },
+						M:  { visible:true, color:'#00acc1', style:'dashed', width:1 },
+						YE: { visible:true, color:'#d81b60', style:'solid', width:2 },
+						weeklyCount:3,
+						monthlyCount:3,
+						showLabels:true,
+					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					let chartLineStyles = Object.assign({}, DEFAULT_LINE_STYLES);
+					let gammaHorizonSettings = JSON.parse(JSON.stringify(DEFAULT_GAMMA_HORIZON_SETTINGS));
 					let bandAdaptiveSmoothing = localStorage.getItem(BAND_SMOOTHING_STORAGE_KEY) !== 'false';
 					// State is isolated per timeframe. Reusing a 1H ATR-derived buffer on
 					// 4H/1D was visually smooth but mathematically inconsistent and made
@@ -704,6 +773,21 @@
 							if (['solid', 'dashed', 'dotted'].includes(savedStyles[key])) chartLineStyles[key] = savedStyles[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
+					try {
+						const saved = JSON.parse(localStorage.getItem(GAMMA_HORIZON_SETTINGS_KEY) || '{}');
+						['D1', 'W', 'M', 'YE'].forEach(kind => {
+							const row = saved[kind] || {};
+							if (typeof row.visible === 'boolean') gammaHorizonSettings[kind].visible = row.visible;
+							if (/^#[0-9a-f]{6}$/i.test(row.color || '')) gammaHorizonSettings[kind].color = row.color;
+							if (['solid', 'dashed', 'dotted'].includes(row.style)) gammaHorizonSettings[kind].style = row.style;
+							gammaHorizonSettings[kind].width = Math.max(1, Math.min(4, parseInt(row.width, 10) || gammaHorizonSettings[kind].width));
+						});
+						const savedWeeklyCount = parseInt(saved.weeklyCount, 10);
+						const savedMonthlyCount = parseInt(saved.monthlyCount, 10);
+						if (Number.isFinite(savedWeeklyCount)) gammaHorizonSettings.weeklyCount = Math.max(0, Math.min(3, savedWeeklyCount));
+						if (Number.isFinite(savedMonthlyCount)) gammaHorizonSettings.monthlyCount = Math.max(0, Math.min(3, savedMonthlyCount));
+						if (typeof saved.showLabels === 'boolean') gammaHorizonSettings.showLabels = saved.showLabels;
+					} catch (e) { /* malformed stored value — use Gamma Horizon defaults */ }
 
 					function lineStyleFromName(name) {
 						if (name === 'dashed') return LightweightCharts.LineStyle.Dashed;
@@ -719,11 +803,8 @@
 						return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 					}
 
-					const DZ_URL           = '/api/delta-zero/' + INSTRUMENT;
-					const MDZ_URL          = MONTHLY_INST ? '/api/delta-zero/' + MONTHLY_INST : '';
-					const ADZ_URL          = '/api/delta-zero-all/' + ASSET;
-					const DZT_URL          = '/api/delta-zero-tomorrow/' + ASSET;
-					const DZT2_URL         = '/api/delta-zero-day-after-tomorrow/' + ASSET;
+					const GAMMA_HORIZON_URL = '/api/gamma-horizon/' + ASSET;
+					const STRATEGY_RADAR_URL = '/api/option-strategy-radar/' + ASSET;
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -947,11 +1028,7 @@
 						lastValueVisible: false, priceLineVisible: false,
 					});
 
-					let priceLines    = [];
-					let monthlyLines  = [];
-					let allLines      = [];
-					let tomorrowLines = [];
-					let dayAfterTomorrowLines = [];
+					let gammaHorizonLines = [];
 
 					function clearLines(arr) {
 						arr.forEach(pl => series.removePriceLine(pl));
@@ -1119,26 +1196,178 @@
 						await updateForecastVisibility();
 					}
 
-					async function refreshDeltaZero() {
-						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(DZ_URL)).json();
-						// Re-check: "S/D" may have been switched off while this fetch
-						// was in flight — onToggleLines() already cleared priceLines
-						// synchronously in that case, so just bail without redrawing.
-						if (!SHOW_ALL_LINES) return;
-						clearLines(priceLines);
-						if (!SHOW_WEEKLY_LINES) return;
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => priceLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Weekly',
-						})));
+					function gammaHorizonLabel(item) {
+						if (!gammaHorizonSettings.showLabels) return '';
+						const expiry = new Date(item.expiry);
+						const date = expiry.toLocaleDateString('en-GB', {
+							timeZone:'UTC', day:'2-digit', month:'short', year:'2-digit',
+						}).toUpperCase().replace(/ /g, ' ');
+						return item.kind + ' · ' + date;
+					}
+
+					async function refreshGammaHorizon() {
+						if (MINIMAL_CHART || !SHOW_GAMMA_HORIZON) return;
+						const response = await fetch(GAMMA_HORIZON_URL);
+						if (!response.ok) throw new Error('Gamma Horizon HTTP ' + response.status);
+						const data = await response.json();
+						if (!SHOW_GAMMA_HORIZON) return;
+						clearLines(gammaHorizonLines);
+						const drawnCounts = { W:0, M:0 };
+						(data.levels || []).forEach(item => {
+							if (!Number.isFinite(Number(item.price))) return;
+							const appearance = gammaHorizonSettings[item.kind] || gammaHorizonSettings.W;
+							if (!appearance.visible) return;
+							if (item.kind === 'W' && drawnCounts.W++ >= gammaHorizonSettings.weeklyCount) return;
+							if (item.kind === 'M' && drawnCounts.M++ >= gammaHorizonSettings.monthlyCount) return;
+							gammaHorizonLines.push(series.createPriceLine({
+								price:Number(item.price), color:appearance.color, lineWidth:appearance.width,
+								lineStyle:lineStyleFromName(appearance.style), axisLabelVisible:true,
+								axisLabelColor:appearance.color, title:gammaHorizonLabel(item),
+							}));
+						});
+						lastTradeCount = Number(data.trade_count || 0);
+						updateStatusLine();
+					}
+
+					function onToggleGammaHorizon() {
+						SHOW_GAMMA_HORIZON = Boolean(document.getElementById('gamma-horizon-toggle')?.checked);
+						if (SHOW_GAMMA_HORIZON) safeRefresh('Gamma Horizon', refreshGammaHorizon);
+						else clearLines(gammaHorizonLines);
+					}
+
+					let SHOW_STRATEGY_RADAR = false;
+					let strategyRadarData = null;
+					let selectedStrategyRadarId = null;
+
+					function radarEsc(value) {
+						return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+					}
+
+					function radarMoney(value) {
+						const number = Number(value || 0);
+						return (number >= 0 ? '+' : '−') + '$' + Math.abs(number).toLocaleString(undefined, {maximumFractionDigits:0});
+					}
+
+					function radarDate(value, withTime) {
+						if (!value) return '—';
+						return new Date(value).toLocaleString('en-GB', {
+							timeZone:'UTC', day:'2-digit', month:'short', year:'2-digit',
+							hour:withTime ? '2-digit' : undefined, minute:withTime ? '2-digit' : undefined,
+						}).toUpperCase() + (withTime ? ' UTC' : '');
+					}
+
+					function payoffSvg(strategy) {
+						const points = strategy.payoff || [];
+						if (points.length < 2) return '<div class="strategy-note">No payoff curve available.</div>';
+						const width=640, height=260, left=58, right=18, top=18, bottom=38;
+						const xs=points.map(p=>Number(p.price)), ys=points.map(p=>Number(p.value));
+						const minX=Math.min(...xs), maxX=Math.max(...xs);
+						let minY=Math.min(0,...ys), maxY=Math.max(0,...ys);
+						if (maxY === minY) { maxY += 1; minY -= 1; }
+						const pad=(maxY-minY)*0.08; minY-=pad; maxY+=pad;
+						const sx=x=>left+(x-minX)/(maxX-minX)*(width-left-right);
+						const sy=y=>top+(maxY-y)/(maxY-minY)*(height-top-bottom);
+						const poly=points.map(p=>sx(Number(p.price)).toFixed(1)+','+sy(Number(p.value)).toFixed(1)).join(' ');
+						const zeroY=sy(0).toFixed(1);
+						const spotX = Number(strategyRadarData?.spot || 0) >= minX && Number(strategyRadarData?.spot || 0) <= maxX ? sx(Number(strategyRadarData.spot)).toFixed(1) : null;
+						const color = strategy.bias === 'bullish' ? '#16833b' : strategy.bias === 'bearish' ? '#c62828' : strategy.bias === 'volatility' ? '#7e57c2' : '#1565c0';
+						const beLines=(strategy.breakevens||[]).map(be=>'<line x1="'+sx(Number(be)).toFixed(1)+'" y1="'+top+'" x2="'+sx(Number(be)).toFixed(1)+'" y2="'+(height-bottom)+'" stroke="#ff9800" stroke-dasharray="4 4"/><text x="'+sx(Number(be)).toFixed(1)+'" y="'+(height-7)+'" text-anchor="middle" font-size="10" fill="#ff9800">BE '+Number(be).toLocaleString(undefined,{maximumFractionDigits:0})+'</text>').join('');
+						return '<svg class="strategy-payoff-svg" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="Payoff at expiry">'
+							+'<line x1="'+left+'" y1="'+zeroY+'" x2="'+(width-right)+'" y2="'+zeroY+'" stroke="#888" stroke-width="1"/>'
+							+(spotX?'<line x1="'+spotX+'" y1="'+top+'" x2="'+spotX+'" y2="'+(height-bottom)+'" stroke="#2196f3" stroke-dasharray="3 4"/>':'')
+							+beLines+'<polyline points="'+poly+'" fill="none" stroke="'+color+'" stroke-width="3"/>'
+							+'<text x="'+left+'" y="14" font-size="11" fill="#777">P&amp;L at expiry (approx. USD)</text>'
+							+'<text x="'+left+'" y="'+(height-7)+'" font-size="10" fill="#777">'+minX.toLocaleString(undefined,{maximumFractionDigits:0})+'</text>'
+							+'<text x="'+(width-right)+'" y="'+(height-7)+'" text-anchor="end" font-size="10" fill="#777">'+maxX.toLocaleString(undefined,{maximumFractionDigits:0})+'</text>'
+							+'<text x="4" y="'+(top+8)+'" font-size="10" fill="#777">'+radarMoney(maxY)+'</text>'
+							+'<text x="4" y="'+(height-bottom)+'" font-size="10" fill="#777">'+radarMoney(minY)+'</text></svg>';
+					}
+
+					function renderStrategyRadarDetail(strategy) {
+						const detail = document.getElementById('strategy-radar-detail');
+						if (!detail) return;
+						if (!strategy) { detail.innerHTML='<div class="strategy-note">No strategy matches the selected filters.</div>'; return; }
+						const sourceLabel = strategy.source === 'confirmed_block' ? 'Confirmed Block' : 'Probable Screen Match';
+						const legs=(strategy.legs||[]).map(leg=>'<div class="strategy-leg"><b>'+radarEsc(leg.label)+'</b><br/>Amount '+Number(leg.amount).toLocaleString()+' · Premium '+Number(leg.price).toFixed(5)+'</div>').join('');
+						detail.innerHTML='<div class="strategy-title">'+radarEsc(strategy.name)+'</div>'
+							+'<div class="strategy-meta"><span>Source</span><b>'+radarEsc(sourceLabel)+'</b><span>Confidence</span><b>'+Number(strategy.confidence)+'%</b><span>Expiry</span><b>'+radarDate(strategy.expiry,false)+'</b><span>Detected</span><b>'+radarDate(strategy.entered_at,true)+'</b><span>Net premium</span><b>'+radarMoney(strategy.net_premium_usd)+'</b><span>Best in view</span><b>'+radarMoney(strategy.max_profit_in_view_usd)+'</b><span>Worst in view</span><b>'+radarMoney(strategy.max_loss_in_view_usd)+'</b></div>'
+							+payoffSvg(strategy)+'<div style="margin-top:8px;font-weight:bold">Legs</div>'+legs
+							+'<div class="strategy-note">Approximate USD-equivalent visualization. A Block ID confirms leg association, not the trader’s external hedge or spot position.</div>';
+					}
+
+					function filteredStrategyRadarRows() {
+						const expiry = document.getElementById('strategy-radar-expiry')?.value || 'all';
+						const source = document.getElementById('strategy-radar-source')?.value || 'all';
+						return (strategyRadarData?.strategies || []).filter(row => (expiry === 'all' || row.expiry === expiry) && (source === 'all' || row.source === source));
+					}
+
+					function selectStrategyRadar(id) {
+						selectedStrategyRadarId = id;
+						renderStrategyRadar();
+					}
+
+					function renderStrategyRadar() {
+						const rows = filteredStrategyRadarRows();
+						if (!rows.some(row=>row.id===selectedStrategyRadarId)) selectedStrategyRadarId = rows[0]?.id || null;
+						const list = document.getElementById('strategy-radar-list');
+						if (list) {
+							list.replaceChildren();
+							rows.forEach(row => {
+								const button=document.createElement('button'); button.type='button';
+								button.className='strategy-card'+(row.id===selectedStrategyRadarId?' active':'');
+								const badge=row.source==='confirmed_block'?'confirmed':'probable';
+								button.innerHTML='<b>'+radarEsc(row.name)+'</b><br/><span class="'+badge+'">'+(badge==='confirmed'?'CONFIRMED BLOCK':'PROBABLE')+' · '+Number(row.confidence)+'%</span><br/>'+radarDate(row.expiry,false);
+								button.addEventListener('click',()=>selectStrategyRadar(row.id)); list.appendChild(button);
+							});
+						}
+						const summary=document.getElementById('strategy-radar-summary');
+						const totals=strategyRadarData?.summary||{};
+						if (summary) summary.textContent=rows.length+' shown · '+Number(totals.confirmed_blocks||0)+' confirmed · '+Number(totals.probable_screen||0)+' probable · Bull '+Number(totals.bullish||0)+' / Bear '+Number(totals.bearish||0);
+						renderStrategyRadarDetail(rows.find(row=>row.id===selectedStrategyRadarId));
+					}
+
+					async function refreshStrategyRadar() {
+						if (!SHOW_STRATEGY_RADAR || MINIMAL_CHART) return;
+						const response=await fetch(STRATEGY_RADAR_URL);
+						if (!response.ok) throw new Error('Strategy Radar HTTP '+response.status);
+						strategyRadarData=await response.json();
+						if (!SHOW_STRATEGY_RADAR) return;
+						const select=document.getElementById('strategy-radar-expiry');
+						const previous=select?.value||'all';
+						if (select) {
+							select.innerHTML='<option value="all">All Expiries</option>';
+							[...new Set((strategyRadarData.strategies||[]).map(row=>row.expiry))].sort().forEach(expiry=>{
+								const option=document.createElement('option'); option.value=expiry; option.textContent=radarDate(expiry,false); select.appendChild(option);
+							});
+							select.value=[...select.options].some(option=>option.value===previous)?previous:'all';
+						}
+						renderStrategyRadar();
+					}
+
+					function closeStrategyRadar() {
+						SHOW_STRATEGY_RADAR=false;
+						const toggle=document.getElementById('strategy-radar-toggle'); if (toggle) toggle.checked=false;
+						const panel=document.getElementById('strategy-radar-panel'); if (panel) panel.style.display='none';
+					}
+
+					function onToggleStrategyRadar() {
+						SHOW_STRATEGY_RADAR=Boolean(document.getElementById('strategy-radar-toggle')?.checked);
+						const panel=document.getElementById('strategy-radar-panel'); if (panel) panel.style.display=SHOW_STRATEGY_RADAR?'flex':'none';
+						if (SHOW_STRATEGY_RADAR) safeRefresh('Strategy Radar', refreshStrategyRadar);
 					}
 
 					let nearestExpiryStr = null;
 					let lastTradeCount = 0;
 					let lastTradeTs = null;
+					// Set from /api/zones-box's echoed `window_hours` while the
+					// Option Flow dropdown is on "Auto (Time to Expiry)" — null
+					// otherwise (every non-auto mode). Shown in the footer so the
+					// user sees what the server-side _auto_window_hours() picked,
+					// matching /4l/<asset>'s own "Auto → <N>h/<N>d" footer text.
+					let zonesBoxAutoHours = null;
+					function zonesBoxHoursLabel(hours) {
+						return (hours >= 24 && hours % 24 === 0) ? (hours / 24) + 'd' : hours + 'h';
+					}
 
 					// Shown in real UTC (not the browser-local tzOffset shift the
 					// chart's own time axis uses) — this is a staleness check
@@ -1158,28 +1387,12 @@
 						const expiries = [INSTRUMENT, MONTHLY_INST].filter(Boolean).join('  ·  ');
 						let text = expiries + '  ·  ' + lastTradeCount + ' trades';
 						if (nearestExpiryStr) text += '  ·  Nearest: ' + nearestExpiryStr;
+						if (zonesBoxAutoHours !== null) {
+							text += '  ·  Option Flow: Auto → ' + zonesBoxHoursLabel(zonesBoxAutoHours) + ' trailing window';
+						}
 						const lastTradeLabel = formatLastTradeTs(lastTradeTs);
 						if (lastTradeLabel) text += '  ·  Last trade: ' + lastTradeLabel;
 						setStatus(text);
-					}
-
-					async function refreshMonthlyDeltaZero() {
-						if (!MDZ_URL) return;
-						const data = await (await fetch(MDZ_URL)).json();
-						clearLines(monthlyLines);
-						// Line drawing is skipped in minimal mode or with the "S/D"
-						// checkbox off, but this fetch still runs — its trade_count
-						// feeds the footer's "N trades", which stays on /oi/<asset> too.
-						if (SHOW_MONTHLY_LINES && !MINIMAL_CHART && SHOW_ALL_LINES) {
-							const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-							zeros.forEach(item => monthlyLines.push(series.createPriceLine({
-								price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
-								lineStyle: LightweightCharts.LineStyle.Solid,
-								axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'Monthly',
-							})));
-						}
-						lastTradeCount = data.trade_count || 0;
-						updateStatusLine();
 					}
 
 					async function refreshNearestExpiry() {
@@ -1199,79 +1412,8 @@
 						// container, silently dropping every trade).
 						const data = await (await fetch(LAST_TRADE_URL)).json();
 						lastTradeTs = data.last_trade_ts || null;
+						if (!SHOW_GAMMA_HORIZON) lastTradeCount = Number(data.active_trade_count || 0);
 						updateStatusLine();
-					}
-
-					async function refreshAllDeltaZero() {
-						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(ADZ_URL)).json();
-						// Re-check: see refreshDeltaZero's own comment above.
-						if (!SHOW_ALL_LINES) return;
-						clearLines(allLines);
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => allLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: axisBlack(), title: 'All',
-						})));
-					}
-
-					async function refreshTomorrowDeltaZero() {
-						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(DZT_URL)).json();
-						// Re-check: see refreshDeltaZero's own comment above.
-						if (!SHOW_ALL_LINES) return;
-						clearLines(tomorrowLines);
-						if (!SHOW_DAILY_LINES) return;
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => tomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily (24H)',
-						})));
-					}
-
-					async function refreshDayAfterTomorrowDeltaZero() {
-						if (MINIMAL_CHART || !SHOW_ALL_LINES) return;
-						const data = await (await fetch(DZT2_URL)).json();
-						// Re-check: see refreshDeltaZero's own comment above.
-						if (!SHOW_ALL_LINES) return;
-						clearLines(dayAfterTomorrowLines);
-						if (!SHOW_DAILY_LINES) return;
-						const zeros = [...(data.delta_zero || [])].sort((a, b) => a.price - b.price);
-						zeros.forEach(item => dayAfterTomorrowLines.push(series.createPriceLine({
-							price: item.price, color: item.type === 'demand' ? 'red' : axisBlack(), lineWidth: 1,
-							lineStyle: LightweightCharts.LineStyle.Solid,
-							axisLabelVisible: true, axisLabelColor: 'orange', title: 'Daily+1 (24H)',
-						})));
-					}
-
-					// "S/D" checkbox (next to Ruler) — hides every horizontal
-					// price-line indicator (delta=0 sets) and stops their
-					// refresh*() functions from even fetching (see SHOW_ALL_LINES
-					// above), to actually cut server load rather than just hiding
-					// the result. Turning off clears everything immediately rather
-					// than waiting for each set's own next poll (their refresh*()
-					// functions return before their own clearLines() call when
-					// SHOW_ALL_LINES is false). Turning back on re-fetches
-					// everything immediately for the same reason.
-					// refreshMonthlyDeltaZero() is untouched here — it always
-					// keeps polling regardless, for the footer's trade count.
-					function onToggleLines() {
-						SHOW_ALL_LINES = document.getElementById('lines-toggle').checked;
-						if (SHOW_ALL_LINES) {
-							refreshDeltaZero();
-							refreshMonthlyDeltaZero();
-							refreshAllDeltaZero();
-							refreshTomorrowDeltaZero();
-							refreshDayAfterTomorrowDeltaZero();
-						} else {
-							clearLines(priceLines);
-							clearLines(monthlyLines);
-							clearLines(allLines);
-							clearLines(tomorrowLines);
-							clearLines(dayAfterTomorrowLines);
-						}
 					}
 
 					// Populated by refreshBands() from Smart Liquidity rows only.
@@ -2048,6 +2190,8 @@
 						belowBoxBottomLine.setData([]);
 						smpBmlBoxSeries.setData([]);
 						smpBmlBoxBottomLine.setData([]);
+						zonesBoxAutoHours = null;
+						updateStatusLine();
 					}
 
 					async function refreshZonesBoxes() {
@@ -2058,7 +2202,14 @@
 						// trailing selection adds ?hours= and makes the server compute a
 						// display-only live preview instead — see
 						// ZONES_BOX_WINDOW_MODE above.
-						const url = withOptionFlowWindow(ZB_URL);
+						// 'auto' is zones-boxes-only: send ?hours=auto and let the
+						// server size the window off the nearest expiry's DTE (see
+						// _auto_window_hours / zones_box_json). withOptionFlowWindow()
+						// deliberately ignores 'auto' so Bands/Smart Liquidity/Forecast
+						// stay on their default 00:00-UTC view.
+						const url = ZONES_BOX_WINDOW_MODE === 'auto'
+							? ZB_URL + (ZB_URL.includes('?') ? '&' : '?') + 'hours=auto'
+							: withOptionFlowWindow(ZB_URL);
 						const data = await (await fetch(url)).json();
 						// Re-check: the "Zones" checkbox may have been switched off
 						// while this fetch was in flight (e.g. a periodic poll or a
@@ -2067,6 +2218,13 @@
 						// boxes would still get redrawn a few seconds after being
 						// unchecked once this stale response arrives.
 						if (!SHOW_ZONES_BOXES) return;
+						// Footer "Option Flow: Auto → <N>h" text — only while the
+						// dropdown is on "Auto" and the server echoed a resolved
+						// window_hours; every other mode leaves it null (see
+						// zonesBoxAutoHours / updateStatusLine).
+						zonesBoxAutoHours = (ZONES_BOX_WINDOW_MODE === 'auto' && typeof data.window_hours === 'number')
+							? data.window_hours : null;
+						updateStatusLine();
 						if (!data || data.t === undefined) {
 							clearZonesBoxes();
 							return;
@@ -2099,7 +2257,7 @@
 						setBoxData(smpBmlBoxSeries, smpBmlBoxBottomLine, smpBmlTop, smpBmlBottom, fromTime, toTime);
 					}
 
-					// "Zones" checkbox (Delta Chart only, right after "S/D") —
+					// "Zones" checkbox (Delta Chart only) —
 					// controls the yellow High Zone/Low Zone boxes and the teal
 					// Middle Zone (Seller Max Profit/Buyer Max Loss) box, i.e.
 					// everything refreshZonesBoxes()/clearZonesBoxes() draw.
@@ -2526,6 +2684,10 @@
 					// the unified Forecast layer. Trailing selections are non-persisted.
 					function onZonesBoxWindowChange() {
 						ZONES_BOX_WINDOW_MODE = document.getElementById('zones-box-window-select').value;
+						// Drop any stale "Auto → <N>h" footer text immediately;
+						// refreshZonesBoxes() re-sets it if the new mode is 'auto'
+						// (and won't touch it at all if the Zones checkbox is off).
+						if (ZONES_BOX_WINDOW_MODE !== 'auto') { zonesBoxAutoHours = null; updateStatusLine(); }
 						refreshZonesBoxes();
 						refreshBands().then(refreshLiveBandDots);
 						refreshForecast();
@@ -2564,11 +2726,7 @@
 						// immediately instead of waiting for the next poll — each
 						// already no-ops (or has already cleared its own lines) if
 						// that indicator isn't currently shown/enabled.
-						refreshDeltaZero();
-						refreshMonthlyDeltaZero();
-						refreshAllDeltaZero();
-						refreshTomorrowDeltaZero();
-						refreshDayAfterTomorrowDeltaZero();
+						refreshGammaHorizon();
 					}
 
 					// "Settings" button/dialog (after Ruler, all 3 TV chart pages) —
@@ -2610,6 +2768,45 @@
 						if (SHOW_BANDS || SHOW_SMART_LIQUIDITY) { refreshBands().then(refreshLiveBandDots); }
 					}
 
+					function populateGammaHorizonSettingsInputs() {
+						['D1', 'W', 'M', 'YE'].forEach(kind => {
+							const row = gammaHorizonSettings[kind];
+							const visible = document.getElementById('gh-visible-' + kind);
+							const color = document.getElementById('gh-color-' + kind);
+							const style = document.getElementById('gh-style-' + kind);
+							const width = document.getElementById('gh-width-' + kind);
+							if (visible) visible.checked = row.visible;
+							if (color) color.value = row.color;
+							if (style) style.value = row.style;
+							if (width) width.value = row.width;
+						});
+						const weeklyCount = document.getElementById('gh-weekly-count');
+						const monthlyCount = document.getElementById('gh-monthly-count');
+						const showLabels = document.getElementById('gh-show-labels');
+						if (weeklyCount) weeklyCount.value = gammaHorizonSettings.weeklyCount;
+						if (monthlyCount) monthlyCount.value = gammaHorizonSettings.monthlyCount;
+						if (showLabels) showLabels.checked = gammaHorizonSettings.showLabels;
+					}
+
+					function readGammaHorizonSettingsInputs() {
+						['D1', 'W', 'M', 'YE'].forEach(kind => {
+							const visible = document.getElementById('gh-visible-' + kind);
+							const color = document.getElementById('gh-color-' + kind);
+							const style = document.getElementById('gh-style-' + kind);
+							const width = document.getElementById('gh-width-' + kind);
+							if (visible) gammaHorizonSettings[kind].visible = visible.checked;
+							if (color) gammaHorizonSettings[kind].color = color.value;
+							if (style) gammaHorizonSettings[kind].style = style.value;
+							if (width) gammaHorizonSettings[kind].width = Math.max(1, Math.min(4, parseInt(width.value, 10) || 1));
+						});
+						const weeklyCount = document.getElementById('gh-weekly-count');
+						const monthlyCount = document.getElementById('gh-monthly-count');
+						const showLabels = document.getElementById('gh-show-labels');
+						if (weeklyCount) gammaHorizonSettings.weeklyCount = Math.max(0, Math.min(3, parseInt(weeklyCount.value, 10) || 0));
+						if (monthlyCount) gammaHorizonSettings.monthlyCount = Math.max(0, Math.min(3, parseInt(monthlyCount.value, 10) || 0));
+						if (showLabels) gammaHorizonSettings.showLabels = showLabels.checked;
+					}
+
 					function openSettingsModal() {
 						Object.keys(DEFAULT_COLORS).forEach(key => {
 							const input = document.getElementById('color-' + key);
@@ -2631,6 +2828,7 @@
 						if (countLabel) countLabel.textContent = 'Candle Count (1–' + maxCount + ')';
 						const smoothingInput = document.getElementById('band-adaptive-smoothing');
 						if (smoothingInput) smoothingInput.checked = bandAdaptiveSmoothing;
+						populateGammaHorizonSettingsInputs();
 						document.getElementById('settings-modal').style.display = 'flex';
 					}
 
@@ -2658,7 +2856,10 @@
 							forecastCandleCounts[INTERVAL] = Math.max(1, Math.min(parseInt(countInput.value, 10) || maxCount, maxCount));
 						}
 						localStorage.setItem(FORECAST_COUNT_STORAGE_KEY, JSON.stringify(forecastCandleCounts));
+						readGammaHorizonSettingsInputs();
+						localStorage.setItem(GAMMA_HORIZON_SETTINGS_KEY, JSON.stringify(gammaHorizonSettings));
 						applyChartColors();
+						if (SHOW_GAMMA_HORIZON) refreshGammaHorizon();
 						refreshForecast();
 						closeSettingsModal();
 					}
@@ -2671,9 +2872,11 @@
 						localStorage.removeItem(FORECAST_COUNT_STORAGE_KEY);
 						localStorage.removeItem(BAND_SMOOTHING_STORAGE_KEY);
 						localStorage.removeItem(BAND_SMOOTHING_STATE_KEY);
+						localStorage.removeItem(GAMMA_HORIZON_SETTINGS_KEY);
 						bandAdaptiveSmoothing = true;
 						bandSmoothingState = {};
 						forecastCandleCounts = { '1h': 72, '4h': 18, '1d': 3 };
+						gammaHorizonSettings = JSON.parse(JSON.stringify(DEFAULT_GAMMA_HORIZON_SETTINGS));
 						Object.keys(DEFAULT_COLORS).forEach(key => {
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
@@ -2686,7 +2889,9 @@
 						if (countInput) countInput.value = forecastCandleCounts[INTERVAL];
 						const smoothingInput = document.getElementById('band-adaptive-smoothing');
 						if (smoothingInput) smoothingInput.checked = true;
+						populateGammaHorizonSettingsInputs();
 						applyChartColors();
+						if (SHOW_GAMMA_HORIZON) refreshGammaHorizon();
 						refreshForecast();
 					}
 
@@ -2741,11 +2946,8 @@
 						// request can never prevent Forecast, Zones, Gamma or Liquidity
 						// from reaching the chart.
 						await Promise.allSettled([
-							safeRefresh('Delta', refreshDeltaZero),
-							safeRefresh('Monthly Delta', refreshMonthlyDeltaZero),
-							safeRefresh('All Delta', refreshAllDeltaZero),
-							safeRefresh('Tomorrow Delta', refreshTomorrowDeltaZero),
-							safeRefresh('Day-after Delta', refreshDayAfterTomorrowDeltaZero),
+							safeRefresh('Gamma Horizon', refreshGammaHorizon),
+							safeRefresh('Strategy Radar', refreshStrategyRadar),
 							safeRefresh('Bands', refreshBands),
 							safeRefresh('Smart Liquidity', refreshLiveBandDots),
 							safeRefresh('Zones', refreshZonesBoxes),
@@ -2757,13 +2959,10 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
-					setInterval(refreshDeltaZero, REFRESH);
-					setInterval(refreshMonthlyDeltaZero, REFRESH);
 					setInterval(refreshNearestExpiry, REFRESH);
 					setInterval(refreshLastTrade, REFRESH);
-					setInterval(refreshAllDeltaZero, REFRESH);
-					setInterval(refreshTomorrowDeltaZero, REFRESH);
-					setInterval(refreshDayAfterTomorrowDeltaZero, REFRESH);
+					setInterval(() => safeRefresh('Gamma Horizon', refreshGammaHorizon), REFRESH);
+					setInterval(() => safeRefresh('Strategy Radar', refreshStrategyRadar), Math.max(REFRESH, 60000));
 					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
 					// underlying dankbit.bands rows only ever change once per
 					// hourly compute_snapshot() cron tick, so polling any faster
