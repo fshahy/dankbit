@@ -218,11 +218,53 @@
 					}
 					body.dark #spinner { border-color: rgba(255,255,255,0.15); border-top-color: #ccc; }
 					@keyframes dankbit-spin { to { transform: rotate(360deg); } }
+
+					/* Single vertical line marking the start of the currently
+					   selected trailing Window (Window=48h means a line at the
+					   candle 48 hours ago) — redrawn on every Window change,
+					   hidden entirely when Window is "All". Same plain
+					   fixed-position DOM overlay approach the l24 chart uses
+					   (Lightweight Charts v4 has no native vertical-line
+					   primitive), repositioned via
+					   chart.timeScale().timeToCoordinate() — see
+					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
+					   Its own text label ("#window-vline-label", ".vline-label"
+					   class) shows the selected window and is positioned/shown
+					   by the same call. */
+					#window-vline {
+						position: fixed; top: 0; height: 100vh; width: 1px;
+						background: rgba(100,100,100,0.55);
+						z-index: 5; pointer-events: none; display: none;
+					}
+					body.dark #window-vline { background: rgba(210,210,210,0.45); }
+					#window-vline-label { color: #646464; }
+					body.dark #window-vline-label { color: #d2d2d2; }
+
+					/* Shape for the Window line's own text label — positioned
+					   just below the toolbar/exchange-label stack (same
+					   --tf-bar-bottom var those use, plus extra clearance so it
+					   sits under #ruler-info too) rather than near the line's
+					   own full-height span, so it can never end up buried behind
+					   a candle mid-chart. Horizontally centered on the line's
+					   own x coordinate (updateWindowVLine() sets `left`; the
+					   translateX below centers it) and hidden by default —
+					   shown/hidden/repositioned by that same call. */
+					.vline-label {
+						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 34px);
+						transform: translateX(-50%);
+						font-family: monospace; font-size: 10pt; font-weight: bold;
+						padding: 1px 5px; border-radius: 3px;
+						background: rgba(255,255,255,0.88); border: 1px solid rgba(0,0,0,0.15);
+						z-index: 6; pointer-events: none; white-space: nowrap; display: none;
+					}
+					body.dark .vline-label { background: rgba(0,0,0,0.75); border-color: rgba(255,255,255,0.2); }
 				</style>
 			</head>
 			<body>
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
+				<div id="window-vline"/>
+				<div id="window-vline-label" class="vline-label">24h</div>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -256,6 +298,10 @@
 						<option value="light">Light</option>
 						<option value="dark">Dark</option>
 					</select>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
+						Window Line
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="refreshFourLegGamma()">Refresh Lines</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
@@ -495,7 +541,9 @@
 
 					window.addEventListener('resize', () => {
 						chart.resize(window.innerWidth, window.innerHeight);
+						updateWindowVLine();
 					});
+					chart.timeScale().subscribeVisibleLogicalRangeChange(() => updateWindowVLine());
 					// #tf-bar wraps onto extra rows on a narrow viewport (see its
 					// own CSS comment) — #exchange-label/#ruler-info (stacked
 					// underneath it) track its actual measured bottom edge via
@@ -652,6 +700,85 @@
 							futureTicks.push({ time: lastTime + i * intervalSec, value: lastClose });
 						}
 						futureAxisSeries.setData(futureTicks);
+						updateWindowVLine();
+					}
+
+					// Resolves the current Window selection to a plain hours
+					// count for the vertical reference line, or null when no
+					// line should be drawn: "All" has no start edge to mark,
+					// and "Auto" has none until the server has resolved it
+					// (autoResolvedHours). "midnight" (not in this page's own
+					// dropdown but still reachable via setWindow) maps to the
+					// hours elapsed since the most recent UTC midnight.
+					function effectiveWindowHours() {
+						if (WINDOW_HOURS === 'all') return null;
+						if (WINDOW_HOURS === 'auto') return autoResolvedHours;
+						if (WINDOW_HOURS === 'midnight') {
+							const nowSec = Math.floor(Date.now() / 1000);
+							return (nowSec % 86400) / 3600;
+						}
+						return WINDOW_HOURS;
+					}
+
+					// timeToCoordinate() only resolves a coordinate for a time
+					// matching an existing data/whitespace point on the shared
+					// time axis — not an arbitrary instant — so the target
+					// "now - N hours" is first snapped to the nearest loaded
+					// candle at-or-before it (binary search over the
+					// already-ascending realCandles). Same technique
+					// /l24/<asset>'s own updateWindowVLine() uses.
+					function nearestCandleTimeAtOrBefore(t) {
+						if (!realCandles.length) return null;
+						let lo = 0, hi = realCandles.length - 1, ans = -1;
+						while (lo <= hi) {
+							const mid = (lo + hi) >> 1;
+							if (realCandles[mid].time <= t) { ans = mid; lo = mid + 1; }
+							else hi = mid - 1;
+						}
+						return ans === -1 ? realCandles[0].time : realCandles[ans].time;
+					}
+
+					// "Window Line" checkbox (right after "Theme", checked by
+					// default) — a plain client-side show/hide flag for the
+					// single Window vertical line + label; no effect on the
+					// Window dropdown or any fetch.
+					let VLINE_SHOWN = true;
+					function onToggleVLine() {
+						VLINE_SHOWN = document.getElementById('vline-toggle').checked;
+						updateWindowVLine();
+					}
+
+					// Positions the single Window reference line (and its label)
+					// at the candle `effectiveWindowHours()` hours before now —
+					// the start of the currently selected trailing Window.
+					// Hidden when the checkbox is off, when Window is "All", or
+					// when the target instant falls outside the visible range.
+					function updateWindowVLine() {
+						const vline = document.getElementById('window-vline');
+						const label = document.getElementById('window-vline-label');
+						if (!vline) return;
+						const hrs = effectiveWindowHours();
+						const hideAll = () => {
+							vline.style.display = 'none';
+							if (label) label.style.display = 'none';
+						};
+						if (!VLINE_SHOWN || hrs === null || hrs === undefined) { hideAll(); return; }
+						const t = Math.floor(Date.now() / 1000) - hrs * 3600 + tzOffset;
+						const snapped = nearestCandleTimeAtOrBefore(t);
+						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
+						if (x === null || x === undefined) { hideAll(); return; }
+						const rect = chartContainerEl.getBoundingClientRect();
+						const left = Math.round(rect.left + x);
+						vline.style.left = left + 'px';
+						vline.style.display = 'block';
+						if (label) {
+							const sel = document.getElementById('window-select');
+							label.textContent = (WINDOW_HOURS === 'auto' && autoResolvedHours !== null)
+								? hoursLabel(autoResolvedHours)
+								: (sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : hoursLabel(hrs));
+							label.style.left = left + 'px';
+							label.style.display = 'block';
+						}
 					}
 
 					function resetChartView() {
@@ -696,6 +823,11 @@
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
 						applyVisibleRange();
+						// rebuildSeriesData() already calls updateWindowVLine(),
+						// but that runs before applyVisibleRange() establishes
+						// the real visible window on first load — recompute here
+						// so the line reflects the actual window immediately.
+						updateWindowVLine();
 					}
 
 					async function updateLatestCandle() {
@@ -752,6 +884,7 @@
 					async function setWindow(hours) {
 						WINDOW_HOURS = (hours === 'all' || hours === 'midnight' || hours === 'auto') ? hours : parseInt(hours, 10);
 						autoResolvedHours = null;
+						updateWindowVLine();
 						await refreshFourLegGamma();
 						setStatus(statusText());
 					}
@@ -794,6 +927,9 @@
 							// display while WINDOW_HOURS === 'auto', see
 							// windowLabel()/hoursLabel() above.
 							autoResolvedHours = typeof data.window_hours === 'number' ? data.window_hours : null;
+							// "Auto" only knows its real trailing-hours span once
+							// the server resolves it — reposition the line now.
+							updateWindowVLine();
 
 							// 0 (not null) once resolved with no trades at all in
 							// the current Window/Expiry — null only ever means
@@ -1000,6 +1136,10 @@
 					}
 					init();
 					setInterval(updateLatestCandle, 5000);
+					// Keep the Window line advancing with real time (same 5s
+					// cadence /l24/<asset> uses) — its target instant is
+					// "now - Window", which drifts continuously.
+					setInterval(updateWindowVLine, 5000);
 					// Every "Expiry" option now isolates to a single
 					// instrument (see SELECTED_INSTRUMENT above) — no more
 					// cumulative "all expiries at once" mode to skip polling
