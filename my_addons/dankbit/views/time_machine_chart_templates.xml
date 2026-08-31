@@ -532,7 +532,7 @@
 					// The AVG line's color is derived from its dominant leg, not a
 					// user setting: a call-side dominant leg (LC/SC) -> light green,
 					// a put-side one (LP/SP) -> light red — same light green/red this
-					// addon uses for the Thales Forecast candle bodies and the /sli
+					// addon uses for the Thales Forecast candle bodies and the /sli65
 					// page's own single line. Was a "Chart Appearance" color picker
 					// until product decision (2026-08-31) made it dominant-leg-derived.
 					const AVG_LINE_COLOR_CALL = '#a5d6a7';

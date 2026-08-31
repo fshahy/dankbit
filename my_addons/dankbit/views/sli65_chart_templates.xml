@@ -1,34 +1,65 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /sli/<asset> — its own file.
-	     "SLI" = "Single Line Indicator". The most stripped-down sibling of
+	<!-- Standalone, minimal TradingView page for /sli65/<asset> — its own file.
+	     "SLI65" = "Single Line Indicator". The most stripped-down sibling of
 	     /l24/<asset> (l24_chart_templates.xml, which this file was copied
 	     from and trimmed further): same Coinbase-spot candle source, same
 	     always-cumulative-across-every-active-expiry 4-leg gamma
-	     computation, own "Timeframe"/"Theme"/"Ruler"/"Update Line"
-	     controls (no "Settings" button — this page has nothing to
-	     configure; the single line's color is derived, see below).
+	     computation, own "Timeframe"/"Theme"/"Weekly"/"Monthly"/"Ruler"/
+	     "Update Line" controls (no "Settings" button — this page has
+	     nothing to configure; every line's color is derived, see below).
 
 	     Differences from /l24/<asset>:
-	       - No "Window" dropdown — the trailing trade window is fixed at
-	         8 hours (?expiry=all&hours=8 against /api/four-leg-gamma/<asset>).
+	       - No "Window" dropdown — the G/D lines' trailing trade window is
+	         fixed at 8 hours (?hours=8 against /api/four-leg-gamma/<asset>).
 	       - No "Window Line" checkbox — the single vertical reference line +
 	         "8h" label marking the window start is always drawn.
 	       - No "Settings" button/modal — nothing to configure here.
 	       - None of the 4 per-leg gamma reference lines (LC/LP/SC/SP) are
-	         drawn, and neither is the light-orange LP/SP+LC/SC fill — the
-	         page shows ONLY one dashed line at the AVG of whichever of the
-	         4 legs are present, labelled "<dominant leg> $<dominant leg price>
-	         | <avg gamma value>" (e.g. "LC $81,300 | 157M"). Its color is
-	         derived from the dominant leg, not user-set: a call-side
-	         dominant leg (LC/SC) → light green, a put-side one (LP/SP) →
-	         light red (avgLineColor() below). -->
+	         drawn, and neither is the light-orange LP/SP+LC/SC fill. The
+	         page draws up to FOUR dashed lines:
+	         All labels are pipe-separated for readability: a pipe after
+	         the G/D/W/M prefix letter and before the appended instrument.
+	           * G (always) — the "global" AVG of whichever of the 4 legs
+	             are present over ALL expiries / the fixed 8h window
+	             (?expiry=all&hours=8), labelled "G | <dominant leg>
+	             $<dominant leg price> | <avg gamma value>" (e.g.
+	             "G | LC $81,300 | 157M"). Color derived from the dominant
+	             leg: a call-side one (LC/SC) light green, a put-side one
+	             (LP/SP) light red (avgLineColor() below).
+	           * D (always) — same 8h-window AVG line as G but the NEAREST
+	             active expiry only (?expiry=nearest&hours=8), labelled
+	             "D | <dominant leg> $<price> | <avg gamma value> | <instrument>"
+	             (e.g. "D | LC $81,050 | 92M | BTC-1SEP26"). Same
+	             drawAvgLine()/avgLineColor() as G; a nearest-expiry +
+	             few-hours query is cheap, so no checkbox.
+	           * W (only while the "Weekly" checkbox is on) — the dominant
+	             leg's own price over ALL trades of the configured nearest
+	             weekly expiry (?expiry=weekly&hours=all), labelled
+	             "W | <leg> <gamma value> | <instrument>" (no price — the
+	             line IS at that price; only G/D, drawn at an average,
+	             label their price).
+	           * M (only while the "Monthly" checkbox is on) — same for the
+	             configured nearest monthly expiry (?expiry=monthly&hours=all),
+	             labelled "M | <leg> <gamma value> | <instrument>".
+	         The D/W/M labels append the resolved expiry instrument name
+	         (data.instrument from the /api/four-leg-gamma response, e.g.
+	         "BTC-1SEP26"); the G line's ?expiry=all response carries no
+	         single instrument, so G gets no suffix.
+	         The Weekly/Monthly checkboxes are UNCHECKED by default — the
+	         W/M fetches aggregate a whole expiry's trade history and are
+	         the heaviest calls this page makes, so an unchecked box skips
+	         the fetch entirely (refreshExpiryLines()), not just the draw.
+	         The W/M lines follow the /4l/<asset> buyer/seller color
+	         convention (legBlackOrange() below): a buyer leg (LC/LP) black
+	         (#000000), a seller leg (SC/SP) orange (#fb8c00). The "Update
+	         Line" button refreshes the G and D lines (never W/M). -->
 
-	<template id="dankbit_sli_chart" name="Dankbit SLI Chart">
+	<template id="dankbit_sli65_chart" name="Dankbit SLI65 Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — SLI</title>
+				<title><t t-esc="asset"/> — SLI65</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,6 +109,19 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+
+					/* Checkbox toggle pill — same shape/class the /l24 page and
+					   the Delta Chart's own toggles use. Here for the "Weekly"
+					   / "Monthly" show/hide checkboxes (both unchecked by
+					   default — their fetches are the heaviest on this page). */
+					.toggle-label {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 2px 10px; border-radius: 4px;
+						cursor: pointer; border: 1px solid #ccc;
+						display: flex; align-items: center; gap: 4px;
+					}
+					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
@@ -175,6 +219,20 @@
 						<option value="light">Light</option>
 						<option value="dark">Dark</option>
 					</select>
+					<!-- Weekly / Monthly W & M lines — unchecked by default.
+					     Each drives whether its own /api/four-leg-gamma
+					     ?expiry=weekly|monthly&hours=all fetch runs at all
+					     (those two are the heaviest calls this page makes —
+					     all trades of a whole weekly/monthly expiry), not
+					     just whether the line is drawn. -->
+					<label class="toggle-label" title="Show a line at the dominant gamma leg over ALL trades of the nearest weekly expiry">
+						<input type="checkbox" id="weekly-cb" onchange="onToggleWeekly()"/>
+						Weekly
+					</label>
+					<label class="toggle-label" title="Show a line at the dominant gamma leg over ALL trades of the nearest monthly expiry">
+						<input type="checkbox" id="monthly-cb" onchange="onToggleMonthly()"/>
+						Monthly
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshAvg()">Update Line</button>
 					<!-- Live countdown to the next automatic line refresh (the
@@ -204,12 +262,28 @@
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
-					// No "Window"/"Expiry"/"Cumulative" controls at all — the 4
-					// gamma legs are always computed cumulatively across every
-					// one of ASSET's own active expiries, over a FIXED 8h
-					// trailing trade window.
+					// The G ("global") line — the 4 gamma legs computed
+					// cumulatively across every one of ASSET's own active
+					// expiries, over a FIXED 8h trailing trade window.
 					const WINDOW_HOURS = 8;
 					const fourLegGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + WINDOW_HOURS;
+					// The D line — same 8h trailing window as G, but the
+					// NEAREST active expiry only (?expiry=nearest) instead of
+					// all expiries. Same "average of the present legs" line as
+					// G (drawAvgLine()), always drawn, no checkbox — a nearest-
+					// expiry + few-hours query is cheap, same cost as G.
+					const nearestGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=nearest&hours=' + WINDOW_HOURS;
+					// The W/M lines — the dominant gamma leg over ALL trades of
+					// the configured nearest weekly / monthly expiry (no
+					// trailing-hours window: hours=all). Each is gated behind
+					// its own toolbar checkbox (both OFF by default) — those
+					// two calls aggregate a whole expiry's trade history and
+					// are the heaviest this page makes, so an unchecked box
+					// skips the fetch entirely, not just the draw.
+					const weeklyGammaUrl  = () => '/api/four-leg-gamma/' + ASSET + '?expiry=weekly&hours=all';
+					const monthlyGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=monthly&hours=all';
+					let SHOW_WEEKLY  = false;
+					let SHOW_MONTHLY = false;
 					// Same "Last trade:" footer field the other TV chart pages
 					// use — a growing gap between this and "now" is the
 					// at-a-glance signal that dankbit_ws has stalled.
@@ -261,6 +335,19 @@
 					const LINE_COLOR_PUT  = '#ef9a9a';
 					function avgLineColor(legName) {
 						return (legName === 'LC' || legName === 'SC') ? LINE_COLOR_CALL : LINE_COLOR_PUT;
+					}
+
+					// The W/M lines instead use the /4l/<asset> buyer/seller
+					// convention (its DEFAULT_COLORS: LC/LP black, SC/SP
+					// orange) — a buyer leg (LC/LP) → black, a seller leg
+					// (SC/SP) → orange. Literal #000000 like /4l (not a
+					// theme-reactive swap); the AVG line's light green/red
+					// stays readable in Dark, these two do not — deliberate,
+					// to match the rest of the /4l family.
+					const LINE_COLOR_BUYER  = '#000000';
+					const LINE_COLOR_SELLER = '#fb8c00';
+					function legBlackOrange(legName) {
+						return (legName === 'LC' || legName === 'LP') ? LINE_COLOR_BUYER : LINE_COLOR_SELLER;
 					}
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
@@ -325,12 +412,16 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The one "line" this page draws — a horizontal reference
-					// line at the CURRENT (latest) AVG value only, same
-					// createPriceLine() pattern /l24/<asset> uses. Redrawn fresh
-					// on every poll (REFRESH, from dankbit.refresh_interval),
-					// each replacing its own previous line.
-					let avgGammaPriceLine = null;
+					// The horizontal reference lines this page draws, each a
+					// createPriceLine() redrawn fresh on every poll (REFRESH,
+					// from dankbit.refresh_interval), each replacing its own
+					// previous line: G (global 8h avg, always), D (nearest
+					// expiry 8h avg, always), W/M (nearest weekly/monthly
+					// dominant leg, each only while its checkbox is on).
+					let avgGammaPriceLine     = null;  // G
+					let nearestGammaPriceLine = null;  // D
+					let weeklyGammaPriceLine  = null;  // W
+					let monthlyGammaPriceLine = null;  // M
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -344,7 +435,7 @@
 					}
 
 					function statusText() {
-						return ASSET + ' · SLI (all expiries, ' + WINDOW_HOURS + 'h trailing window, live)'
+						return ASSET + ' · SLI65 (all expiries, ' + WINDOW_HOURS + 'h trailing window, live)'
 							+ lastTradeSuffix() + tradeCountSuffix();
 					}
 
@@ -514,59 +605,147 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
+					// The 4 gamma legs of a /api/four-leg-gamma response's
+					// LATEST point, filtered to the present ones (0.0 price =
+					// absent, same convention the backend uses). Shared by the
+					// AVG line and the two expiry lines.
+					function gammaLegsOf(latest) {
+						if (!latest) return [];
+						return [
+							{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
+							{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
+							{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
+							{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
+						].filter(leg => leg.price);
+					}
+
+					// The present leg with the largest |gamma value| — the
+					// "dominant" leg. null when no leg is present.
+					function dominantGammaLeg(latest) {
+						const legs = gammaLegsOf(latest);
+						return legs.length ? legs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a) : null;
+					}
+
+					// Draws (or clears) one "average" line — the present-leg-only
+					// average of the 4 gamma PRICE levels of a /api/four-leg-gamma
+					// latest point, colored by the dominant leg (avgLineColor():
+					// call-side light green, put-side light red). `prefix` is the
+					// label's leading tag: "G" (all expiries) or "D" (nearest
+					// expiry), both over the fixed 8h window. `existing` is the
+					// previous line handle; returns the new one, or null when no
+					// leg is present / `data` is missing. Label (pipe-separated
+					// for readability):
+					// "<prefix> | <dominant leg> $<PRICE> | <avg VALUE> | <instrument>"
+					// — the resolved expiry instrument
+					// (data.instrument, e.g. "BTC-1SEP26") is appended when the
+					// response carries one; the G line's ?expiry=all response
+					// carries none, so G gets no suffix.
+					function drawAvgLine(existing, prefix, data) {
+						if (existing) { series.removePriceLine(existing); }
+						const points = (data && data.points) || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						const gammaLegs = gammaLegsOf(latest);
+						if (!gammaLegs.length) return null;
+						const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
+						const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
+						const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
+						const lineColor = avgLineColor(dominantLeg.name);
+						return series.createPriceLine({
+							price: avgGammaPrice, color: lineColor, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dashed,
+							axisLabelVisible: true, axisLabelColor: lineColor,
+							title: prefix + ' | ' + dominantLeg.name
+								+ ' $' + Math.round(dominantLeg.price).toLocaleString('en-US')
+								+ ' | ' + formatAbbreviated(avgGammaValue)
+								+ (data && data.instrument ? ' | ' + data.instrument : ''),
+						});
+					}
+
+					// Draws (or clears) one of the two expiry lines — a single
+					// horizontal reference line at the dominant leg's own PRICE
+					// over ALL trades of the nearest weekly / monthly expiry.
+					// Color is the /4l buyer/seller convention (legBlackOrange).
+					// `existing` is the previous line handle; returns the new
+					// one (or null). Label (pipe-separated for readability):
+					// "<prefix> | <leg> <value> | <instrument>"
+					// — no price, since the line IS drawn at that price (the
+					// axis label already shows it); the G/D lines keep their
+					// price because they're drawn at an AVERAGE, not at the
+					// labelled leg's own price. The resolved expiry instrument
+					// (data.instrument, e.g. "BTC-1SEP26") is appended when
+					// present.
+					function drawExpiryLine(existing, prefix, data) {
+						if (existing) { series.removePriceLine(existing); }
+						const points = (data && data.points) || [];
+						const latest = points.length ? points[points.length - 1] : null;
+						const dominantLeg = dominantGammaLeg(latest);
+						if (!dominantLeg) return null;
+						const lineColor = legBlackOrange(dominantLeg.name);
+						return series.createPriceLine({
+							price: dominantLeg.price, color: lineColor, lineWidth: 2,
+							lineStyle: LightweightCharts.LineStyle.Dashed,
+							axisLabelVisible: true, axisLabelColor: lineColor,
+							title: prefix + ' | ' + dominantLeg.name + ' ' + formatAbbreviated(dominantLeg.value)
+								+ (data && data.instrument ? ' | ' + data.instrument : ''),
+						});
+					}
+
+					// Fetches + redraws the W / M expiry lines according to the
+					// current SHOW_WEEKLY / SHOW_MONTHLY checkbox state. An
+					// unchecked box skips the fetch (its data is passed as
+					// null, so drawExpiryLine() just clears any existing line).
+					// Both fetches .catch(() => null) so a missing weekly/
+					// monthly config can never reject the caller.
+					async function refreshExpiryLines() {
+						const [weeklyData, monthlyData] = await Promise.all([
+							SHOW_WEEKLY  ? fetch(weeklyGammaUrl()).then(r => r.json()).catch(() => null)  : Promise.resolve(null),
+							SHOW_MONTHLY ? fetch(monthlyGammaUrl()).then(r => r.json()).catch(() => null) : Promise.resolve(null),
+						]);
+						weeklyGammaPriceLine  = drawExpiryLine(weeklyGammaPriceLine, 'W', weeklyData);
+						monthlyGammaPriceLine = drawExpiryLine(monthlyGammaPriceLine, 'M', monthlyData);
+					}
+
 					// Only the LATEST reading is used — /api/four-leg-gamma
-					// still returns the full history shape (unchanged backend);
-					// this page draws a single horizontal line at the AVG of
-					// whichever of the 4 legs are present. The 4 leg lines
-					// themselves (LC/LP/SC/SP) are NOT drawn on this page —
-					// their values are fetched only to compute AVG + the
-					// dominant leg's name.
+					// still returns the full history shape (unchanged backend).
+					// This page draws up to 4 horizontal lines: G (all-expiries
+					// 8h avg, always), D (nearest-expiry 8h avg, always), and
+					// W/M (nearest weekly/monthly dominant leg, each only while
+					// its checkbox is on). The 4 raw leg lines (LC/LP/SC/SP)
+					// are NOT drawn on this page.
 					//
-					// Also wired directly to the "Update Line" button for an
-					// on-demand recompute. Shows #spinner for the duration of
-					// the fetch (server-side recompute, no persisted history).
-					async function refreshAvgLine() {
+					// G and D (both cheap 8h-window average lines) are ALWAYS
+					// refreshed here — including from the "Update Line" button.
+					// `includeExpiryLines` is false only from that button
+					// (manualRefreshAvg()); it skips just the W/M lines, whose
+					// whole-expiry fetches are the heavy ones. The routine poll
+					// (scheduleAvgRefresh) and init() pass true, so W/M still
+					// track their checkboxes on every tick. Shows #spinner for
+					// the duration of the fetches (server-side recompute, no
+					// persisted history).
+					async function refreshAvgLine(includeExpiryLines = true) {
 						showSpinner();
 						try {
-							const data = await (await fetch(fourLegGammaUrl())).json();
+							const [data, nearestData] = await Promise.all([
+								fetch(fourLegGammaUrl()).then(r => r.json()),
+								fetch(nearestGammaUrl()).then(r => r.json()).catch(() => null),
+								includeExpiryLines ? refreshExpiryLines() : Promise.resolve(),
+							]);
+
+							// The D line — same present-leg average as G but the
+							// nearest active expiry only.
+							nearestGammaPriceLine = drawAvgLine(nearestGammaPriceLine, 'D', nearestData);
+
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
-
 							tradeCount = latest ? latest.trade_count : 0;
 							setStatus(statusText());
 
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
-							if (!latest) return;
-
-							// Average of the legs' own gamma PRICE levels over
-							// whichever legs are actually present (0.0 means
-							// absent, same convention the backend uses), not a
-							// fixed /4. Skipped entirely when none of the 4 are
-							// present. Label format is unique to this page (its
-							// one line has no siblings to disambiguate from, so
-							// the "AVG " prefix /l24/<asset> uses is dropped):
-							// "<dominant leg> $<dominant leg PRICE> | <avg gamma
-							// VALUE>", e.g. "LC $81,300 | 157M" — dominant leg =
-							// whichever present leg has the largest |gamma value|.
-							const gammaLegs = [
-								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
-								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
-								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
-								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
-							].filter(leg => leg.price);
-							if (gammaLegs.length) {
-								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
-								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
-								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
-								const lineColor = avgLineColor(dominantLeg.name);
-								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: lineColor, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: lineColor,
-									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US')
-										+ ' | ' + formatAbbreviated(avgGammaValue),
-								});
-							}
+							// The G line — present-leg-only average of the 4
+							// all-expiries / 8h-window gamma PRICE levels,
+							// e.g. "G LC $81,300 | 157M". "G" = "global" (all
+							// expiries), distinct from the nearest-expiry "D"
+							// line and the "W"/"M" expiry lines.
+							avgGammaPriceLine = drawAvgLine(avgGammaPriceLine, 'G', data);
 						} finally {
 							hideSpinner();
 							// Reset the toolbar countdown — the next automatic
@@ -597,10 +776,27 @@
 						}, REFRESH);
 					}
 
-					// "Update Line" button — refresh now, then restart the
-					// countdown from a clean full interval.
+					// "Update Line" button — refresh the G and D lines now
+					// (never the W/M lines, whatever their checkbox state),
+					// then restart the countdown from a clean full interval.
 					function manualRefreshAvg() {
-						refreshAvgLine().then(scheduleAvgRefresh);
+						refreshAvgLine(false).then(scheduleAvgRefresh);
+					}
+
+					// "Weekly" / "Monthly" checkboxes — both OFF by default.
+					// Turning one on fetches + draws its line immediately (the
+					// #spinner covers the fetch); turning it off clears the
+					// line without any fetch. Either way the new state is
+					// picked up by the next routine refreshAvgLine() poll too.
+					function onToggleWeekly() {
+						SHOW_WEEKLY = document.getElementById('weekly-cb').checked;
+						if (SHOW_WEEKLY) { showSpinner(); refreshExpiryLines().finally(hideSpinner); }
+						else if (weeklyGammaPriceLine) { series.removePriceLine(weeklyGammaPriceLine); weeklyGammaPriceLine = null; }
+					}
+					function onToggleMonthly() {
+						SHOW_MONTHLY = document.getElementById('monthly-cb').checked;
+						if (SHOW_MONTHLY) { showSpinner(); refreshExpiryLines().finally(hideSpinner); }
+						else if (monthlyGammaPriceLine) { series.removePriceLine(monthlyGammaPriceLine); monthlyGammaPriceLine = null; }
 					}
 
 					// Ticks the #refresh-countdown label down once a second

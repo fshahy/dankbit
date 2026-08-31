@@ -451,7 +451,7 @@ class Trade(models.Model):
     # native 3600 (1h) granularity here and gets bucketed in Python
     # afterward, same technique as the old Deribit-perpetual path this
     # replaced. 5m/15m/1h/1d map directly onto Coinbase's own
-    # 300/900/3600/86400. (5m added for /sli/<asset>'s own Timeframe
+    # 300/900/3600/86400. (5m added for /sli65/<asset>'s own Timeframe
     # dropdown — no other page requests it.)
     _COINBASE_GRANULARITY_SECONDS = {"5m": 300, "15m": 900, "1h": 3600, "4h": 3600, "1d": 86400}
     _COINBASE_MAX_CANDLES_PER_REQUEST = 300

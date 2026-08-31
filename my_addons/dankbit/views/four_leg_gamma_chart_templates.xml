@@ -484,7 +484,7 @@
 					// The AVG line's color is derived from its dominant leg, not a
 					// user setting: a call-side dominant leg (LC/SC) -> light green,
 					// a put-side one (LP/SP) -> light red — same light green/red this
-					// addon uses for the Thales Forecast candle bodies and the /sli
+					// addon uses for the Thales Forecast candle bodies and the /sli65
 					// page's own single line, so the association reads consistently
 					// across pages. Was a "Chart Appearance" color picker until
 					// product decision (2026-08-31) made it dominant-leg-derived.
@@ -1027,7 +1027,7 @@
 								// which single leg is driving it and where it sits.
 								// Label: "<dom leg> $<dom leg price> | <avg gamma value>",
 								// e.g. "LC $81,200 | 71M" (positions swapped + $ added
-								// per product decision 2026-08-31, matching /sli).
+								// per product decision 2026-08-31, matching /sli65).
 								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
 								const avgColor = avgLineColor(dominantLeg.name);
 								avgGammaPriceLine = series.createPriceLine({

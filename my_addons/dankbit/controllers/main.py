@@ -3122,9 +3122,9 @@ class ChartController(http.Controller):
         }
         return request.render("dankbit.dankbit_l24_chart", ctx)
 
-    @http.route("/sli/<string:asset>", type="http", auth="user", website=True)
-    def sli_chart(self, asset):
-        """"SLI" ("Single Line Indicator") — a standalone TradingView page,
+    @http.route("/sli65/<string:asset>", type="http", auth="user", website=True)
+    def sli65_chart(self, asset):
+        """"SLI65" ("Single Line Indicator") — a standalone TradingView page,
         the most stripped-down sibling of /l24/<asset> (l24_chart): same
         Coinbase-spot candle source, same always-cumulative-across-every-
         active-expiry 4-leg gamma computation, own "Timeframe"/"Theme"/
@@ -3139,26 +3139,63 @@ class ChartController(http.Controller):
             + "8h" label marking the window start is always drawn (still
             positioned by the same updateWindowVLine() the /l24/<asset>
             template carries, just with no toggle).
-          - No "Settings" button/modal — the single line's color is
-            derived, not user-set (see below).
+          - No "Settings" button/modal — line colors are derived, not
+            user-set (see below).
           - None of the 4 per-leg gamma reference lines (LC/LP/SC/SP) are
-            drawn, and neither is the light-orange LP/SP+LC/SC fill — the
-            page shows ONLY one dashed line at the present-leg-only average
-            of those 4 leg PRICE levels, labelled
-            "<dominant leg> <avg gamma VALUE> | <dominant leg PRICE>"
-            (e.g. "LC 157M | 81,300"). Its color is derived from the
-            dominant leg: a call-side one (LC/SC) is light green, a
-            put-side one (LP/SP) light red. The 4 leg values are still
-            fetched (that's how AVG/dominant-leg are computed), just not
-            rendered as their own lines.
-          - A bold "Next Update: MM:SS" countdown to the next automatic
-            line refresh sits after the "Update Line" button.
+            drawn, and neither is the light-orange LP/SP+LC/SC fill. The
+            page draws up to FOUR dashed lines (labels pipe-separated for
+            readability — a pipe after the G/D/W/M prefix letter and
+            before the appended instrument):
+              * G (always) — the "global" present-leg-only average of the
+                4 all-expiries / 8h-window leg PRICE levels
+                (?expiry=all&hours=8), labelled "G | <dominant leg>
+                $<dominant leg PRICE> | <avg gamma VALUE>" (e.g. "G | LC
+                $81,300 | 157M"). Color derived from the dominant leg: a
+                call-side one (LC/SC) light green, a put-side one (LP/SP)
+                light red.
+              * D (always) — the same 8h-window average line as G but the
+                NEAREST active expiry only (?expiry=nearest&hours=8),
+                labelled "D | <dominant leg> $<PRICE> | <avg gamma VALUE>
+                | <instrument>" (e.g. "D | LC $81,050 | 92M | BTC-1SEP26").
+                Same drawAvgLine()/color treatment as G; a nearest-expiry
+                + few-hours query is cheap, so no checkbox.
+              * W (only while the "Weekly" checkbox is on) — a line at the
+                dominant leg's own PRICE level over ALL trades of the
+                configured nearest weekly expiry (?expiry=weekly&
+                hours=all), labelled "W | <leg> <gamma VALUE> |
+                <instrument>" — no price in the label, since the line
+                itself sits at that price (only G/D, drawn at an AVERAGE,
+                label their price).
+              * M (only while the "Monthly" checkbox is on) — same for the
+                configured nearest monthly expiry (?expiry=monthly&
+                hours=all), labelled "M | <leg> <gamma VALUE> |
+                <instrument>".
+            The D/W/M labels append the resolved expiry instrument name
+            (the response's own `instrument` field, e.g. "BTC-1SEP26");
+            G's ?expiry=all response has none, so G gets no suffix.
+            The Weekly/Monthly checkboxes are UNCHECKED by default — the
+            W/M fetches aggregate a whole expiry's trade history and are
+            the heaviest calls this page makes, so an unchecked box skips
+            the fetch entirely, not just the draw. The W/M lines follow
+            the /4l/<asset> buyer/seller color convention: a buyer leg
+            (LC/LP) → black (#000000), a seller leg (SC/SP) → orange
+            (#fb8c00). All 4 leg values per fetch are still returned by
+            the unchanged endpoint; only the dominant one is drawn for
+            W/M.
+          - The "Update Line" button refreshes the G and D lines (both
+            cheap 8h-window average lines) — never the W/M lines,
+            whatever their checkbox state; W/M refresh only on the
+            routine poll (per checkbox). A bold "Next Update: MM:SS"
+            countdown to the next automatic (full) refresh sits after
+            that button.
 
-        Renders its own standalone template (dankbit_sli_chart). Polls on
+        Renders its own standalone template (dankbit_sli65_chart). Polls on
         the general dankbit.refresh_interval, same as /l24/<asset>. No
-        route/query changes were needed — it drives the exact same
+        route/query changes were needed — it drives the same
         /api/klines-coinbase/<asset> and /api/four-leg-gamma/<asset>
-        (?expiry=all&hours=8) endpoints /l24/<asset> already uses."""
+        endpoints /l24/<asset> already uses (?expiry=all&hours=8 for AVG,
+        plus ?expiry=weekly&hours=all / ?expiry=monthly&hours=all for the
+        two new lines)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.not_found()
@@ -3166,7 +3203,7 @@ class ChartController(http.Controller):
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
-        return request.render("dankbit.dankbit_sli_chart", ctx)
+        return request.render("dankbit.dankbit_sli65_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
