@@ -209,7 +209,10 @@ class OptionStrategyRadarController(http.Controller):
             return request.make_response(json.dumps({"error": "Unknown asset"}), headers=[("Content-Type", "application/json")])
 
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        tomorrow = (now + timedelta(days=1)).date()
+        daily_dates = {
+            (now + timedelta(days=offset)).date(): f"D{offset}"
+            for offset in (1, 2, 3)
+        }
         cr = request.env.cr
         cr.execute("""
             SELECT DISTINCT expiration FROM dankbit_trade
@@ -217,11 +220,20 @@ class OptionStrategyRadarController(http.Controller):
              ORDER BY expiration
         """, (f"{asset}-%", now))
         expirations = [row[0] for row in cr.fetchall() if row[0]]
+        horizon_labels = defaultdict(list)
         selected = []
-        selected += [exp for exp in expirations if exp.date() == tomorrow][:1]
-        selected += [exp for exp in expirations if exp.date().weekday() == 4 and not _is_last_friday(exp.date())][:3]
-        selected += [exp for exp in expirations if _is_last_friday(exp.date()) and exp.date().month != 12][:3]
-        selected += [exp for exp in expirations if _is_last_friday(exp.date()) and exp.date().month == 12][:1]
+        for expiry in expirations:
+            daily_label = daily_dates.get(expiry.date())
+            if daily_label:
+                selected.append(expiry)
+                horizon_labels[expiry].append(daily_label)
+        weekly = [exp for exp in expirations if exp.date().weekday() == 4 and not _is_last_friday(exp.date())][:3]
+        monthly = [exp for exp in expirations if _is_last_friday(exp.date()) and exp.date().month != 12][:3]
+        year_end = [exp for exp in expirations if _is_last_friday(exp.date()) and exp.date().month == 12][:1]
+        for label, targets in (("W", weekly), ("M", monthly), ("YE", year_end)):
+            for expiry in targets:
+                selected.append(expiry)
+                horizon_labels[expiry].append(label)
         selected = sorted(set(selected))
         if not selected:
             payload = {"asset": asset, "strategies": [], "summary": {}, "display_only": True}
@@ -236,7 +248,7 @@ class OptionStrategyRadarController(http.Controller):
                AND iv <> 0 AND deribit_ts IS NOT NULL AND deribit_ts <= %s
                AND (block_trade_id IS NOT NULL OR deribit_ts >= %s)
              ORDER BY deribit_ts
-        """, (f"{asset}-%", selected, now, now - timedelta(hours=72)))
+        """, (f"{asset}-%", selected, now, now - timedelta(hours=120)))
         raw_rows = cr.fetchall()
         rows = [{
             "instrument": row[0], "strike": float(row[1]), "option_type": row[2],
@@ -259,6 +271,7 @@ class OptionStrategyRadarController(http.Controller):
         for block_id, group in block_groups.items():
             strategy = _serialize_strategy("block:" + block_id, "confirmed_block", 98, group, spot)
             if strategy:
+                strategy["horizon"] = "/".join(horizon_labels.get(max(row["expiration"] for row in group), [])) or "TERM"
                 strategies.append(strategy)
 
         # Conservative public-screen inference: only 2-4 trades sharing an
@@ -281,6 +294,7 @@ class OptionStrategyRadarController(http.Controller):
             confidence = int(max(60, min(84, 84 - time_span * 5 - (max(amounts) / min(amounts) - 1) * 100)))
             strategy = _serialize_strategy(f"screen:{expiry.isoformat()}:{bucket}", "probable_screen", confidence, group, spot)
             if strategy and not strategy["name"].startswith("Custom"):
+                strategy["horizon"] = "/".join(horizon_labels.get(expiry, [])) or "TERM"
                 strategies.append(strategy)
 
         strategies.sort(key=lambda row: row["entered_at"], reverse=True)

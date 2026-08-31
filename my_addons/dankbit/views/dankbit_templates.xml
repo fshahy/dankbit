@@ -1290,7 +1290,7 @@
 						const sourceLabel = strategy.source === 'confirmed_block' ? 'Confirmed Block' : 'Probable Screen Match';
 						const legs=(strategy.legs||[]).map(leg=>'<div class="strategy-leg"><b>'+radarEsc(leg.label)+'</b><br/>Amount '+Number(leg.amount).toLocaleString()+' · Premium '+Number(leg.price).toFixed(5)+'</div>').join('');
 						detail.innerHTML='<div class="strategy-title">'+radarEsc(strategy.name)+'</div>'
-							+'<div class="strategy-meta"><span>Source</span><b>'+radarEsc(sourceLabel)+'</b><span>Confidence</span><b>'+Number(strategy.confidence)+'%</b><span>Expiry</span><b>'+radarDate(strategy.expiry,false)+'</b><span>Detected</span><b>'+radarDate(strategy.entered_at,true)+'</b><span>Net premium</span><b>'+radarMoney(strategy.net_premium_usd)+'</b><span>Best in view</span><b>'+radarMoney(strategy.max_profit_in_view_usd)+'</b><span>Worst in view</span><b>'+radarMoney(strategy.max_loss_in_view_usd)+'</b></div>'
+							+'<div class="strategy-meta"><span>Source</span><b>'+radarEsc(sourceLabel)+'</b><span>Horizon</span><b>'+radarEsc(strategy.horizon||'TERM')+'</b><span>Confidence</span><b>'+Number(strategy.confidence)+'%</b><span>Expiry</span><b>'+radarDate(strategy.expiry,false)+'</b><span>Detected</span><b>'+radarDate(strategy.entered_at,true)+'</b><span>Net premium</span><b>'+radarMoney(strategy.net_premium_usd)+'</b><span>Best in view</span><b>'+radarMoney(strategy.max_profit_in_view_usd)+'</b><span>Worst in view</span><b>'+radarMoney(strategy.max_loss_in_view_usd)+'</b></div>'
 							+payoffSvg(strategy)+'<div style="margin-top:8px;font-weight:bold">Legs</div>'+legs
 							+'<div class="strategy-note">Approximate USD-equivalent visualization. A Block ID confirms leg association, not the trader’s external hedge or spot position.</div>';
 					}
@@ -1316,7 +1316,7 @@
 								const button=document.createElement('button'); button.type='button';
 								button.className='strategy-card'+(row.id===selectedStrategyRadarId?' active':'');
 								const badge=row.source==='confirmed_block'?'confirmed':'probable';
-								button.innerHTML='<b>'+radarEsc(row.name)+'</b><br/><span class="'+badge+'">'+(badge==='confirmed'?'CONFIRMED BLOCK':'PROBABLE')+' · '+Number(row.confidence)+'%</span><br/>'+radarDate(row.expiry,false);
+								button.innerHTML='<b>'+radarEsc(row.name)+'</b><br/><span class="'+badge+'">'+(badge==='confirmed'?'CONFIRMED BLOCK':'PROBABLE')+' · '+Number(row.confidence)+'%</span><br/><b>'+radarEsc(row.horizon||'TERM')+'</b> · '+radarDate(row.expiry,false);
 								button.addEventListener('click',()=>selectStrategyRadar(row.id)); list.appendChild(button);
 							});
 						}
@@ -1337,7 +1337,8 @@
 						if (select) {
 							select.innerHTML='<option value="all">All Expiries</option>';
 							[...new Set((strategyRadarData.strategies||[]).map(row=>row.expiry))].sort().forEach(expiry=>{
-								const option=document.createElement('option'); option.value=expiry; option.textContent=radarDate(expiry,false); select.appendChild(option);
+								const match=(strategyRadarData.strategies||[]).find(row=>row.expiry===expiry);
+								const option=document.createElement('option'); option.value=expiry; option.textContent=(match?.horizon||'TERM')+' · '+radarDate(expiry,false); select.appendChild(option);
 							});
 							select.value=[...select.options].some(option=>option.value===previous)?previous:'all';
 						}
