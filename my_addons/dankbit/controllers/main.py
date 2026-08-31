@@ -79,9 +79,12 @@ FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
 
 def _l24_window_options():
-    """(hours, label) pairs for the /l24 and /tm "Window" dropdowns — a
+    """(hours, label) pairs for the /l24 "Window" dropdown — a
     plain 1h..72h range in 1-hour steps, then 4d and 5d (96h/120h)
-    appended at the end, 24h default. Labels are "<N>h" up to 72h and
+    appended at the end, 24h default. (/tm used this too during its
+    /l24-based phase; it has since been re-synced onto /4l and uses
+    /4l's own hardcoded Auto/8h/24h/48h/3d/4d/5d/All set instead.)
+    Labels are "<N>h" up to 72h and
     "<N>d" for the whole-day entries above it, matching the templates'
     own formatWindowLabel(). Drawn from FOUR_LEG_WINDOW_HOURS_CHOICES so
     every value is a member the `?hours=` param already validates."""
@@ -134,7 +137,7 @@ def _parse_as_of_param(raw):
     the /tm client never sends one). Returns None for a missing/malformed
     value, same as every other query param in this file — callers fall
     back to "now" in that case, so a Time Machine URL with no `as_of`
-    still behaves exactly like the live page it's based on."""
+    still behaves exactly like the live /4l/<asset> page it's based on."""
     if not raw:
         return None
     try:
@@ -2428,13 +2431,13 @@ class ChartController(http.Controller):
         had already traded and hadn't yet expired as of that past moment"
         — via dankbit.bands._distinct_expirations_asof() instead of the
         plain _distinct_expirations() the live (no as_of) path still uses.
-        Originally backed /tm/<asset>'s (Time Machine) own "Expiry"
-        dropdown, reloaded every time the user picked a different date;
-        that dropdown was removed when /tm/<asset> was rebuilt around
-        /l24/<asset>'s own always-cumulative-across-every-expiry design
-        (see time_machine_chart), so this `?as_of=` branch is no longer
-        called by any page's own UI — still reachable by a direct API
-        call, just orphaned from the frontend for now."""
+        Backs /tm/<asset>'s (Time Machine) own "Expiry" dropdown,
+        reloaded every time the user picks a different As-Of date — the
+        set of instruments active as of that moment moves with it. The
+        dropdown was briefly removed when /tm/<asset> was rebuilt around
+        /l24/<asset>'s own always-cumulative design, then restored when
+        /tm/<asset> was re-synced back onto /4l/<asset> (see
+        time_machine_chart)."""
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
             return request.make_response(
@@ -2469,11 +2472,10 @@ class ChartController(http.Controller):
           the ordinal family below — sent by `/4l/<asset>`'s own
           "Expiry" dropdown (each option resolves to a real instrument
           picked from `/api/expiries/<asset>` rather than a mode string).
-          `/tm/<asset>` (Time Machine) used to send this too, via its own
-          "Expiry" dropdown, before that dropdown was removed when
-          /tm/<asset> was rebuilt around /l24/<asset>'s own design (see
-          time_machine_chart) — it now sends `?expiry=all` instead, same
-          as /l24/<asset> itself (see that branch below).
+          `/tm/<asset>` (Time Machine) sends this too, from its own
+          "Expiry" dropdown (populated from `/api/expiries/<asset>?as_of=`),
+          paired with its own `?as_of=` param so the isolation targets
+          that historical moment (see time_machine_chart).
 
         - "nearest" (default — the currently soonest-expiring active
           instrument), "nearest_plus_1", or "nearest_plus_2" (the
@@ -2515,15 +2517,17 @@ class ChartController(http.Controller):
           into this one and removed. `/l24/<asset>` sends this
           unconditionally (that page has no "Expiry" dropdown at all —
           its 4 gamma legs are always cumulative across every active
-          expiry, see l24_chart), and `/tm/<asset>` (Time Machine) sends
-          it too, paired with its own `?as_of=` param, since that page
-          was rebuilt around /l24/<asset>'s own design (see
-          time_machine_chart) — this "all" branch's own
+          expiry, see l24_chart). `/tm/<asset>` (Time Machine) drove
+          this branch too during its own /l24-based phase, paired with
+          its own `?as_of=` param — this "all" branch's own
           `expiration >= as_of` condition (via the shared `as_of`
           variable every branch in this route reads instead of calling
           `datetime.now()` inline) and its `active_test=False` bypass
-          were already built to serve exactly that historical case
-          before /tm/<asset>'s own rebuild came along to reuse them.
+          were built to serve that historical case; /tm/<asset> has
+          since been re-synced onto /4l/<asset> and now sends
+          `?instrument=` (optionally `?cumulative=1`) + `?as_of=`
+          instead, but those paths carry the same `as_of`/
+          `active_test=False` treatment.
 
         Any other/missing `?expiry=` value falls back to "nearest". The
         trailing-hours trade window is independently user-selectable via
@@ -2584,12 +2588,11 @@ class ChartController(http.Controller):
         and the given instrument's own expiration, inclusive — "from
         as_of through and including this cutoff". The trailing-hours
         Window (`?hours=`) still
-        applies on top, same as the isolated path. Was used by
-        /tm/<asset> (Time Machine)'s own "Cumulative" checkbox before
-        that checkbox was removed when /tm/<asset> was rebuilt around
-        /l24/<asset>'s own always-cumulative design (see
-        time_machine_chart) — still reachable by a direct API call, just
-        orphaned from every page's own UI now. Requires a lookup of
+        applies on top, same as the isolated path. Sent by /4l/<asset>'s
+        and /tm/<asset>'s (Time Machine) own "Cumulative" checkbox —
+        /tm/<asset>'s relative to its user-picked As-Of moment (via the
+        `?as_of=` override), /4l/<asset>'s relative to "now" (see
+        four_leg_gamma_chart/time_machine_chart). Requires a lookup of
         the given instrument's own expiration (the same single-row
         lookup `?hours=auto` already performs for `?instrument=`, now
         also run whenever `?cumulative=` is set) — falls back to the
@@ -2676,12 +2679,11 @@ class ChartController(http.Controller):
         target_expiration = None
         bands_model = request.env["dankbit.bands"]
         # `?instrument=` — sent by /4l/<asset>'s own "Expiry" dropdown
-        # (each option is a real instrument string, not a mode) — was
-        # also sent by /tm/<asset>'s own "Expiry" dropdown before that
-        # dropdown was removed (see time_machine_chart) — bypassing the
-        # mode resolution below entirely — ISOLATED to that one
-        # instrument's own trades, same domain the ordinal
-        # Nearest/Nearest+1/Nearest+2 family below uses.
+        # (each option is a real instrument string, not a mode), and by
+        # /tm/<asset>'s own "Expiry" dropdown paired with `?as_of=` (see
+        # time_machine_chart) — bypassing the mode resolution below
+        # entirely — ISOLATED to that one instrument's own trades, same
+        # domain the ordinal Nearest/Nearest+1/Nearest+2 family below uses.
         instrument_override = (request.httprequest.args.get("instrument") or "").upper() or None
         cumulative_param = (request.httprequest.args.get("cumulative") or "").lower() in ("1", "true")
         # `?from_instrument=`/`?to_instrument=` — sent by /ft/<asset>'s own
@@ -3169,73 +3171,74 @@ class ChartController(http.Controller):
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
         """"Time Machine" — a standalone TradingView page, structurally a
-        historical-replay sibling of /l24/<asset> (l24_chart): same
-        Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/SPG) +
-        AVG line rendering (SC/SP labels with no combined magnitude
-        suffix, AVG label with the dominant leg's name), same always-
-        CUMULATIVE-across-every-active-expiry 4-leg computation (no
-        "Expiry" dropdown/"Cumulative" checkbox), same "Window" dropdown
-        (1h..72h in 1-hour steps then 4d/5d, 24h default — options from
-        the `window_hours` context list, _l24_window_options(), same as
-        /l24/<asset>), same
-        light-orange LP/SP+LC/SC fill, and a single vertical reference
-        line + label at the start of the currently selected trailing
-        Window (measured back from the As-Of moment, not real "now" —
-        see the template's updateWindowVLine()) — this page was rebuilt
-        around /l24/<asset>'s own feature set (previously structured
-        around /4l/<asset> instead, with an "Expiry" dropdown/
-        "Cumulative" checkbox and a narrower Auto/8h/12h/24h/All Window
-        set; that rebuild is what removed both controls). The 8
-        per-duration "N Line" checkboxes it used to carry were replaced
-        by that single Window-tracking line per product decision
-        (2026-08-29), same as /l24/<asset>; there is no "Refresh Lines"
-        button (a frozen As-Of view has nothing to force a re-fetch of).
-        Own Timeframe defaults to 1h (was 4h — this page's own pre-rebuild
-        default — changed per product decision to match /l24/<asset>'s own
-        1h default) — everything else is anchored to a user-picked past "As Of" date
-        instead of "now", using this addon's ~9 months of retained trade
-        history (including long-expired, archived instruments) to let a
-        user scroll back and study how the 4-leg gamma structure lined up
-        against price for a past moment. The "As Of" picker (and this
-        page's own URL `?as_of=`) is EUROPE/BERLIN wall-clock time,
+        historical-replay sibling of /4l/<asset> (four_leg_gamma_chart):
+        same Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/
+        SPG) + dashed AVG line rendering (dominant-leg-derived AVG color/
+        label, SC/SP labels with no combined magnitude suffix), same
+        Timeframe/Expiry/Cumulative/Window/Theme/Window Line/Ruler/
+        Settings controls, same per-instrument-ISOLATED-or-CUMULATIVE
+        4-leg computation, and the same single vertical Window reference
+        line + label. Like /4l it carries an "Expiry" dropdown
+        (dynamically loaded from /api/expiries/<asset>) and a "Cumulative"
+        checkbox, and its "Window" dropdown is /4l's own set
+        (Auto/8h/24h/48h/3d/4d/5d/All, 24h default) — this page was
+        rebuilt around /l24/<asset>'s feature set for a while (an
+        always-cumulative-across-every-expiry design with no Expiry
+        dropdown), then moved back onto /4l and re-synced to its current
+        state per a later request. NOT carried over from /4l: the "Refresh
+        Lines" button and the "Last trade:" footer — a frozen As-Of view
+        has nothing to force a re-fetch of (changing As Of/Timeframe/
+        Expiry/Window is already how a fresh read happens), and "Last
+        trade:" is a live data-staleness check with no meaning for a
+        historical moment. Own Timeframe defaults to 1h (was 4h — this
+        page's own original default — changed per product decision so it
+        agrees with /l24/<asset>'s own 1h; kept at 1h through the move
+        back onto /4l, whose own default is 4h).
+
+        Everything on this page is anchored to a user-picked past "As Of"
+        date instead of "now", using this addon's ~9 months of retained
+        trade history (including long-expired, archived instruments) to
+        let a user scroll back and study how the 4-leg gamma structure
+        lined up against price for a past moment. The "As Of" picker (and
+        this page's own URL `?as_of=`) is EUROPE/BERLIN wall-clock time,
         DST-aware — per product decision, since this Thales tool's users
         think in Berlin time; the template converts it to UTC client-side
         (berlinNaiveToUtcIso()) before any backend call, so every endpoint
         still receives UTC (AS_OF_ISO), matching this addon's UTC-anchored
-        trade-window convention. The one deliberate difference from
-        /l24/<asset>'s own Window vertical line: it is measured back from
-        AS_OF_ISO (asOfEpochSeconds(), Date.parse(AS_OF_ISO + 'Z'))
-        rather than real "now", since "testing the past" only makes sense
-        relative to the moment being inspected, not actual current time.
+        trade-window convention. The one deliberate difference from /4l's
+        own Window vertical line: it is measured back from AS_OF_ISO
+        (asOfEpochSeconds(), Date.parse(AS_OF_ISO + 'Z')) rather than real
+        "now", since "testing the past" only makes sense relative to the
+        moment being inspected, not actual current time.
 
         Renders its own standalone template (dankbit_time_machine_chart),
-        not dankbit_l24_chart — the two pages share no markup, since this
-        one needs an "As Of" date/time picker in place of the live page's
-        auto-refresh polling (a past "as of" moment is frozen by
-        definition, so nothing here polls on a timer — no candle poll, no
-        gamma-leg poll, and unlike /l24/<asset>'s own 5s vline-advance
-        tick, no periodic vline reposition either, since none of those
-        need to keep moving once AS_OF_ISO stops changing; the Window
-        line is re-positioned only when the user changes As Of/Timeframe/
-        Window by hand, or pans/zooms/resizes the chart).
+        not dankbit_four_leg_gamma_chart — the two pages share no markup,
+        since this one needs an "As Of" date/time picker in place of the
+        live page's auto-refresh polling (a past "as of" moment is frozen
+        by definition, so nothing here polls on a timer — no candle poll,
+        no gamma-leg poll, and unlike /4l/<asset>'s own 5s vline-advance
+        tick, no periodic vline reposition either; every fetch and every
+        vline reposition only re-runs when the user changes As Of/
+        Timeframe/Expiry/Cumulative/Window by hand, or pans/zooms/resizes
+        the chart).
         This rebuild needed zero backend/controller changes: every fetch
-        just adds `?as_of=<naive-UTC ISO-8601>` (the Berlin picker value
-        already converted to UTC client-side) to the same 2 endpoints
-        /l24/<asset> already uses (one fewer than before this
-        rebuild — /api/expiries/<asset> is no longer called at all, now
-        that the Expiry dropdown is gone) — /api/klines-coinbase/<asset>
-        (historical candles ending at that moment, via
-        get_candles_coinbase()'s own `as_of_ts` param), and
-        /api/four-leg-gamma/<asset> with `?expiry=all&hours=<N>
-        &as_of=<AS_OF_ISO>` — the same cumulative-"all" branch
-        /l24/<asset> itself uses, its own `active_test=False` bypass and
-        `expiration >= as_of` condition already built (before this
-        page's own rebuild) specifically to serve exactly this historical
-        case, so no route/query changes were needed to reuse it here. No
-        new backend computation exists for this page — every number it
-        shows is something /l24/<asset> can already compute for "now";
-        this page just asks those same 2 endpoints about a different
-        point in time.
+        just adds `&as_of=<naive-UTC ISO-8601>` (the Berlin picker value
+        already converted to UTC client-side) to the same 3 endpoints
+        /4l/<asset> uses — /api/klines-coinbase/<asset> (historical
+        candles ending at that moment, via get_candles_coinbase()'s own
+        `as_of_ts` param), /api/expiries/<asset> (every instrument that
+        had already traded and hadn't yet expired as of that moment, via
+        dankbit.bands._distinct_expirations_asof()), and
+        /api/four-leg-gamma/<asset> with
+        `?instrument=<i>&hours=<N>&as_of=<AS_OF_ISO>` (optionally
+        `&cumulative=1`) — that route's every `?expiry=`/`?instrument=`/
+        `?hours=` resolution is already written relative to a local
+        `as_of` variable, and its trade searches already run with
+        `active_test=False`, so archived (long-since-expired) instruments'
+        trades from that period are still found. No new backend
+        computation exists for this page — every number it shows is
+        something /4l/<asset> can already compute for "now"; this page
+        just asks those same 3 endpoints about a different point in time.
 
         `?as_of=` on this page's own URL (e.g. /tm/BTC?as_of=2026-03-01T00:00,
         read as 00:00 BERLIN on that date) pre-fills the "As Of" input so a
@@ -3250,15 +3253,9 @@ class ChartController(http.Controller):
             return request.not_found()
 
         as_of_param = request.httprequest.args.get("as_of") or ""
-        # "Window" dropdown — (hours, label) pairs: 1h..72h in 1-hour
-        # steps, then 4d/5d appended; 24h default — same as /l24/<asset>.
-        # See _l24_window_options().
-        ctx = {
-            "asset": asset,
-            "as_of": as_of_param,
-            "window_hours": _l24_window_options(),
-            "window_default": FOUR_LEG_DEFAULT_WINDOW_HOURS,
-        }
+        # The Window dropdown's options are hardcoded in the template
+        # (/4l's own Auto/8h/24h/48h/3d/4d/5d/All set), not context-driven.
+        ctx = {"asset": asset, "as_of": as_of_param}
         return request.render("dankbit.dankbit_time_machine_chart", ctx)
 
     @http.route("/api/forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)

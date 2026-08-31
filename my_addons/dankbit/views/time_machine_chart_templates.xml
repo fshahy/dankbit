@@ -1,59 +1,59 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /tm/<asset> — "Time Machine",
-	     a historical-replay sibling of /l24/<asset> (l24_chart_templates.xml,
-	     which this file is structurally based on — was based on /4l/<asset>
-	     until a later request rebuilt it around /l24 instead, see below):
-	     same Coinbase-spot candle source, same 4-gamma-leg (BCG/BPG/SCG/SPG)
-	     + AVG line rendering, same Timeframe/Window/Theme/Ruler/Settings
-	     controls, same always-CUMULATIVE-across-every-active-expiry 4-leg
-	     computation (no "Expiry" dropdown/"Cumulative" checkbox — those were
-	     this page's own /4l-based controls before the rebuild, removed since
-	     /l24 has neither), same light-orange LP/SP+LC/SC fill, same
-	     "Window" dropdown (1h..72h in 1-hour steps then 4d/5d, 24h default,
-	     options from the `window_hours` context list), and the same single vertical
-	     reference line + label at the start of the currently selected
-	     trailing Window (this replaced an earlier set of 8 per-duration
-	     "N Line" checkboxes on both pages, per product decision
-	     (2026-08-29)), shown/hidden via the same "Window Line" checkbox
-	     (right after "Theme", checked by default; VLINE_SHOWN — a plain
-	     client-side toggle, no fetch effect) — but no "Refresh Lines"
-	     button: unlike /l24, this
-	     page never polls, so there is no live state to force a re-fetch of
-	     (see below); manually changing As Of/Timeframe/Window is already how
-	     a fresh read happens here. The one structural difference from /l24
-	     itself: everything on this page is anchored to a user-picked "As Of"
-	     date/time instead of "now". That picker (and the URL's own `?as_of=`)
-	     is EUROPE/BERLIN wall-clock time, DST-aware — per product decision,
-	     since this Thales tool's users think in Berlin time; it is converted
-	     to UTC client-side (berlinNaiveToUtcIso(), the single conversion
-	     point) before any backend call, so the server still only ever
-	     receives UTC (AS_OF_ISO), matching this addon's UTC-anchored
-	     trade-window convention. Candles end at that moment instead of
-	     the live present, the 4-leg gamma computation is cumulative across
-	     every expiry active AS OF that moment (`?expiry=all&hours=<N>
-	     &as_of=<AS_OF_ISO>` against /api/four-leg-gamma/<asset> — the same
-	     `?expiry=all` cumulative branch /l24/<asset> uses, its own
-	     `active_test=False` bypass and `expiration >= as_of` condition
-	     already built to serve exactly this historical case even before this
-	     page's own rebuild — no backend change was needed here), and the
-	     Window vertical line is measured back from AS_OF_ISO instead of
-	     real "now" (so Window=24h shows where the trailing window started
-	     24h before the inspected moment, not 24h before actual current
-	     time) — per explicit product decision, since "testing the past"
-	     only makes sense relative to the moment being inspected. A past
-	     "as of" moment is frozen by definition, so unlike /l24/<asset>
+	     a historical-replay sibling of /4l/<asset>
+	     (four_leg_gamma_chart_templates.xml, which this file is structurally
+	     based on — it was rebuilt around /l24/<asset> for a while, then moved
+	     back onto /4l per a later request and re-synced to /4l's current
+	     state): same Coinbase-spot candle source, same 4-gamma-leg
+	     (BCG/BPG/SCG/SPG) + dashed AVG line rendering (dominant-leg-derived
+	     AVG color/label, no combined SC/SP magnitude suffix), same
+	     Timeframe/Expiry/Cumulative/Window/Theme/Window Line/Ruler/Settings
+	     controls, same per-instrument-ISOLATED-or-CUMULATIVE 4-leg
+	     computation, and the same single vertical Window reference line +
+	     label. Like /4l it has an "Expiry" dropdown (dynamically loaded from
+	     /api/expiries/<asset>) and a "Cumulative" checkbox, and its "Window"
+	     dropdown is /4l's own set (Auto/8h/24h/48h/3d/4d/5d/All, 24h
+	     default). NOT carried over from /4l: the "Refresh Lines" button and
+	     the "Last trade:" footer — a frozen As-Of view has nothing to force
+	     a re-fetch of (changing As Of / Timeframe / Expiry / Window is
+	     already how a fresh read happens), and "Last trade:" is a live
+	     data-staleness check with no meaning for a historical moment.
+
+	     The one structural difference from /4l itself: everything on this
+	     page is anchored to a user-picked "As Of" date/time instead of
+	     "now". That picker (and the URL's own ?as_of=) is EUROPE/BERLIN
+	     wall-clock time, DST-aware — per product decision, since this Thales
+	     tool's users think in Berlin time; it is converted to UTC
+	     client-side (berlinNaiveToUtcIso(), the single conversion point)
+	     before any backend call, so the server still only ever receives UTC
+	     (AS_OF_ISO), matching this addon's UTC-anchored trade-window
+	     convention. Candles end at that moment instead of the live present,
+	     the "Expiry" dropdown lists every instrument that had already traded
+	     and hadn't yet expired AS OF that moment (/api/expiries/<asset>
+	     ?as_of=<AS_OF_ISO> -> dankbit.bands._distinct_expirations_asof()),
+	     the 4-leg gamma computation runs against trades up to AS_OF_ISO
+	     (/api/four-leg-gamma/<asset>?instrument=<i>&hours=<N>&as_of=<AS_OF_ISO>,
+	     optionally &cumulative=1 — the same route /4l uses, whose every
+	     ?expiry=/?instrument=/?hours= resolution is already written relative
+	     to a local `as_of` variable and whose trade searches already run
+	     with active_test=False so archived, long-expired instruments' trades
+	     are still found — no backend change was needed), and the Window
+	     vertical line is measured back from AS_OF_ISO instead of real "now"
+	     (so Window=24h shows where the trailing window started 24h before
+	     the inspected moment) — per explicit product decision, since
+	     "testing the past" only makes sense relative to the moment being
+	     inspected.
+
+	     A past "as of" moment is frozen by definition, so unlike /4l/<asset>
 	     this page has NO auto-refresh timer at all (no periodic
-	     candle/gamma-leg/vline poll): every fetch (candles/gamma legs) and
-	     every vline reposition only re-runs when the user changes As
-	     Of/Timeframe/Window by hand, or pans/zooms/resizes the chart —
-	     there's nothing to keep advancing in real time once AS_OF_ISO
-	     stops moving. See main.py's
-	     time_machine_chart for the full route docstring — this page adds no
-	     new backend computation of its own, it just asks
-	     /api/klines-coinbase and /api/four-leg-gamma (the same 2 endpoints
-	     /l24/<asset> already uses, one fewer than before the rebuild now
-	     that /api/expiries is no longer needed) about a different point in
-	     time via their shared `?as_of=` query param. -->
+	     candle/gamma-leg/vline poll): every fetch and every vline reposition
+	     only re-runs when the user changes As Of / Timeframe / Expiry /
+	     Cumulative / Window by hand, or pans/zooms/resizes the chart. See
+	     main.py's time_machine_chart for the full route docstring — this
+	     page adds no new backend computation of its own, it just asks
+	     /api/klines-coinbase, /api/expiries and /api/four-leg-gamma (the
+	     same 3 endpoints /4l/<asset> uses) about a different point in time
+	     via their shared ?as_of= query param. -->
 
 	<template id="dankbit_time_machine_chart" name="Dankbit Time Machine Chart">
 		<html>
@@ -123,18 +123,7 @@
 						color: #555; background: rgba(255,255,255,0.88);
 						padding: 1px 6px; border-radius: 4px; border: 1px solid #ccc;
 					}
-					/* Checkbox toggle pill — same shape/class the Delta Chart's
-					   own S/D, Zones, Bands, etc. toggles use
-					   (dankbit_templates.xml). Used here for the "Window Line"
-					   show/hide checkbox. */
-					.toggle-label {
-						font-family: monospace; font-size: 11pt;
-						color: #555; background: rgba(255,255,255,0.88);
-						padding: 2px 10px; border-radius: 4px;
-						cursor: pointer; border: 1px solid #ccc;
-						display: flex; align-items: center; gap: 4px;
-					}
-					body.dark .toggle-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
+
 					/* Custom right-click context menu (Lightweight Charts has
 					   no built-in one) — same hand-rolled approach as every
 					   other standalone TV page in this addon. */
@@ -151,9 +140,10 @@
 					}
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
-					/* "Settings" button/dialog — color pickers for this page's
-					   own 4 gamma-leg lines. Plain centered overlay + box, no
-					   library — same hand-rolled shape /l24/&lt;asset&gt; uses, copied
+					/* "Settings" button/dialog (see openSettingsModal() below) —
+					   color pickers for this page's own 4 gamma-leg lines.
+					   Plain centered overlay + box, no library — same
+					   hand-rolled shape as /4l/&lt;asset&gt;'s own modal, copied
 					   rather than shared so the two pages' color settings stay
 					   completely independent (see COLOR_STORAGE_KEY below). */
 					.modal-overlay {
@@ -201,10 +191,10 @@
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
 
-					/* Shown while any fetch driven by As Of/Timeframe/Window is
-					   in flight — this page has no live poll, so a fetch only
-					   ever happens in direct response to the user changing one
-					   of those controls. */
+					/* Shown while any fetch driven by As Of/Timeframe/Expiry/
+					   Cumulative/Window is in flight — this page has no live
+					   poll, so a fetch only ever happens in direct response to
+					   the user changing one of those controls. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -220,18 +210,16 @@
 					   selected trailing Window, measured back from AS_OF_ISO
 					   (not real "now" — see this file's own top docstring for
 					   why) — e.g. Window=24h puts it at the candle 24h before
-					   the inspected moment. Redrawn on every Window change, no
-					   checkbox (this replaced an earlier set of 8 per-duration
-					   "N Line" checkboxes on both this page and /l24/&lt;asset&gt;).
-					   Lightweight Charts v4 has no native vertical-line
-					   primitive, so this is a plain fixed-position DOM overlay
-					   (same technique the Delta Chart's own Smart Liquidity
-					   term markers use), repositioned via
+					   the inspected moment. Redrawn on every Window change,
+					   shown/hidden by the "Window Line" checkbox. Lightweight
+					   Charts v4 has no native vertical-line primitive, so this
+					   is a plain fixed-position DOM overlay (same technique the
+					   l24 chart uses), repositioned via
 					   chart.timeScale().timeToCoordinate() — see
 					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
 					   Its label ("#window-vline-label", ".vline-label" class)
-					   shows the selected window (e.g. "12h"/"48h") and is
-					   positioned/shown by the same call. */
+					   shows the selected window and is positioned/shown by the
+					   same call. */
 					#window-vline {
 						position: fixed; top: 0; height: 100vh; width: 1px;
 						background: rgba(100,100,100,0.55);
@@ -241,20 +229,15 @@
 					#window-vline-label { color: #646464; }
 					body.dark #window-vline-label { color: #d2d2d2; }
 
-					/* Shape for the Window line's own text label (e.g.
-					   "24h"/"48h") — positioned just below the toolbar/
-					   exchange-label stack (same --tf-bar-bottom var those
-					   use, see its own comment above, plus extra clearance
-					   so it sits under #ruler-info too whether or not the
-					   ruler is active) rather than near the line's own full-
-					   height span, so it can never end up buried behind a
-					   candle mid-chart. Horizontally centered on the line's
-					   own x coordinate (updateWindowVLine() sets `left` to
-					   that x; the translateX below does the centering) and
-					   hidden by default — shown/hidden and repositioned by
-					   the same updateWindowVLine() call that already drives
-					   the line itself, so the two can never drift out of
-					   sync. */
+					/* Shape for the Window line's own text label — positioned
+					   just below the toolbar/exchange-label stack (same
+					   --tf-bar-bottom var those use, plus extra clearance so it
+					   sits under #ruler-info too) rather than near the line's
+					   own full-height span, so it can never end up buried behind
+					   a candle mid-chart. Horizontally centered on the line's
+					   own x coordinate (updateWindowVLine() sets `left`; the
+					   translateX below centers it) and hidden by default —
+					   shown/hidden/repositioned by that same call. */
 					.vline-label {
 						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 34px);
 						transform: translateX(-50%);
@@ -285,23 +268,30 @@
 						<option value="4h">4h</option>
 						<option value="1d">1d</option>
 					</select>
+					<span class="tf-label">Expiry:</span>
+					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
+					</select>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
+						Cumulative
+					</label>
 					<span class="tf-label">Window:</span>
-					<!-- 1h..72h in 1-hour steps, then 4d/5d — options are
-					     (hours, label) pairs from the `window_hours` context
-					     list (time_machine_chart -> _l24_window_options() in
-					     main.py); `window_default` is 24 (24h). Same dropdown
-					     as /l24/<asset>. -->
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<t t-foreach="window_hours" t-as="wh">
-							<option t-att-value="wh[0]" t-att-selected="'selected' if wh[0] == window_default else False"><t t-esc="wh[1]"/></option>
-						</t>
+						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="8">8h</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="48">48h</option>
+						<option value="72">3d</option>
+						<option value="96">4d</option>
+						<option value="120">5d</option>
+						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
 						<option value="light">Light</option>
 						<option value="dark">Dark</option>
 					</select>
-					<label class="toggle-label">
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
 						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
 						Window Line
 					</label>
@@ -344,8 +334,8 @@
 					// (not set) means "start at now", same as a bare
 					// /tm/<asset> visit.
 					const INITIAL_AS_OF = cfg.asOf || '';
-					// Coinbase spot, same symbol convention /l24/<asset>
-					// uses (server-side _COINBASE_SYMBOL_MAP).
+					// Coinbase spot, same symbol convention /4l/<asset> uses
+					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
 
@@ -461,30 +451,60 @@
 						return Math.floor(Date.parse(AS_OF_ISO + 'Z') / 1000);
 					}
 
-					// "Timeframe" dropdown — same options as /l24/<asset>'s
-					// own, defaulting to 1h here (was 4h — this page's own
-					// pre-rebuild default — changed per product decision to
-					// match /l24/<asset>'s own 1h default) — see TF_WINDOW
-					// below for the per-timeframe visible-window convention
-					// this page shares with it.
+					// "Timeframe" dropdown — same options as /4l/<asset>'s own,
+					// defaulting to 1h here (was 4h — this page's own
+					// pre-rebuild default — changed per product decision so it
+					// agrees with /l24/<asset>'s own 1h; kept at 1h through the
+					// move back onto /4l, whose own default is 4h). See
+					// TF_WINDOW below for the per-timeframe visible-window
+					// convention this page shares with /4l.
 					let INTERVAL = '1h';
 					const klineUrl = (iv, limit) =>
 						'/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit + '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
-					// This page has no "Expiry"/"Cumulative" controls at all
-					// (removed in the /l24-based rebuild) — the 4 gamma legs
-					// are always computed cumulatively across every one of
-					// ASSET's own expiries active AS OF AS_OF_ISO. It does
-					// have its own "Window" dropdown (1h..72h in 1-hour steps
-					// then 4d/5d, 24h default — options rendered server-side
-					// from the `window_hours` context list, same as
-					// /l24/<asset>), restricting the trailing-hours trade
-					// window ending at AS_OF_ISO instead of "now".
+					// "Expiry" dropdown — which expiry's trades feed the 4
+					// gamma legs. Dynamically loaded from every instrument that
+					// had already traded and hadn't yet expired AS OF AS_OF_ISO
+					// (loadExpiries(), sourced from /api/expiries/<asset>
+					// ?as_of=<AS_OF_ISO> — dankbit.bands._distinct_expirations_asof()),
+					// soonest-first, reloaded whenever the As-Of moment changes.
+					// Each option ISOLATES trades to that one instrument's own
+					// trades via four_leg_gamma_json's own ?instrument= override
+					// (unless "Cumulative" is checked, see below).
+					let SELECTED_INSTRUMENT = null;
+					// "Cumulative" checkbox — off by default. When checked,
+					// /api/four-leg-gamma's own `?cumulative=1` switches
+					// SELECTED_INSTRUMENT from an ISOLATED single-instrument
+					// trade domain to a CUMULATIVE one spanning every
+					// instrument whose own expiration falls between AS_OF_ISO
+					// and the selected instrument's own expiration, inclusive.
+					// The Window dropdown's trailing-hours filter still applies
+					// on top, same as the isolated path.
+					let CUMULATIVE = false;
+					// "Window" dropdown — trailing-hours trade window ending at
+					// AS_OF_ISO (not "now"), fed into the selected expiry's
+					// trades. Same option set as /4l/<asset>
+					// (Auto/8h/24h/48h/3d/4d/5d/All, 24h default). 'all' skips
+					// the trailing-hours filter entirely; 'auto' lets the
+					// server shrink the window as the selected Expiry's own
+					// settlement nears (see autoResolvedHours below); a number
+					// otherwise.
 					let WINDOW_HOURS = 24;
+					// When WINDOW_HOURS === 'auto', this is the numeric hours
+					// /api/four-leg-gamma actually resolved it to (its own
+					// `window_hours` response field, via _auto_window_hours()
+					// server-side) — null until the first fetch resolves, so
+					// windowLabel() can fall back to a plain "Auto" label
+					// before that.
+					let autoResolvedHours = null;
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + WINDOW_HOURS
+						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
+						+ (CUMULATIVE ? '&cumulative=1' : '')
 						+ '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
+					// Trade count for the currently selected Window/Expiry —
+					// same `trade_count` field /api/four-leg-gamma returns.
+					// null until the first refreshFourLegGamma() resolves.
 					let tradeCount = null;
 
 					// Same browser-local-timezone shift every other TV chart page
@@ -522,13 +542,14 @@
 					}
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 4 gamma-leg lines, persisted
-					// per-browser under a key completely independent of
-					// /l24/<asset>'s own 'dankbit_l24_chart_colors' and every
-					// other page's own color settings, since Time Machine is
-					// its own page with its own settings — unchanged by the
-					// /l24-based rebuild. The AVG line is not here — its color is
-					// dominant-leg-derived (avgLineColor() above).
+					// page's own 4 gamma-leg lines, persisted per-browser under
+					// a key completely independent of /4l/<asset>'s own
+					// 'dankbit_4l_chart_colors' and every other page's own color
+					// settings, since Time Machine is its own page. The AVG line
+					// is not here — its color is dominant-leg-derived
+					// (avgLineColor() above). No line-style picker (these 4
+					// lines are always solid createPriceLine()s). Defaults match
+					// /4l's own (LC/LP black, SC/SP orange).
 					const COLOR_STORAGE_KEY = 'dankbit_tm_chart_colors';
 					const DEFAULT_COLORS = { bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
@@ -542,19 +563,18 @@
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
-					// Watermark — this page only (not /l24/<asset> or the
-					// Delta Chart), via Lightweight Charts v4's own built-in
-					// `watermark` chart option (drawn directly onto the
-					// chart's own canvas, so it's properly clipped/resized
-					// along with everything else — not a hand-rolled DOM
-					// overlay). Fixed gray, deliberately NOT theme-reactive
-					// (unlike every other themed chart option on this page)
-					// — a light/dark-switching black-ish/white-ish color
-					// went invisible in practice (white-on-white in Light,
-					// black-on-black in Dark, reported directly), so a
-					// single mid-gray at moderate alpha is used instead,
-					// which reads against both a white and a black
-					// background without needing to track DARK_MODE at all.
+					// Watermark — this page only (not /4l/<asset> or the Delta
+					// Chart), via Lightweight Charts v4's own built-in
+					// `watermark` chart option (drawn directly onto the chart's
+					// own canvas, so it's properly clipped/resized along with
+					// everything else — not a hand-rolled DOM overlay). Fixed
+					// gray, deliberately NOT theme-reactive (unlike every other
+					// themed chart option on this page) — a light/dark-switching
+					// black-ish/white-ish color went invisible in practice
+					// (white-on-white in Light, black-on-black in Dark), so a
+					// single mid-gray at moderate alpha is used instead, which
+					// reads against both a white and a black background without
+					// needing to track DARK_MODE at all.
 					const WATERMARK_TEXT = 'Dankbit Time Machine';
 					const WATERMARK_COLOR = 'rgba(120,120,120,0.35)';
 
@@ -597,27 +617,6 @@
 					window.addEventListener('resize', repositionBelowToolbar);
 					repositionBelowToolbar();
 
-					// Light-orange fill between LP/SP (when LP is below SP) and between
-					// LC/SC (when LC is above SC) — same addBaselineSeries flat-top +
-					// baseValue-bottom fill trick /l24/<asset> uses. No border stroke
-					// (topLineColor/bottomLineColor transparent) since this is meant as
-					// a plain shaded zone, not another bordered box. Added to the chart
-					// BEFORE the candlestick series below, so it renders underneath the
-					// candles and the LC/LP/SC/SP reference lines (series added later
-					// draw on top) rather than muddying them.
-					const putFillSeries = chart.addBaselineSeries({
-						baseValue: { type: 'price', price: 0 },
-						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
-						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
-						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-					const callFillSeries = chart.addBaselineSeries({
-						baseValue: { type: 'price', price: 0 },
-						topLineColor: 'rgba(0,0,0,0)', topFillColor1: 'rgba(255,152,0,0.22)', topFillColor2: 'rgba(255,152,0,0.22)',
-						bottomLineColor: 'rgba(0,0,0,0)', bottomFillColor1: 'rgba(255,152,0,0.22)', bottomFillColor2: 'rgba(255,152,0,0.22)',
-						lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
-					});
-
 					const series = chart.addCandlestickSeries({
 						upColor: '#26a69a', downColor: '#ef5350',
 						borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
@@ -625,7 +624,7 @@
 
 					// Invisible helper series solely to extend the shared time
 					// axis a little past the last historical candle, same
-					// mechanism /l24/<asset>'s own futureAxisSeries uses — just
+					// mechanism /4l/<asset>'s own futureAxisSeries uses — just
 					// breathing room for the 4 gamma price lines' own axis
 					// labels, not a claim about real future price action (this
 					// page shows a frozen past moment, not a live forecast).
@@ -636,8 +635,8 @@
 
 					// The 4 gamma "lines" are horizontal reference lines at the
 					// resolved As-Of/Window reading — same createPriceLine()
-					// pattern /l24/<asset> uses — redrawn fresh whenever As
-					// Of/Timeframe/Window changes.
+					// pattern /4l/<asset> uses — redrawn fresh whenever As
+					// Of/Timeframe/Expiry/Cumulative/Window changes.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
@@ -646,14 +645,43 @@
 						return tradeCount !== null ? '  ·  ' + tradeCount + ' trades' : '';
 					}
 
+					// WINDOW_HOURS is the string 'all' when the "All" option is
+					// selected (no trailing-hours trade filter), the string
+					// 'auto' when the "Auto (Time to Expiry)" option is selected
+					// (server picks the window, see autoResolvedHours above), or
+					// a number otherwise. Values >=24 that divide evenly display
+					// in days rather than hours, matching the dropdown's own
+					// labels.
+					function hoursLabel(hours) {
+						if (hours >= 24 && hours % 24 === 0) return (hours / 24) + 'd';
+						return hours + 'h';
+					}
+					function windowLabel() {
+						if (WINDOW_HOURS === 'all') return 'all trades';
+						if (WINDOW_HOURS === 'auto') {
+							return autoResolvedHours !== null
+								? 'Auto → ' + hoursLabel(autoResolvedHours) + ' trailing window'
+								: 'Auto trailing window';
+						}
+						return hoursLabel(WINDOW_HOURS) + ' trailing window';
+					}
+
 					function statusText() {
 						// The picker is Berlin wall-clock — show that, plus the
 						// UTC instant it resolved to (what actually filters
 						// trades) in parentheses, so both are visible at a glance.
 						const berlin = document.getElementById('as-of-input').value || '?';
 						const utc = AS_OF_ISO ? AS_OF_ISO + 'Z' : '?';
-						return ASSET + ' · L24 (Time Machine, all expiries, ' + WINDOW_HOURS + 'h trailing window)'
-							+ '  ·  As of ' + berlin + ' Berlin (' + utc + ')' + tradeCountSuffix();
+						return ASSET + ' · TM · ' + (SELECTED_INSTRUMENT || '?')
+							+ ' (' + windowLabel() + ')'
+							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
+							+ '  ·  As of ' + berlin + ' Berlin (' + utc + ')'
+							+ tradeCountSuffix();
+					}
+
+					function onToggleCumulative() {
+						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
+						refreshFourLegGamma();
 					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
@@ -665,23 +693,11 @@
 
 					let realCandles = [];
 
-					// Same per-timeframe visible-window convention /l24/<asset>'s
+					// Same per-timeframe visible-window convention /4l/<asset>'s
 					// own TF_WINDOW uses.
 					const TF_WINDOW = { '15m': 5, '1h': 30, '4h': 15, '1d': 365 };
 					const INTERVAL_SECONDS = { '15m': 15 * 60, '1h': 3600, '4h': 4 * 3600, '1d': 86400 };
 					const FUTURE_MARGIN_DAYS = 5;
-
-					// Time span the LP/SP and LC/SC fill rectangles stretch across —
-					// from the earliest loaded candle out to the same future-axis
-					// edge applyVisibleRange() scrolls to, so the shaded zone spans
-					// the full plotted width instead of stopping at the last real bar.
-					function fillRectTimeRange() {
-						if (!realCandles.length) return null;
-						return {
-							fromTime: realCandles[0].time,
-							toTime: realCandles[realCandles.length - 1].time + FUTURE_MARGIN_DAYS * 86400,
-						};
-					}
 
 					function applyVisibleRange() {
 						if (!realCandles.length) return;
@@ -709,7 +725,7 @@
 
 					// Snaps an arbitrary instant to the nearest loaded candle
 					// at-or-before it — same binary-search technique
-					// /l24/<asset> uses (timeToCoordinate() only resolves a
+					// /4l/<asset> uses (timeToCoordinate() only resolves a
 					// coordinate for a time that exactly matches an existing
 					// data/whitespace point on the shared time axis, it does
 					// NOT interpolate an isolated point in between — see
@@ -725,68 +741,64 @@
 						return ans === -1 ? realCandles[0].time : realCandles[ans].time;
 					}
 
-					// Formats the selected Window for the line's own text label
-					// — "<N>h" up to 72h, "<N>d" for the whole-day entries above
-					// it (4d/5d), matching the Window dropdown's own option
-					// labels exactly (see _l24_window_options() in main.py),
-					// same as /l24/<asset>.
-					function formatWindowLabel(hours) {
-						return (hours > 72 && hours % 24 === 0) ? (hours / 24) + 'd' : hours + 'h';
-					}
-
 					// "Window Line" checkbox (right after "Theme", checked by
 					// default) — a plain client-side show/hide flag for the
 					// single Window vertical line + label; no effect on the
-					// Window dropdown or any fetch. Lets the user hide the line
-					// to see the candles under it.
+					// Window dropdown or any fetch.
 					let VLINE_SHOWN = true;
 					function onToggleVLine() {
 						VLINE_SHOWN = document.getElementById('vline-toggle').checked;
 						updateWindowVLine();
 					}
 
+					// Resolves the current Window selection to a plain hours
+					// count for the vertical reference line, or null when no
+					// line should be drawn: "All" has no start edge to mark,
+					// and "Auto" has none until the server has resolved it
+					// (autoResolvedHours).
+					function effectiveWindowHours() {
+						if (WINDOW_HOURS === 'all') return null;
+						if (WINDOW_HOURS === 'auto') return autoResolvedHours;
+						return WINDOW_HOURS;
+					}
+
 					// Positions the single Window reference line (and its
-					// label) at the candle WINDOW_HOURS hours before AS_OF_ISO
-					// — the start of the currently selected trailing Window,
-					// relative to the inspected moment rather than real "now"
-					// (per this page's "testing the past" design; asOfEpochSeconds()
-					// instead of Date.now(), the one difference from /l24's own
-					// updateWindowVLine()). An As-Of moment is frozen, so unlike
-					// /l24 this line never needs to keep creeping forward on a
-					// timer once positioned (no setInterval on this page at all
-					// — see init()/reloadForAsOf() below). The line and its
-					// label are always shown/hidden/positioned together so they
-					// can never drift out of sync. Fully hidden when the
-					// "Window Line" checkbox is unchecked (VLINE_SHOWN false).
+					// label) at the candle effectiveWindowHours() hours before
+					// AS_OF_ISO — the start of the currently selected trailing
+					// Window, relative to the inspected moment rather than real
+					// "now" (per this page's "testing the past" design;
+					// asOfEpochSeconds() instead of Date.now(), the one
+					// difference from /4l's own updateWindowVLine()). An As-Of
+					// moment is frozen, so unlike /4l this line never needs to
+					// keep creeping forward on a timer once positioned (no
+					// setInterval on this page at all). Hidden when the "Window
+					// Line" checkbox is off, when Window is "All"/unresolved
+					// "Auto", when AS_OF_ISO isn't set yet, or when the target
+					// instant falls outside the visible range.
 					function updateWindowVLine() {
 						const vline = document.getElementById('window-vline');
 						const label = document.getElementById('window-vline-label');
 						if (!vline) return;
-						if (!VLINE_SHOWN) {
-							vline.style.display = 'none';
-							if (label) label.style.display = 'none';
-							return;
-						}
+						const hrs = effectiveWindowHours();
 						const asOfEpoch = asOfEpochSeconds();
-						if (asOfEpoch === null) {
+						const hideAll = () => {
 							vline.style.display = 'none';
 							if (label) label.style.display = 'none';
-							return;
-						}
-						const t = asOfEpoch - WINDOW_HOURS * 3600 + tzOffset;
+						};
+						if (!VLINE_SHOWN || hrs === null || hrs === undefined || asOfEpoch === null) { hideAll(); return; }
+						const t = asOfEpoch - hrs * 3600 + tzOffset;
 						const snapped = nearestCandleTimeAtOrBefore(t);
 						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
-						if (x === null || x === undefined) {
-							vline.style.display = 'none';
-							if (label) label.style.display = 'none';
-							return;
-						}
+						if (x === null || x === undefined) { hideAll(); return; }
 						const rect = chartContainerEl.getBoundingClientRect();
 						const left = Math.round(rect.left + x);
 						vline.style.left = left + 'px';
 						vline.style.display = 'block';
 						if (label) {
-							label.textContent = formatWindowLabel(WINDOW_HOURS);
+							const sel = document.getElementById('window-select');
+							label.textContent = (WINDOW_HOURS === 'auto' && autoResolvedHours !== null)
+								? hoursLabel(autoResolvedHours)
+								: (sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : hoursLabel(hrs));
 							label.style.left = left + 'px';
 							label.style.display = 'block';
 						}
@@ -837,7 +849,7 @@
 						// rebuildSeriesData() already calls updateWindowVLine() once,
 						// but that happens BEFORE applyVisibleRange() establishes
 						// the real visible window on first load — recompute here
-						// too so the lines reflect the actual window immediately.
+						// too so the line reflects the actual window immediately.
 						updateWindowVLine();
 					}
 
@@ -847,15 +859,56 @@
 						setStatus(statusText());
 					}
 
+					async function setExpiry(instr) {
+						SELECTED_INSTRUMENT = instr;
+						await refreshFourLegGamma();
+					}
+
+					// Populates the "Expiry" dropdown from every instrument
+					// that had already traded and hadn't yet expired AS OF
+					// AS_OF_ISO (/api/expiries/<asset>?as_of=<AS_OF_ISO> ->
+					// dankbit.bands._distinct_expirations_asof()). Called from
+					// init() and again from reloadForAsOf() on every As-Of
+					// change, since the active-expiry set itself moves with the
+					// inspected moment. Preserves the current selection when it
+					// still exists in the new list, else falls back to the
+					// nearest (first, soonest) entry.
+					async function loadExpiries() {
+						const select = document.getElementById('expiry-select');
+						if (!select) return;
+						const data = await (await fetch('/api/expiries/' + ASSET + '?as_of=' + encodeURIComponent(AS_OF_ISO))).json();
+						const expiries = data.expiries || [];
+						const prev = SELECTED_INSTRUMENT;
+						select.innerHTML = '';
+						expiries.forEach(instr => {
+							const opt = document.createElement('option');
+							opt.value = instr;
+							opt.textContent = instr;
+							select.appendChild(opt);
+						});
+						SELECTED_INSTRUMENT = (prev && expiries.indexOf(prev) !== -1)
+							? prev
+							: (expiries.length ? expiries[0] : null);
+						if (SELECTED_INSTRUMENT) select.value = SELECTED_INSTRUMENT;
+						// The Expiry select's own width can change once real
+						// instrument strings replace its initial empty state,
+						// which can shift how #tf-bar wraps.
+						repositionBelowToolbar();
+					}
+
 					async function setWindow(hours) {
-						WINDOW_HOURS = parseInt(hours, 10);
+						WINDOW_HOURS = (hours === 'all' || hours === 'auto') ? hours : parseInt(hours, 10);
+						autoResolvedHours = null;
 						updateWindowVLine();
 						await refreshFourLegGamma();
 						setStatus(statusText());
 					}
 
-					// Rounds and abbreviates large raw dollar-gamma values —
-					// same convention /l24/<asset>'s own formatAbbreviated() uses.
+					// Rounds and abbreviates large raw dollar-gamma values
+					// (hundreds of millions to billions is typical here) —
+					// thousands as K, millions as M, sign preserved (long
+					// legs' gamma is positive, short legs' is negative, per
+					// this addon's own convention — see per_leg_greeks).
 					function formatAbbreviated(value) {
 						const sign = value < 0 ? '-' : '';
 						const abs = Math.abs(value);
@@ -865,14 +918,12 @@
 					}
 
 					// Fetches and redraws the 4 gamma-leg lines (+ AVG) for the
-					// current WINDOW_HOURS as of AS_OF_ISO — same shape as
-					// /l24/<asset>'s own refreshFourLegGamma() (SC/SP labels
-					// with no combined magnitude suffix, AVG label
-					// "<dom leg> $<dom leg price> | <avg gamma value>",
-					// light-orange LP/SP+LC/SC fill),
-					// minus the periodic re-poll (this only ever runs in
-					// direct response to a control change or the "Refresh
-					// Lines" button on this page).
+					// current Expiry/Cumulative/Window as of AS_OF_ISO — same
+					// shape as /4l/<asset>'s own refreshFourLegGamma() (SC/SP
+					// labels with no combined magnitude suffix, AVG label
+					// "<dom leg> $<dom leg price> | <avg gamma value>"), minus
+					// the periodic re-poll (this only ever runs in direct
+					// response to a control change on this page).
 					async function refreshFourLegGamma() {
 						showSpinner();
 						try {
@@ -880,10 +931,19 @@
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
+							// Server-resolved window in hours (always present,
+							// even with zero points) — only meaningful for
+							// display while WINDOW_HOURS === 'auto', see
+							// windowLabel()/hoursLabel() above.
+							autoResolvedHours = typeof data.window_hours === 'number' ? data.window_hours : null;
+							// "Auto" only knows its real trailing-hours span once
+							// the server resolves it — reposition the line now.
+							updateWindowVLine();
+
 							// 0 (not null) once resolved with no trades at all in
-							// the current window — null only ever means "haven't
-							// fetched yet", so tradeCountSuffix() can tell "0
-							// trades" apart from "not loaded".
+							// the current Window/Expiry — null only ever means
+							// "haven't fetched yet", so tradeCountSuffix() can
+							// tell "0 trades" apart from "not loaded".
 							tradeCount = latest ? latest.trade_count : 0;
 							setStatus(statusText());
 
@@ -893,14 +953,17 @@
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
 							if (!latest) {
-								putFillSeries.setData([]);
-								callFillSeries.setData([]);
 								return;
 							}
 
 							// 0.0 means absent (same convention every gamma_band/
 							// smart_liq_*_price field in this addon uses) — no
 							// line drawn rather than a spurious price-0 line.
+							// axisLabelColor matches each line's own color here
+							// so the label is identifiable by color at a glance
+							// with 4 lines on one chart. Colors come from
+							// chartColors (user-configurable via the "Settings"
+							// button/dankbit_tm_chart_colors).
 							if (latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
 									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
@@ -941,8 +1004,7 @@
 							// legs) + its own $-prefixed price, then the average of
 							// those legs' gamma VALUES: "<dom leg> $<dom leg price> |
 							// <avg gamma value>", e.g. "LC $81,200 | 71M" — same as
-							// /l24/<asset> (positions swapped + $ added per product
-							// decision 2026-08-31, matching /sli).
+							// /4l/<asset>.
 							const gammaLegs = [
 								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
 								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
@@ -960,32 +1022,6 @@
 									axisLabelVisible: true, axisLabelColor: avgColor,
 									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
 								});
-							}
-
-							// Light-orange shaded zone between LP/SP when LP sits below SP,
-							// and between LC/SC when LC sits above SC — see putFillSeries/
-							// callFillSeries above. 0.0 (falsy) on either price means that
-							// leg had no trades in the window, same absent-price convention
-							// the lines above already check, so the fill is skipped rather
-							// than drawn against a spurious price-0 edge.
-							const fillRange = fillRectTimeRange();
-							if (fillRange && latest.bpg_price && latest.spg_price && latest.bpg_price < latest.spg_price) {
-								putFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.bpg_price } });
-								putFillSeries.setData([
-									{ time: fillRange.fromTime, value: latest.spg_price },
-									{ time: fillRange.toTime, value: latest.spg_price },
-								]);
-							} else {
-								putFillSeries.setData([]);
-							}
-							if (fillRange && latest.bcg_price && latest.scg_price && latest.bcg_price > latest.scg_price) {
-								callFillSeries.applyOptions({ baseValue: { type: 'price', price: latest.scg_price } });
-								callFillSeries.setData([
-									{ time: fillRange.fromTime, value: latest.bcg_price },
-									{ time: fillRange.toTime, value: latest.bcg_price },
-								]);
-							} else {
-								callFillSeries.setData([]);
 							}
 						} finally {
 							hideSpinner();
@@ -1082,19 +1118,18 @@
 						}
 					});
 
-					// Re-runs every fetch on this page against the current
-					// AS_OF_ISO — called whenever the "As Of" input changes or
-					// the "Now" button is pressed. Candles/gamma legs both
-					// depend on AS_OF_ISO, so both are re-fetched together
-					// (unlike setTf/setWindow, which each only touch the one
-					// thing they control). No Expiry list to reload anymore
-					// (removed in the /l24-based rebuild) — the 4 gamma legs
-					// are always cumulative across every expiry active as of
-					// AS_OF_ISO.
+					// Re-runs every As-Of-dependent fetch on this page against
+					// the current AS_OF_ISO — called whenever the "As Of" input
+					// changes or the "Now" button is pressed. Candles, the
+					// Expiry list, and the 4 gamma legs all depend on
+					// AS_OF_ISO, so all three are re-fetched together (unlike
+					// setTf/setExpiry/setWindow, which each only touch the one
+					// thing they control).
 					async function reloadForAsOf() {
 						showSpinner();
 						try {
 							await loadCandles();
+							await loadExpiries();
 							await refreshFourLegGamma();
 							setStatus(statusText());
 						} catch (e) {
@@ -1122,6 +1157,7 @@
 						try {
 							setAsOfInput(INITIAL_AS_OF || defaultAsOfBerlinNaive());
 							await loadCandles();
+							await loadExpiries();
 							await refreshFourLegGamma();
 							setStatus(statusText());
 						}
@@ -1129,7 +1165,7 @@
 					}
 					init();
 					// No setInterval calls at all on this page — an As-Of
-					// moment is frozen by definition, so unlike /l24/<asset>
+					// moment is frozen by definition, so unlike /4l/<asset>
 					// (candle poll, gamma-leg poll, and a 5s vline-advance
 					// tick) there's nothing here that needs to keep moving
 					// forward in real time once AS_OF_ISO stops changing.
