@@ -291,10 +291,6 @@
 							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
 						</div>
-						<div class="modal-section">
-							<div class="modal-section-title">AVG Line</div>
-							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
-						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
 							<button class="tf-btn" onclick="saveChartColors()">Save</button>
@@ -371,6 +367,18 @@
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
+					// The AVG line's color is derived from its dominant leg, not a
+					// user setting: a call-side dominant leg (LC/SC) -> light green,
+					// a put-side one (LP/SP) -> light red — same light green/red this
+					// addon uses for the Thales Forecast candle bodies and the /sli
+					// page's own single line. Was a "Chart Appearance" color picker
+					// until product decision (2026-08-31) made it dominant-leg-derived.
+					const AVG_LINE_COLOR_CALL = '#a5d6a7';
+					const AVG_LINE_COLOR_PUT  = '#ef9a9a';
+					function avgLineColor(legName) {
+						return (legName === 'LC' || legName === 'SC') ? AVG_LINE_COLOR_CALL : AVG_LINE_COLOR_PUT;
+					}
+
 					// "Settings" button/dialog (see openSettingsModal() below,
 					// after Ruler) — user-pickable colors for this page's own
 					// 4 gamma-leg lines, persisted per-browser to localStorage
@@ -379,10 +387,11 @@
 					// line-style picker (unlike the Delta Chart's own modal)
 					// since these 4 lines are always solid createPriceLine()s.
 					// Defaults match /4l/<asset>'s own original fixed colors
-					// (LC/LP black, SC/SP orange, AVG light violet).
+					// (LC/LP black, SC/SP orange). The AVG line is not here — its
+					// color is dominant-leg-derived (avgLineColor() above).
 					const COLOR_STORAGE_KEY = 'dankbit_l24_chart_colors';
 					const DEFAULT_COLORS = {
-						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc',
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -860,14 +869,19 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								// Dominant leg — whichever present leg has the largest
-								// |gamma value| — appended to the label so the AVG line
-								// also communicates which single leg is driving it.
+								// |gamma value| — leads the label (with its own
+								// $-prefixed price), so the AVG line also communicates
+								// which single leg is driving it and where it sits.
+								// Label: "<dom leg> $<dom leg price> | <avg gamma value>",
+								// e.g. "LC $81,200 | 71M" (positions swapped + $ added
+								// per product decision 2026-08-31, matching /sli).
 								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
+								const avgColor = avgLineColor(dominantLeg.name);
 								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
+									price: avgGammaPrice, color: avgColor, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: chartColors.avg,
-									title: 'AVG ' + formatAbbreviated(avgGammaValue) + ' | ' + dominantLeg.name,
+									axisLabelVisible: true, axisLabelColor: avgColor,
+									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
 								});
 							}
 

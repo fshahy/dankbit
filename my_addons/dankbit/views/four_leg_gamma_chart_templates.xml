@@ -28,10 +28,13 @@
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms), plus
-	     a 5th light-violet dashed AVG line, always drawn alongside the
+	     a 5th dashed AVG line, always drawn alongside the
 	     other 4 — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
-	     prices (no server field of its own); removed per an earlier
+	     prices (no server field of its own). Its color is dominant-leg-
+	     derived (avgLineColor(): light green for an LC/SC dominant leg,
+	     light red for LP/SP), NOT a "Chart Appearance" picker — that
+	     picker was removed per product decision (2026-08-31). Removed per an earlier
 	     product decision alongside a heavier "ALL AVG" all-expiries
 	     variant, then restored on its own (ALL AVG stays removed) per a
 	     further product decision, then put behind an opt-in checkbox per
@@ -55,14 +58,14 @@
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
-	     dropdown (Auto/24h/All —
-	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "24h" entry plus the "Auto"
-	     dynamic option (the default) and the "All" no-window-bound option;
+	     dropdown (Auto/8h/24h/48h/3d/4d/5d/All —
+	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "8h"/"24h"/"48h"/"72h"/"96h"/"120h"
+	     entries plus the "Auto" dynamic option and the "All" no-window-bound
+	     option ("24h" is the default);
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
-	     main.py for this choice set's full history. "00:00 UTC"/"4h"/"8h"/
-	     "12h" were also once offered here, removed from this dropdown per
-	     a product decision (2026-08-19) — the server-side "midnight"/"4"/
-	     "8"/"12" ?hours= resolutions, and windowLabel()'s own display
+	     main.py for this choice set's full history. "00:00 UTC"/"4h"/
+	     "12h" were also once offered here — the server-side "midnight"/"4"/
+	     "12" ?hours= resolutions, and windowLabel()'s own display
 	     strings for them, are unchanged and still reachable by a direct
 	     API call, just no longer offered from this page's UI) independently
 	     picks the trailing-hours trade window via ?hours= on that same
@@ -286,6 +289,7 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="8">8h</option>
 						<option value="24" selected="selected">24h</option>
 						<option value="48">48h</option>
 						<option value="72">3d</option>
@@ -322,10 +326,6 @@
 							<label class="color-row">Long Put (LP) <input type="color" id="color-bpg"/></label>
 							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
-						</div>
-						<div class="modal-section">
-							<div class="modal-section-title">AVG Line</div>
-							<label class="color-row">AVG <input type="color" id="color-avg"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -481,6 +481,19 @@
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
+					// The AVG line's color is derived from its dominant leg, not a
+					// user setting: a call-side dominant leg (LC/SC) -> light green,
+					// a put-side one (LP/SP) -> light red — same light green/red this
+					// addon uses for the Thales Forecast candle bodies and the /sli
+					// page's own single line, so the association reads consistently
+					// across pages. Was a "Chart Appearance" color picker until
+					// product decision (2026-08-31) made it dominant-leg-derived.
+					const AVG_LINE_COLOR_CALL = '#a5d6a7';
+					const AVG_LINE_COLOR_PUT  = '#ef9a9a';
+					function avgLineColor(legName) {
+						return (legName === 'LC' || legName === 'SC') ? AVG_LINE_COLOR_CALL : AVG_LINE_COLOR_PUT;
+					}
+
 					// "Settings" button/dialog (see openSettingsModal() below,
 					// after Ruler) — user-pickable colors for this page's own
 					// 4 gamma-leg lines, persisted per-browser to localStorage
@@ -500,7 +513,7 @@
 					// chosen rather than swapping with the theme).
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
 					const DEFAULT_COLORS = {
-						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#c9a0dc',
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -510,12 +523,10 @@
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
 					// Average of the 4 gamma legs' own price levels (dashed
-					// line, see avgGammaPriceLine below) — default light
-					// violet, same "gamma" color association this addon
-					// uses elsewhere (the Zones page's violet Gamma section
-					// header, the Delta Chart's own dashed violet Gamma Band
-					// line), user-recolorable via the "Chart Appearance"
-					// modal's own "AVG Line" section (chartColors.avg).
+					// line, see avgGammaPriceLine below). Its color is NOT in
+					// chartColors / the "Chart Appearance" modal — it's derived
+					// from the dominant leg via avgLineColor() (light green for a
+					// call-side dominant leg, light red for a put-side one).
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -1011,14 +1022,19 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								// Dominant leg — whichever present leg has the largest
-								// |gamma value| — appended to the label so the AVG line
-								// also communicates which single leg is driving it.
+								// |gamma value| — leads the label (with its own
+								// $-prefixed price), so the AVG line also communicates
+								// which single leg is driving it and where it sits.
+								// Label: "<dom leg> $<dom leg price> | <avg gamma value>",
+								// e.g. "LC $81,200 | 71M" (positions swapped + $ added
+								// per product decision 2026-08-31, matching /sli).
 								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
+								const avgColor = avgLineColor(dominantLeg.name);
 								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: chartColors.avg, lineWidth: 2,
+									price: avgGammaPrice, color: avgColor, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: chartColors.avg,
-									title: 'AVG ' + formatAbbreviated(avgGammaValue) + ' | ' + dominantLeg.name,
+									axisLabelVisible: true, axisLabelColor: avgColor,
+									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
 								});
 							}
 						} finally {
