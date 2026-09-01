@@ -1,12 +1,13 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
-	     "Timeframe" dropdown (15m/1h/4h/1d, 4h default — 15m added
+	     "Timeframe" dropdown (15m/1h/4h/1d, 1h default — 15m added
 	     since Coinbase natively
 	     supports it too, and was originally also this page's own default
 	     until it was changed to 4h per product decision (matching the
 	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
 	     further product decision (2026-08-19), then back to 4h per a
-	     still later product decision), candles
+	     still later product decision, then to 1h per a further product
+	     decision (2026-09-01)), candles
 	     from Coinbase spot (dankbit.trade.get_candles_coinbase(), same
 	     /api/klines-coinbase/<asset> proxy /tm/<asset> uses — Coinbase
 	     has no native 4h resolution, so "4h" is bucketed server-side from
@@ -58,14 +59,16 @@
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
-	     dropdown (Auto/8h/24h/48h/3d/4d/5d/All —
-	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "8h"/"24h"/"48h"/"72h"/"96h"/"120h"
+	     dropdown (Auto/2h/4h/6h/8h/24h/48h/3d/4d/5d/All, 4h default —
+	     2h/4h/6h added per product decision (2026-09-01), which also
+	     moved the default from 24h to 4h;
+	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "2h"/"4h"/"6h"/"8h"/"24h"/"48h"/"72h"/"96h"/"120h"
 	     entries plus the "Auto" dynamic option and the "All" no-window-bound
-	     option ("24h" is the default);
+	     option;
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
-	     main.py for this choice set's full history. "00:00 UTC"/"4h"/
-	     "12h" were also once offered here — the server-side "midnight"/"4"/
-	     "12" ?hours= resolutions, and windowLabel()'s own display
+	     main.py for this choice set's full history. "00:00 UTC"/"12h"
+	     were also once offered here — the server-side "midnight"/"12"
+	     ?hours= resolutions, and windowLabel()'s own display
 	     strings for them, are unchanged and still reachable by a direct
 	     API call, just no longer offered from this page's UI) independently
 	     picks the trailing-hours trade window via ?hours= on that same
@@ -267,7 +270,7 @@
 				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="window-vline"/>
-				<div id="window-vline-label" class="vline-label">24h</div>
+				<div id="window-vline-label" class="vline-label">4h</div>
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
@@ -275,8 +278,8 @@
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="15m">15m</option>
-						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
+						<option value="1h" selected="selected">1h</option>
+						<option value="4h">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
@@ -290,10 +293,10 @@
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
 						<option value="2">2h</option>
-						<option value="4">4h</option>
+						<option value="4" selected="selected">4h</option>
 						<option value="6">6h</option>
 						<option value="8">8h</option>
-						<option value="24" selected="selected">24h</option>
+						<option value="24">24h</option>
 						<option value="48">48h</option>
 						<option value="72">3d</option>
 						<option value="96">4d</option>
@@ -344,10 +347,11 @@
 					// Strike Gamma charts' own dropdown; was 15m by default,
 					// then changed to 4h (matching those pages), then to 1d
 					// per a further product decision (2026-08-19), then back
-					// to 4h per a still later product decision — see
+					// to 4h per a still later product decision, then to 1h
+					// per a further product decision (2026-09-01) — see
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
-					let INTERVAL = '4h';
+					let INTERVAL = '1h';
 					// Coinbase spot, same symbol convention /tm/<asset> uses
 					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -407,10 +411,11 @@
 					// "24h" was made the default per a still later product
 					// decision, then back to "Auto" per a still later
 					// product decision, then back to "24h" per a still
-					// later product decision — see main.py's own
+					// later product decision, then to "4h" per a further
+					// product decision (2026-09-01) — see main.py's own
 					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
 					// the current full history.)
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 4;
 					// When WINDOW_HOURS === 'auto', this is the numeric hours
 					// /api/four-leg-gamma actually resolved it to (its own
 					// `window_hours` response field, via _auto_window_hours()
