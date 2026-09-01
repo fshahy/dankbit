@@ -278,6 +278,9 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="2">2h</option>
+						<option value="4">4h</option>
+						<option value="6">6h</option>
 						<option value="8">8h</option>
 						<option value="24" selected="selected">24h</option>
 						<option value="48">48h</option>
