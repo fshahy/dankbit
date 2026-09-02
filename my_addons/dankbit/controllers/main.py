@@ -11,6 +11,7 @@ from . import options
 from . import delta
 from . import gamma
 from . import next_candle_forecast
+from . import four_leg_forecast
 
 # /4l/<asset>'s own "Window" dropdown numeric choice set — 4h/8h/12h/
 # 1d/2d/3d/4d/5d/6d/7d/8d/9d/10d (still stored/passed as raw hours —
@@ -2458,195 +2459,19 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
-    @http.route("/api/four-leg-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
-    def four_leg_gamma_json(self, asset):
-        """Computed fresh on every request — no model/table behind this
-        route: 4-leg gamma extrema (BCG/BPG/SCG/SPG) over `asset`'s own
-        trailing trades, restricted to an expiry chosen via the page's
-        own "Expiry" dropdown — an optional `?expiry=` query param, one
-        of two families:
+    def _resolve_four_leg_trades(self, asset):
+        """Shared trade-domain resolution for the 4-leg-gamma family of
+        routes — `?expiry=` / `?instrument=` / `?cumulative=` /
+        `?from_instrument=`+`?to_instrument=` / `?hours=` / `?as_of=` —
+        exactly as four_leg_gamma_json documents them. Returns a dict:
+        {trades (recordset), instrument (str|None), hours (int|"all"|
+        "midnight"), STs (np.ndarray), from_price, to_price, step, as_of,
+        from_instrument (raw param|None), to_instrument (raw param|None),
+        ft_range (bool)}. `asset` must already be upper-cased/validated.
 
-        - An explicit `?instrument=` query param (e.g. "BTC-25JUL26")
-          takes priority over `?expiry=` entirely and ISOLATES trades to
-          that one instrument directly, same anchored `=ilike` domain as
-          the ordinal family below — sent by `/4l/<asset>`'s own
-          "Expiry" dropdown (each option resolves to a real instrument
-          picked from `/api/expiries/<asset>` rather than a mode string).
-          `/tm/<asset>` (Time Machine) sends this too, from its own
-          "Expiry" dropdown (populated from `/api/expiries/<asset>?as_of=`),
-          paired with its own `?as_of=` param so the isolation targets
-          that historical moment (see time_machine_chart).
-
-        - "nearest" (default — the currently soonest-expiring active
-          instrument), "nearest_plus_1", or "nearest_plus_2" (the
-          1st/2nd active expiry after the nearest one), mapped to an
-          ordinal index (0-2) and resolved via
-          dankbit.bands._distinct_expirations()/_format_instrument()
-          directly rather than dankbit.bands._compute_asset(), since
-          this route only needs the instrument string, not a full curve
-          build. Trades are ISOLATED to that one resolved instrument's
-          own trades via the same anchored `=ilike` domain
-          chart_png_zones uses (`f"{instrument}-%"`, left-prefix match
-          so one expiry's query can never pull in another's trades).
-
-        - "weekly" or "monthly" — resolved against the configured
-          weekly_expiry/monthly_expiry instrument for `asset`
-          (eth_-prefixed for ETH, same convention
-          _build_tv_chart_context() uses). Trades are ISOLATED to that
-          one configured instrument's own trades, same anchored `=ilike`
-          domain (and active_test bypass, in case that instrument has
-          since expired and been archived) as the ordinal family above —
-          previously CUMULATIVE through every active instrument whose
-          own expiration was <= that expiry's day-suffix (the same
-          expiration-column cutoff gamma_by_strike_until_json/
-          _gamma_by_strike still use for their own Weekly/Monthly
-          scopes); changed per product decision so Weekly/Monthly line
-          up with the ordinal family's single-instrument isolation
-          instead of pulling in every other active expiry's trades too.
-
-        - "all" — skips the weekly/monthly instrument lookup entirely
-          and considers every one of `asset`'s own non-expired
-          instruments (`expiration >= now`, no upper bound — same
-          no-expiry-cutoff domain gamma_by_strike_json's own "All" scope
-          uses), trades CUMULATIVE across all of them — unlike Weekly/
-          Monthly above, there's no single instrument to isolate to.
-          This is the same domain the since-removed /mwa/<asset> page's
-          own mwa_gamma_json route used, ported onto this route's own
-          "Expiry" dropdown alongside its original ordinal options
-          rather than as a separate page, once /mwa/<asset> was folded
-          into this one and removed. `/l24/<asset>` sends this
-          unconditionally (that page has no "Expiry" dropdown at all —
-          its 4 gamma legs are always cumulative across every active
-          expiry, see l24_chart). `/tm/<asset>` (Time Machine) drove
-          this branch too during its own /l24-based phase, paired with
-          its own `?as_of=` param — this "all" branch's own
-          `expiration >= as_of` condition (via the shared `as_of`
-          variable every branch in this route reads instead of calling
-          `datetime.now()` inline) and its `active_test=False` bypass
-          were built to serve that historical case; /tm/<asset> has
-          since been re-synced onto /4l/<asset> and now sends
-          `?instrument=` (optionally `?cumulative=1`) + `?as_of=`
-          instead, but those paths carry the same `as_of`/
-          `active_test=False` treatment.
-
-        Any other/missing `?expiry=` value falls back to "nearest". The
-        trailing-hours trade window is independently user-selectable via
-        the page's own "Window" dropdown — an optional `?hours=` query
-        param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (every
-        integer 1..72 plus 96/120/144/168/192/216/240/480/720; each
-        page's own "Window" dropdown offers a different subset of these
-        — see the constant's own comment above — or the literal string
-        "all", skipping the trailing-hours trade filter entirely, or the
-        literal string "midnight", restricting to trades since the most
-        recent UTC midnight (options.day_window_start) instead of a
-        trailing-hours count — same day-boundary convention chart_png_zones/
-        the /lp,lc,sp,sc single-leg routes/dankbit.bands._compute_asset's
-        default window already use, or the literal string "auto",
-        resolved via _auto_window_hours() to the smallest
-        FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers however
-        many hours remain until the resolved Expiry's own settlement —
-        shrinking the lookback as expiry nears, on the reasoning that
-        stale/rolled flow matters less the closer price gets to
-        settlement (see _auto_window_hours' own docstring for the
-        rationale and why there's no direct "professional practice" to
-        point to here); falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS when
-        Expiry=All (no single instrument to compute a time-to-expiry
-        against) — any other/missing `?hours=` value falls back to
-        FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
-        — applies to both expiry families the same way. The resolved
-        numeric window is echoed back as the response's own
-        `window_hours` field (always an int, even when `?hours=auto`
-        resolved it, so the client can display what Auto actually
-        picked). Computed via
-        options.per_leg_gamma() — a
-        gamma-only slice of options.per_leg_greeks() (the single source
-        of truth for the full gamma/delta/theta/vega set, also used by
-        dankbit.bands/dankbit.forecast.snapshot/chart_png_zones) that
-        skips the theta/vega/delta curves this route never reads (see
-        per_leg_gamma()'s own docstring in options.py). Feeds
-        /4l/<asset>'s own 4 horizontal gamma-price lines — the page's
-        own "refreshFourLegGamma()" timer poll is skipped client-side
-        while a cumulative "weekly"/"monthly"/"all" mode is selected,
-        same reasoning /mwa/<asset> never polled this class of
-        computation on a timer at all (options.per_leg_gamma() loops
-        per trade in plain Python, so cost scales directly with trade
-        count — potentially every trade for every active instrument at
-        once). No points at all (same nothing-computable-yet convention
-        every other route in this addon follows) when nothing is active
-        at that ordinal position, or (for the cumulative family) when
-        the selected expiry isn't configured for `asset`, is malformed,
-        or has no matching trades in the resolved window. `points`
-        holds exactly one (current) reading, kept as a list for
-        shape-compatibility with the page's own existing
-        points[points.length-1] read.
-
-        An optional `?cumulative=1` (or "true") query param — only
-        meaningful alongside `?instrument=` — switches that branch from
-        ISOLATING to the given instrument's own trades to a CUMULATIVE
-        domain across every one of `asset`'s own instruments whose own
-        `expiration` falls between `as_of` (or its `?as_of=` override)
-        and the given instrument's own expiration, inclusive — "from
-        as_of through and including this cutoff". The trailing-hours
-        Window (`?hours=`) still
-        applies on top, same as the isolated path. Sent by /4l/<asset>'s
-        and /tm/<asset>'s (Time Machine) own "Cumulative" checkbox —
-        /tm/<asset>'s relative to its user-picked As-Of moment (via the
-        `?as_of=` override), /4l/<asset>'s relative to "now" (see
-        four_leg_gamma_chart/time_machine_chart). Requires a lookup of
-        the given instrument's own expiration (the same single-row
-        lookup `?hours=auto` already performs for `?instrument=`, now
-        also run whenever `?cumulative=` is set) — falls back to the
-        ordinary isolated behavior if that instrument has no trades at
-        all (nothing to resolve a cutoff expiration from).
-
-        A separate `?from_instrument=`/`?to_instrument=` query param pair —
-        both required together, and taking priority over `?instrument=`/
-        `?expiry=` entirely — switches to a CUMULATIVE domain spanning
-        every one of `asset`'s own instruments whose own `expiration` falls
-        between the two resolved expirations, inclusive (order-independent
-        — swapped if given backwards). Each side is resolved to its own
-        expiration via the same single-row trade lookup `?instrument=`'s
-        own `?hours=auto`/`?cumulative=` handling already performs; falling
-        back to the ordinary `?instrument=`/`?expiry=` resolution (or empty
-        trades if neither is set) if either side's lookup finds no trades
-        at all. Used by /ft/<asset> (the FT — "From/To" — Chart)'s own
-        "From"/"To" Expiry dropdowns, each populated the same way
-        /4l/<asset>'s own single "Expiry" dropdown is (`/api/expiries/<asset>`).
-        The trailing-hours Window (`?hours=`) still applies on top, same as
-        every other branch — including `?hours=auto`: the range's own
-        farther-out (later, post-swap) edge is used as the `_auto_window_hours()`
-        time-to-expiry reference, the same role a single resolved
-        instrument's own expiration plays for every other `?hours=auto`
-        path in this method. Response echoes the resolved
-        `from_instrument`/`to_instrument` strings (`None` on any other
-        path), alongside the existing `instrument` field (`None` here too,
-        since this is a range rather than a single instrument, same as the
-        cumulative "all" branch below).
-
-        An optional `?as_of=` query param (see _parse_as_of_param)
-        substitutes for "now" everywhere in this function — every
-        `?expiry=`/`?instrument=`/`?hours=`
-        resolution above is already written relative to a local `as_of`
-        variable rather than calling datetime.now() inline, so overriding
-        just that one assignment retargets the whole computation at a
-        past moment with no other changes needed. Used by /tm/<asset>
-        (Time Machine) to compute the 4 gamma legs as they stood at a
-        user-picked historical date; every trade domain search below
-        already runs with `active_test=False` for exactly this reason —
-        so archived (long-since-expired) trades from that period are
-        still found — except the cumulative "all" branch, which now also
-        bypasses active_test unconditionally (harmless for the live/no
-        as_of case too, since that branch's own `expiration >= as_of`
-        condition already excludes anything old enough to have been
-        archived when as_of is "now").
-        """
-        asset = asset.upper()
-        if not (asset.startswith("BTC") or asset.startswith("ETH")):
-            return request.make_response(
-                json.dumps({"error": "Unknown asset"}),
-                headers=[("Content-Type", "application/json")],
-            )
-
+        Extracted so /api/four-leg-forecast/<asset> resolves the same
+        trade set the page currently shows — the forecast can never drift
+        from whatever Expiry/Window/Cumulative the user has selected."""
         icp = request.env["ir.config_parameter"].sudo()
         if asset == "BTC":
             from_price = float(icp.get_param("dankbit.from_price", default=100000))
@@ -2866,6 +2691,213 @@ class ChartController(http.Controller):
 
         STs = np.arange(from_price, to_price, step, dtype=np.float64)
 
+        return {
+            "trades": trades, "instrument": instrument, "hours": hours, "STs": STs,
+            "from_price": from_price, "to_price": to_price, "step": step, "as_of": as_of,
+            "from_instrument": from_instrument_param if ft_range else None,
+            "to_instrument": to_instrument_param if ft_range else None,
+            "ft_range": ft_range,
+        }
+
+    @http.route("/api/four-leg-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def four_leg_gamma_json(self, asset):
+        """Computed fresh on every request — no model/table behind this
+        route: 4-leg gamma extrema (BCG/BPG/SCG/SPG) over `asset`'s own
+        trailing trades, restricted to an expiry chosen via the page's
+        own "Expiry" dropdown — an optional `?expiry=` query param, one
+        of two families:
+
+        - An explicit `?instrument=` query param (e.g. "BTC-25JUL26")
+          takes priority over `?expiry=` entirely and ISOLATES trades to
+          that one instrument directly, same anchored `=ilike` domain as
+          the ordinal family below — sent by `/4l/<asset>`'s own
+          "Expiry" dropdown (each option resolves to a real instrument
+          picked from `/api/expiries/<asset>` rather than a mode string).
+          `/tm/<asset>` (Time Machine) sends this too, from its own
+          "Expiry" dropdown (populated from `/api/expiries/<asset>?as_of=`),
+          paired with its own `?as_of=` param so the isolation targets
+          that historical moment (see time_machine_chart).
+
+        - "nearest" (default — the currently soonest-expiring active
+          instrument), "nearest_plus_1", or "nearest_plus_2" (the
+          1st/2nd active expiry after the nearest one), mapped to an
+          ordinal index (0-2) and resolved via
+          dankbit.bands._distinct_expirations()/_format_instrument()
+          directly rather than dankbit.bands._compute_asset(), since
+          this route only needs the instrument string, not a full curve
+          build. Trades are ISOLATED to that one resolved instrument's
+          own trades via the same anchored `=ilike` domain
+          chart_png_zones uses (`f"{instrument}-%"`, left-prefix match
+          so one expiry's query can never pull in another's trades).
+
+        - "weekly" or "monthly" — resolved against the configured
+          weekly_expiry/monthly_expiry instrument for `asset`
+          (eth_-prefixed for ETH, same convention
+          _build_tv_chart_context() uses). Trades are ISOLATED to that
+          one configured instrument's own trades, same anchored `=ilike`
+          domain (and active_test bypass, in case that instrument has
+          since expired and been archived) as the ordinal family above —
+          previously CUMULATIVE through every active instrument whose
+          own expiration was <= that expiry's day-suffix (the same
+          expiration-column cutoff gamma_by_strike_until_json/
+          _gamma_by_strike still use for their own Weekly/Monthly
+          scopes); changed per product decision so Weekly/Monthly line
+          up with the ordinal family's single-instrument isolation
+          instead of pulling in every other active expiry's trades too.
+
+        - "all" — skips the weekly/monthly instrument lookup entirely
+          and considers every one of `asset`'s own non-expired
+          instruments (`expiration >= now`, no upper bound — same
+          no-expiry-cutoff domain gamma_by_strike_json's own "All" scope
+          uses), trades CUMULATIVE across all of them — unlike Weekly/
+          Monthly above, there's no single instrument to isolate to.
+          This is the same domain the since-removed /mwa/<asset> page's
+          own mwa_gamma_json route used, ported onto this route's own
+          "Expiry" dropdown alongside its original ordinal options
+          rather than as a separate page, once /mwa/<asset> was folded
+          into this one and removed. `/l24/<asset>` sends this
+          unconditionally (that page has no "Expiry" dropdown at all —
+          its 4 gamma legs are always cumulative across every active
+          expiry, see l24_chart). `/tm/<asset>` (Time Machine) drove
+          this branch too during its own /l24-based phase, paired with
+          its own `?as_of=` param — this "all" branch's own
+          `expiration >= as_of` condition (via the shared `as_of`
+          variable every branch in this route reads instead of calling
+          `datetime.now()` inline) and its `active_test=False` bypass
+          were built to serve that historical case; /tm/<asset> has
+          since been re-synced onto /4l/<asset> and now sends
+          `?instrument=` (optionally `?cumulative=1`) + `?as_of=`
+          instead, but those paths carry the same `as_of`/
+          `active_test=False` treatment.
+
+        Any other/missing `?expiry=` value falls back to "nearest". The
+        trailing-hours trade window is independently user-selectable via
+        the page's own "Window" dropdown — an optional `?hours=` query
+        param, restricted to FOUR_LEG_WINDOW_HOURS_CHOICES (every
+        integer 1..72 plus 96/120/144/168/192/216/240/480/720; each
+        page's own "Window" dropdown offers a different subset of these
+        — see the constant's own comment above — or the literal string
+        "all", skipping the trailing-hours trade filter entirely, or the
+        literal string "midnight", restricting to trades since the most
+        recent UTC midnight (options.day_window_start) instead of a
+        trailing-hours count — same day-boundary convention chart_png_zones/
+        the /lp,lc,sp,sc single-leg routes/dankbit.bands._compute_asset's
+        default window already use, or the literal string "auto",
+        resolved via _auto_window_hours() to the smallest
+        FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers however
+        many hours remain until the resolved Expiry's own settlement —
+        shrinking the lookback as expiry nears, on the reasoning that
+        stale/rolled flow matters less the closer price gets to
+        settlement (see _auto_window_hours' own docstring for the
+        rationale and why there's no direct "professional practice" to
+        point to here); falls back to FOUR_LEG_DEFAULT_WINDOW_HOURS when
+        Expiry=All (no single instrument to compute a time-to-expiry
+        against) — any other/missing `?hours=` value falls back to
+        FOUR_LEG_DEFAULT_WINDOW_HOURS=24)
+        — applies to both expiry families the same way. The resolved
+        numeric window is echoed back as the response's own
+        `window_hours` field (always an int, even when `?hours=auto`
+        resolved it, so the client can display what Auto actually
+        picked). Computed via
+        options.per_leg_gamma() — a
+        gamma-only slice of options.per_leg_greeks() (the single source
+        of truth for the full gamma/delta/theta/vega set, also used by
+        dankbit.bands/dankbit.forecast.snapshot/chart_png_zones) that
+        skips the theta/vega/delta curves this route never reads (see
+        per_leg_gamma()'s own docstring in options.py). Feeds
+        /4l/<asset>'s own 4 horizontal gamma-price lines — the page's
+        own "refreshFourLegGamma()" timer poll is skipped client-side
+        while a cumulative "weekly"/"monthly"/"all" mode is selected,
+        same reasoning /mwa/<asset> never polled this class of
+        computation on a timer at all (options.per_leg_gamma() loops
+        per trade in plain Python, so cost scales directly with trade
+        count — potentially every trade for every active instrument at
+        once). No points at all (same nothing-computable-yet convention
+        every other route in this addon follows) when nothing is active
+        at that ordinal position, or (for the cumulative family) when
+        the selected expiry isn't configured for `asset`, is malformed,
+        or has no matching trades in the resolved window. `points`
+        holds exactly one (current) reading, kept as a list for
+        shape-compatibility with the page's own existing
+        points[points.length-1] read.
+
+        An optional `?cumulative=1` (or "true") query param — only
+        meaningful alongside `?instrument=` — switches that branch from
+        ISOLATING to the given instrument's own trades to a CUMULATIVE
+        domain across every one of `asset`'s own instruments whose own
+        `expiration` falls between `as_of` (or its `?as_of=` override)
+        and the given instrument's own expiration, inclusive — "from
+        as_of through and including this cutoff". The trailing-hours
+        Window (`?hours=`) still
+        applies on top, same as the isolated path. Sent by /4l/<asset>'s
+        and /tm/<asset>'s (Time Machine) own "Cumulative" checkbox —
+        /tm/<asset>'s relative to its user-picked As-Of moment (via the
+        `?as_of=` override), /4l/<asset>'s relative to "now" (see
+        four_leg_gamma_chart/time_machine_chart). Requires a lookup of
+        the given instrument's own expiration (the same single-row
+        lookup `?hours=auto` already performs for `?instrument=`, now
+        also run whenever `?cumulative=` is set) — falls back to the
+        ordinary isolated behavior if that instrument has no trades at
+        all (nothing to resolve a cutoff expiration from).
+
+        A separate `?from_instrument=`/`?to_instrument=` query param pair —
+        both required together, and taking priority over `?instrument=`/
+        `?expiry=` entirely — switches to a CUMULATIVE domain spanning
+        every one of `asset`'s own instruments whose own `expiration` falls
+        between the two resolved expirations, inclusive (order-independent
+        — swapped if given backwards). Each side is resolved to its own
+        expiration via the same single-row trade lookup `?instrument=`'s
+        own `?hours=auto`/`?cumulative=` handling already performs; falling
+        back to the ordinary `?instrument=`/`?expiry=` resolution (or empty
+        trades if neither is set) if either side's lookup finds no trades
+        at all. Used by /ft/<asset> (the FT — "From/To" — Chart)'s own
+        "From"/"To" Expiry dropdowns, each populated the same way
+        /4l/<asset>'s own single "Expiry" dropdown is (`/api/expiries/<asset>`).
+        The trailing-hours Window (`?hours=`) still applies on top, same as
+        every other branch — including `?hours=auto`: the range's own
+        farther-out (later, post-swap) edge is used as the `_auto_window_hours()`
+        time-to-expiry reference, the same role a single resolved
+        instrument's own expiration plays for every other `?hours=auto`
+        path in this method. Response echoes the resolved
+        `from_instrument`/`to_instrument` strings (`None` on any other
+        path), alongside the existing `instrument` field (`None` here too,
+        since this is a range rather than a single instrument, same as the
+        cumulative "all" branch below).
+
+        An optional `?as_of=` query param (see _parse_as_of_param)
+        substitutes for "now" everywhere in this function — every
+        `?expiry=`/`?instrument=`/`?hours=`
+        resolution above is already written relative to a local `as_of`
+        variable rather than calling datetime.now() inline, so overriding
+        just that one assignment retargets the whole computation at a
+        past moment with no other changes needed. Used by /tm/<asset>
+        (Time Machine) to compute the 4 gamma legs as they stood at a
+        user-picked historical date; every trade domain search below
+        already runs with `active_test=False` for exactly this reason —
+        so archived (long-since-expired) trades from that period are
+        still found — except the cumulative "all" branch, which now also
+        bypasses active_test unconditionally (harmless for the live/no
+        as_of case too, since that branch's own `expiration >= as_of`
+        condition already excludes anything old enough to have been
+        archived when as_of is "now").
+        """
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        resolved = self._resolve_four_leg_trades(asset)
+        trades = resolved["trades"]
+        STs = resolved["STs"]
+        instrument = resolved["instrument"]
+        hours = resolved["hours"]
+        as_of = resolved["as_of"]
+        ft_range = resolved["ft_range"]
+        from_instrument_param = resolved["from_instrument"]
+        to_instrument_param = resolved["to_instrument"]
+
         points = []
         if trades:
             # per_leg_gamma() rather than per_leg_greeks() — only
@@ -2903,6 +2935,271 @@ class ChartController(http.Controller):
             json.dumps(payload),
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
+
+    @http.route("/api/four-leg-forecast/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def four_leg_forecast_json(self, asset):
+        """Deterministic 240-minute forecast-candle overlay for
+        /4l/<asset> — projects the dominant gamma leg's peak-price
+        migration (recency-weighted "fast"/"edge" curves vs the
+        equal-weight "slow" AVG-line level) plus timed order-flow
+        imbalance forward over the next 4 hours. No GBM/random term —
+        every candle is a direct function of the current flow, same
+        determinism as forecast.simulate_forecast(). Nothing persisted;
+        recomputed on every request. See controllers/four_leg_forecast.py.
+
+        **Pinned to the NEAREST active expiry and a trailing
+        four_leg_forecast.NEAREST_EXPIRY_WINDOW_HOURS (8) hour trade
+        window** — it deliberately ignores whatever Expiry/Window/
+        Cumulative the /4l page has selected (per request: "make sure
+        this forecast is applied only for nearest expiry and 4 hour
+        window"). Following the page's own selection, and an accuracy
+        log, are deferred. The nearest expiry is resolved the same cheap
+        way `_resolve_four_leg_trades` / four_leg_gamma_json resolve
+        `?expiry=nearest` (dankbit.bands._distinct_expirations() +
+        _format_instrument()), then trades are ISOLATED to that one
+        instrument (anchored `=ilike` domain, `iv != 0`) since the
+        trailing window start. One `?timeframe=` param (15m/1h/4h/1d,
+        default 1h) sets the candle step; the 240-minute horizon is
+        hard-fixed. Emits 240/tf_minutes candles (16 at 15m, 4 at 1h,
+        1 at 4h); 1d has no sub-candle to draw, so the /4l page hides the
+        toggle there and this route returns an empty path.
+
+        **Two-phase pull target** (per user observation): the forecast
+        pulls price toward `p_slow` (the dominant leg's own gamma-peak —
+        the exact value the /4l AVG-line *label* shows, used **flat**)
+        first, then latches to `p_avg` (the equal-weight mean of every
+        present leg's gamma-peak — where the dashed AVG *line* sits, and
+        this one migrates by `drift_v_avg`) once price reaches or crosses
+        `p_slow`. **If real price has already reached `p_slow` within the
+        trailing window** (`four_leg_forecast.level_met_recently()` over
+        the 15m candles) that target is treated as done: the forecast
+        starts in phase 2, heading straight for the AVG line
+        (`meta.p_slow_met_recently`).
+        Creation-time weighting still feeds `flow_impulse` / `burst`,
+        `drift_v_avg`, and a confidence haircut when the recency-weighted
+        dominant peak `p_fast` disagrees with `p_slow`. **`gamma_reach`**
+        (`four_leg_forecast.gamma_reach_factor()` of `avg_gamma_value` —
+        the mean dollar-gamma value across present legs, the "| -31M"
+        figure on the AVG-line label): below ~30M the gamma concentration
+        is too thin to pull price to the target, so the pull rate is
+        throttled (the path drifts toward but falls short of `p_slow`)
+        and confidence is haircut.
+
+        Returns {asset, instrument, timeframe, generated_at,
+        dominant_leg (LC/LP/SC/SP or None), confidence (0-1),
+        meta:{p_slow,p_fast,p_avg,p_avg_fast,drift_v_avg,flow_impulse,
+        burst,atr,p_slow_met_recently,avg_gamma_value,gamma_reach,
+        dom_trade_count,span_hours,dominant_leg_abs,confidence_breakdown
+        (vol_conf/sep/burst_conf/base/trade_target/next_leg_abs/zeroed/
+        disagree/disagree_haircut/gamma_reach_haircut — rendered in the
+        /4l "Forecast" toggle's top-right panel)},
+        points:[{t,open,high,low,close,mode}]} — `mode` gains a
+        "_to_avg" suffix on phase-2 steps. `points` is [] (nothing-
+        computable convention) on any guard trip: no active expiry, no
+        trades in the window, no usable dominant leg, thin dominant-leg
+        sample, gamma peak pinned to the price-grid edge, no ATR, or
+        timeframe=1d."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+        asset_key = "BTC" if asset.startswith("BTC") else "ETH"
+
+        tf_map = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+        timeframe = (request.httprequest.args.get("timeframe") or "1h").lower()
+        if timeframe not in tf_map:
+            timeframe = "1h"
+        tf_minutes = tf_map[timeframe]
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset_key == "BTC":
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            step = float(icp.get_param("dankbit.steps", default=100))
+        else:
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            step = float(icp.get_param("dankbit.eth_steps", default=50))
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        leg_codes = {"long_call": "LC", "long_put": "LP", "short_call": "SC", "short_put": "SP"}
+        _headers = [("Content-Type", "application/json"), ("Cache-Control", "no-cache")]
+
+        # Pinned to the nearest active expiry + a trailing
+        # NEAREST_EXPIRY_WINDOW_HOURS (8h) window, regardless of the /4l
+        # page's own Expiry/Window/Cumulative.
+        bands_model = request.env["dankbit.bands"]
+        nearest = bands_model._distinct_expirations(asset, as_of, 1)
+        instrument = bands_model._format_instrument(asset, nearest[0]) if nearest else None
+        base = {
+            "asset": asset, "instrument": instrument, "timeframe": timeframe,
+            "generated_at": int(as_of.replace(tzinfo=timezone.utc).timestamp() * 1000),
+            "dominant_leg": None, "confidence": 0.0, "meta": {}, "points": [],
+        }
+        # A 240-minute horizon spans less than one candle above 4h — the
+        # /4l page hides the toggle on 1d; keep the API consistent.
+        if not instrument or tf_minutes > four_leg_forecast.HORIZON_MINUTES:
+            return request.make_response(json.dumps(base), headers=_headers)
+
+        window_start = as_of - timedelta(hours=four_leg_forecast.NEAREST_EXPIRY_WINDOW_HOURS)
+        trades = request.env["dankbit.trade"].with_context(active_test=False).search([
+            ("name", "=ilike", f"{instrument}-%"), ("iv", "!=", 0),
+            ("deribit_ts", ">=", window_start), ("deribit_ts", "<=", as_of),
+        ])
+        if not trades:
+            return request.make_response(json.dumps(base), headers=_headers)
+
+        # 1. Legs. Dominant = largest |gamma_value|. `p_slow` = that leg's
+        #    own gamma-peak (the value the /4l AVG-line *label* shows).
+        #    `p_avg` = equal-weight mean of every present leg's gamma-peak
+        #    (where the dashed AVG *line* actually sits) — the two-phase
+        #    pull target: price seeks p_slow first, then rotates to p_avg.
+        legs = options.per_leg_gamma(STs, trades)
+        leg_abs = {k: abs(v["gamma_value"]) for k, v in legs.items()}
+        present = [k for k, v in legs.items() if v["gamma_price"]]
+        dom = max(leg_abs, key=leg_abs.get)
+        if not present or leg_abs[dom] <= 0 or legs[dom]["gamma_price"] is None:
+            return request.make_response(json.dumps(base), headers=_headers)
+        dom_trades = legs[dom]["trades"]
+        p_slow = float(legs[dom]["gamma_price"])
+        p_avg = sum(float(legs[k]["gamma_price"]) for k in present) / len(present)
+        # The "| -31M" figure on the /4l AVG-line label — mean dollar-gamma
+        # VALUE across present legs. Weak (< ~30M) => the gamma concentration
+        # can't pull price to the level (see gamma_reach_factor).
+        avg_gamma_value = sum(float(legs[k]["gamma_value"]) for k in present) / len(present)
+        gamma_reach = four_leg_forecast.gamma_reach_factor(avg_gamma_value, asset_key)
+
+        # Window span: oldest dominant-leg trade through as_of — drives the
+        # age-bucketing of the fast peak and the flow/burst binning.
+        dom_ages = [
+            (as_of - t.deribit_ts).total_seconds() / 3600.0
+            for t in dom_trades if t.deribit_ts
+        ]
+        span_h = max(max(dom_ages), 0.5) if dom_ages else 0.5
+
+        # 2. Per-leg recency-weighted "fast" gamma-peak (age-bucketed exp
+        #    decay, weighted sum of portfolio_gamma() then the leg's own
+        #    argmax/argmin) — the dominant leg's `p_fast` feeds the
+        #    confidence haircut; the mean over present legs (`p_avg_fast`)
+        #    feeds `drift_v_avg`, so the phase-2 avg-line target migrates.
+        nb = four_leg_forecast.FAST_AGE_BUCKETS
+        hl_h = four_leg_forecast.FAST_HALF_LIFE_MINUTES / 60.0
+
+        def _leg_fast_price(leg_name):
+            recs = legs[leg_name]["trades"]
+            curve = np.zeros_like(STs)
+            for i in range(nb):
+                lo, hi = span_h * i / nb, span_h * (i + 1) / nb
+                sub = recs.filtered(
+                    lambda t, lo=lo, hi=hi: t.deribit_ts
+                    and lo <= (as_of - t.deribit_ts).total_seconds() / 3600.0 < hi
+                )
+                if not sub:
+                    continue
+                w = 0.5 ** (((lo + hi) / 2.0) / hl_h)
+                curve = curve + w * np.asarray(gamma.portfolio_gamma(STs, sub), dtype=float)
+            if not np.any(curve):
+                return float(legs[leg_name]["gamma_price"])
+            return float(STs[int(options._GAMMA_VEGA_ARGFN[leg_name](curve))])
+
+        leg_fast = {k: _leg_fast_price(k) for k in present}
+        p_fast = leg_fast[dom]
+        p_avg_fast = sum(leg_fast.values()) / len(leg_fast)
+
+        # 3. ATR14 + last close on 15m Coinbase-spot candles (the fixed
+        #    internal simulation step — see four_leg_forecast.SIM_STEP_MINUTES;
+        #    the path is rolled up to the requested display timeframe after).
+        #    Enough bars to also cover the NEAREST_EXPIRY_WINDOW_HOURS
+        #    lookback for level_met_recently() below (8h => 32 bars).
+        candles = request.env["dankbit.trade"].get_candles_coinbase(asset_key, interval="15m", limit=44)
+        atr = four_leg_forecast.atr14(candles)
+        last_close = float(candles[-1]["c"]) if candles else 0.0
+
+        # Has real price already reached p_slow (the AVG-label wall) within
+        # the trailing window? If so the target is "done" — start the
+        # forecast in phase 2, heading straight for the drawn AVG line (per user
+        # observation 2026-09-02).
+        lookback_steps = int(round(
+            four_leg_forecast.NEAREST_EXPIRY_WINDOW_HOURS * 60 / four_leg_forecast.SIM_STEP_MINUTES))
+        p_slow_met = four_leg_forecast.level_met_recently(candles, p_slow, atr, lookback_steps)
+
+        # 4. Timed flow imbalance + burst intensity, over ALL window trades
+        #    (net bullish vs bearish gamma-notional, not just the dom leg).
+        events, all_ages = [], []
+        for t in trades:
+            if not t.deribit_ts:
+                continue
+            age = (as_of - t.deribit_ts).total_seconds() / 3600.0
+            all_ages.append(age)
+            if not t.expiration:
+                continue
+            t_years = (t.expiration - as_of).total_seconds() / (3600.0 * 24 * 365)
+            sn = four_leg_forecast.per_trade_signed_notional(
+                t.amount, t.direction, t.option_type, t.strike, t_years, t.iv, last_close or p_slow,
+            )
+            if sn:
+                events.append((age, sn))
+        flow_impulse = four_leg_forecast.compute_flow_impulse(events, span_h)
+        burst = four_leg_forecast.compute_burst(all_ages, span_h)
+
+        # 5. Confidence, then the deterministic path. The phase-1 target
+        #    is p_slow FLAT (the label value); creation-time weighting
+        #    still feeds flow_impulse/burst, the phase-2 avg-line drift,
+        #    and — here — a confidence haircut when the recency-weighted
+        #    dominant peak (p_fast) disagrees with p_slow (contested level).
+        other_abs = [v for k, v in leg_abs.items() if k != dom]
+        cparts = four_leg_forecast.compute_confidence(
+            asset_key, len(dom_trades), leg_abs[dom], other_abs, burst,
+            p_slow, from_price, to_price, step,
+        )
+        confidence = cparts["value"]
+        disagree = min(1.0, abs(p_fast - p_slow) / (four_leg_forecast.CONF_DISAGREE_ATR * atr)) if atr else 0.0
+        disagree_haircut = 1.0 - four_leg_forecast.CONF_DISAGREE_MAX_HAIRCUT * disagree
+        gamma_reach_haircut = min(1.0, gamma_reach)
+        confidence = confidence * disagree_haircut * gamma_reach_haircut
+        # Component breakdown for the /4l Forecast panel (see forecast_json's
+        # docstring / four_leg_gamma_chart_templates.xml #forecast-panel).
+        confidence_breakdown = {
+            "vol_conf": round(cparts["vol_conf"], 3), "sep": round(cparts["sep"], 3),
+            "burst_conf": round(cparts["burst_conf"], 3), "base": round(cparts["base"], 3),
+            "trade_target": int(cparts["trade_target"]), "next_leg_abs": round(cparts["next_leg_abs"], 0),
+            "zeroed": cparts["zeroed"], "disagree": round(disagree, 3),
+            "disagree_haircut": round(disagree_haircut, 3),
+            "gamma_reach_haircut": round(gamma_reach_haircut, 3),
+            "gamma_strength_ref_m": four_leg_forecast.GAMMA_STRENGTH_REF_M.get(
+                asset_key, four_leg_forecast.GAMMA_STRENGTH_REF_M["BTC"]),
+            "window_hours": four_leg_forecast.NEAREST_EXPIRY_WINDOW_HOURS,
+        }
+        lag_h = max(span_h / 2.0, 1.0)
+        drift_v_avg = (p_avg_fast - p_avg) / lag_h
+
+        points = four_leg_forecast.simulate_four_leg_forecast(
+            p_slow, flow_impulse, burst, confidence,
+            atr, last_close, from_price, to_price, tf_minutes,
+            p_avg=p_avg, drift_v_avg=drift_v_avg, start_phase2=p_slow_met,
+            gamma_reach=gamma_reach,
+        )
+
+        payload = dict(base)
+        payload.update({
+            "dominant_leg": leg_codes[dom], "confidence": round(confidence, 3),
+            "meta": {
+                "p_slow": round(p_slow, 2), "p_fast": round(p_fast, 2),
+                "p_avg": round(p_avg, 2), "p_avg_fast": round(p_avg_fast, 2),
+                "drift_v_avg": round(drift_v_avg, 2),
+                "flow_impulse": round(flow_impulse, 4), "burst": round(burst, 3),
+                "atr": round(atr, 2) if atr else None, "p_slow_met_recently": bool(p_slow_met),
+                "avg_gamma_value": round(avg_gamma_value, 0), "gamma_reach": round(gamma_reach, 3),
+                "dom_trade_count": len(dom_trades), "span_hours": round(span_h, 2),
+                "dominant_leg_abs": round(leg_abs[dom], 0),
+                "confidence_breakdown": confidence_breakdown,
+            },
+            "points": points,
+        })
+        return request.make_response(json.dumps(payload), headers=_headers)
 
     @http.route("/4l/<string:asset>", type="http", auth="user", website=True)
     def four_leg_gamma_chart(self, asset):
@@ -2978,7 +3275,9 @@ class ChartController(http.Controller):
         72h/All, then relabeling 48h/72h to 2d/3d and adding 4d-10d, then
         relabeling 24h to 1d, then adding the "00:00 UTC" option and
         making it the default, then adding "Auto" and making it the
-        default in "00:00 UTC"'s place; see
+        default in "00:00 UTC"'s place; the default has since moved
+        through 24h and 4h to 8h, and the offered set is now
+        Auto/2h/4h/6h/8h/24h/48h/3d/4d/5d/All (2026-09) — see
         four_leg_gamma_json for how each option resolves). A vertical
         marker line showing where the selected Window's trailing-hours
         cutoff falls used to be drawn on the candle chart (#window-vline)
@@ -3138,7 +3437,9 @@ class ChartController(http.Controller):
           - No "Window Line" checkbox — the single vertical reference line
             + "8h" label marking the window start is always drawn (still
             positioned by the same updateWindowVLine() the /l24/<asset>
-            template carries, just with no toggle).
+            template carries, just with no toggle; same 1px translucent-
+            gray solid line + label styling as the /4l chart's own Window
+            line).
           - No "Settings" button/modal — line colors are derived, not
             user-set (see below).
           - None of the 4 per-leg gamma reference lines (LC/LP/SC/SP) are

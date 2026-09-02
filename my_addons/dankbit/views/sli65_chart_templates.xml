@@ -12,7 +12,9 @@
 	       - No "Window" dropdown — the G/D lines' trailing trade window is
 	         fixed at 8 hours (?hours=8 against /api/four-leg-gamma/<asset>).
 	       - No "Window Line" checkbox — the single vertical reference line +
-	         "8h" label marking the window start is always drawn.
+	         "8h" label marking the window start is always drawn, using the
+	         same 1px translucent-gray solid line + label styling as the /4l
+	         chart's own Window line.
 	       - No "Settings" button/modal — nothing to configure here.
 	       - None of the 4 per-leg gamma reference lines (LC/LP/SC/SP) are
 	         drawn, and neither is the light-orange LP/SP+LC/SC fill. The
@@ -176,7 +178,9 @@
 					   Delta Chart's own Smart Liquidity term markers use — see
 					   CLAUDE.md), repositioned via
 					   chart.timeScale().timeToCoordinate() — see
-					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below. -->
+					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
+					   Same 1px translucent-gray solid line + label colors the
+					   /4l chart's own Window line uses. */
 					#window-vline {
 						position: fixed; top: 0; height: 100vh; width: 1px;
 						background: rgba(100,100,100,0.55);
