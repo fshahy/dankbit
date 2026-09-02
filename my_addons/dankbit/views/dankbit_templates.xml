@@ -305,6 +305,22 @@
 					.strategy-leg { padding:4px 0; border-bottom:1px dotted #ccc; }
 					.strategy-note { color:#777; font-size:9pt; margin-top:6px; }
 					@media (max-width:760px) { .strategy-radar-body { grid-template-columns:1fr; overflow-y:auto; } #strategy-radar-list { max-height:150px; border-right:0; border-bottom:1px solid #ddd; } }
+					#expiry-pricing-panel {
+						position:fixed; top:calc(var(--tf-bar-bottom, 36px) + 8px); right:72px;
+						width:min(700px, calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom, 36px) - 28px);
+						display:none; flex-direction:column; overflow:auto; z-index:21;
+						font:10.5pt/1.35 monospace; color:#333; background:rgba(255,255,255,0.97);
+						border:1px solid #aaa; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,0.24); padding-bottom:9px;
+					}
+					.expiry-pricing-head { display:flex; align-items:center; padding:8px 10px; border-bottom:1px solid #ddd; font-weight:bold; }
+					.expiry-pricing-head button { margin-left:auto; border:0; background:transparent; color:inherit; font-size:15pt; cursor:pointer; }
+					#expiry-pricing-summary { padding:7px 10px; color:#666; border-bottom:1px solid #ddd; }
+					.expiry-pricing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; padding:8px 10px; }
+					.expiry-flow-card { border:1px solid #ddd; border-radius:5px; padding:6px; background:#fafafa; }
+					.expiry-flow-card b { display:block; font-size:11pt; }
+					#expiry-pricing-svg { width:calc(100% - 20px); height:300px; margin:0 10px; display:block; border:1px solid #ddd; background:#fff; }
+					.expiry-pricing-note { color:#777; font-size:9pt; padding:6px 10px 0; }
+					@media (max-width:760px) { .expiry-pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 					.signal-bot-control { position:relative; display:flex; align-items:stretch; }
 					.signal-bot-control .toggle-label { border-radius:4px 0 0 4px; border-right:0; }
 					.signal-bot-summary { max-width:165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777; font-size:9.5pt; }
@@ -413,6 +429,10 @@
 					body.dark .strategy-card { color:#ddd; background:#1b1b1b; border-color:#555; }
 					body.dark .strategy-card.active { background:#30233a; border-color:#a778c4; }
 					body.dark .strategy-payoff-svg { background:#111; border-color:#444; }
+					body.dark #expiry-pricing-panel { color:#ddd; background:rgba(12,12,12,0.97); border-color:#555; }
+					body.dark .expiry-pricing-head, body.dark #expiry-pricing-summary { border-color:#444; }
+					body.dark .expiry-flow-card { background:#1b1b1b; border-color:#555; }
+					body.dark #expiry-pricing-svg { background:#111; border-color:#444; }
 					body.dark .signal-bot-menu { background:rgba(20,20,20,0.98); border-color:#555; }
 					body.dark .signal-bot-menu button, body.dark .signal-bot-menu a { color:#ddd; }
 					body.dark .signal-bot-menu button:hover, body.dark .signal-bot-menu a:hover { background:#333; }
@@ -447,6 +467,13 @@
 					<div id="strategy-radar-summary">Loading…</div>
 					<div class="strategy-radar-body"><div id="strategy-radar-list"/><div id="strategy-radar-detail"/></div>
 				</div>
+				<div id="expiry-pricing-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+					<div class="expiry-pricing-head"><span>Expiry Pricing Compass · 24H Path</span><button type="button" onclick="closeExpiryPricing()">&#10005;</button></div>
+					<div id="expiry-pricing-summary">Loading…</div>
+					<div id="expiry-pricing-flows" class="expiry-pricing-grid"/>
+					<svg id="expiry-pricing-svg" viewBox="0 0 760 300" role="img" aria-label="Expiry Pricing Path"/>
+					<div class="expiry-pricing-note">Solid candles are observed UTC-hour candles; translucent candles are the independent pricing scenario. Refresh: every 15 minutes. This panel does not feed any other indicator engine.</div>
+				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -467,6 +494,10 @@
 						<label class="toggle-label">
 							<input type="checkbox" id="strategy-radar-toggle" onchange="onToggleStrategyRadar()"/>
 							Strategy Radar
+						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="expiry-pricing-toggle" onchange="onToggleExpiryPricing()"/>
+							Expiry Compass
 						</label>
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
@@ -805,6 +836,7 @@
 
 					const GAMMA_HORIZON_URL = '/api/gamma-horizon/' + ASSET;
 					const STRATEGY_RADAR_URL = '/api/option-strategy-radar/' + ASSET;
+					const EXPIRY_PRICING_URL = '/api/expiry-pricing/' + ASSET;
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -1356,6 +1388,71 @@
 						const panel=document.getElementById('strategy-radar-panel'); if (panel) panel.style.display=SHOW_STRATEGY_RADAR?'flex':'none';
 						if (SHOW_STRATEGY_RADAR) safeRefresh('Strategy Radar', refreshStrategyRadar);
 					}
+
+					let SHOW_EXPIRY_PRICING = false;
+					let expiryPricingData = null;
+					const EXPIRY_PRICING_SNAPSHOT_KEY='dankbit_expiry_pricing_snapshots_'+ASSET;
+
+					function expiryNumber(value, digits) {
+						const number=Number(value);
+						return Number.isFinite(number) ? number.toLocaleString(undefined,{maximumFractionDigits:digits == null ? 0 : digits}) : '—';
+					}
+
+					function expiryPricingSvg(data) {
+						const candles=[...(data.actual||[]),...(data.forecast||[])].slice(0,24);
+						if (!candles.length) return '<text x="380" y="150" text-anchor="middle" fill="#888">No hourly candles available</text>';
+						const levels=data.targets||{};
+						const levelRows=[['BCG',Number(levels.bcg),'#2e7d32'],['BPG',Number(levels.bpg),'#c62828'],['SCG',Number(levels.scg),'#7e57c2'],['SPG',Number(levels.spg),'#1565c0']].filter(row=>Number.isFinite(row[1]));
+						const values=candles.flatMap(c=>[Number(c.high),Number(c.low)]).concat(levelRows.map(row=>row[1])).filter(Number.isFinite);
+						let min=Math.min(...values), max=Math.max(...values); const pad=Math.max((max-min)*0.08,Number(data.spot||1)*0.001); min-=pad; max+=pad;
+						const width=760,height=300,left=58,right=58,top=17,bottom=32,plotW=width-left-right,plotH=height-top-bottom;
+						const sy=value=>top+(max-value)/(max-min)*plotH;
+						const slot=plotW/24, bodyW=Math.max(4,slot*0.56);
+						let svg='<rect width="760" height="300" fill="transparent"/>';
+						for(let i=0;i<=4;i++){const y=top+i*plotH/4;const price=max-i*(max-min)/4;svg+='<line x1="'+left+'" y1="'+y+'" x2="'+(width-right)+'" y2="'+y+'" stroke="#888" stroke-opacity=".20"/><text x="4" y="'+(y+4)+'" font-size="10" fill="#888">'+expiryNumber(price)+'</text>';}
+						levelRows.forEach(row=>{const y=sy(row[1]);svg+='<line x1="'+left+'" y1="'+y+'" x2="'+(width-right)+'" y2="'+y+'" stroke="'+row[2]+'" stroke-width="1.2" stroke-dasharray="5 4"/><text x="'+(width-right+4)+'" y="'+(y+4)+'" font-size="10" fill="'+row[2]+'">'+row[0]+'</text>';});
+						candles.forEach((c,index)=>{const x=left+slot*(index+.5),open=sy(Number(c.open)),close=sy(Number(c.close)),high=sy(Number(c.high)),low=sy(Number(c.low));const up=Number(c.close)>=Number(c.open),forecast=c.kind==='forecast';const color=up?'#26a69a':'#ef5350';const opacity=forecast?Math.max(.22,.68-index*.012):.95;svg+='<line x1="'+x+'" y1="'+high+'" x2="'+x+'" y2="'+low+'" stroke="'+color+'" stroke-opacity="'+opacity+'"/><rect x="'+(x-bodyW/2)+'" y="'+Math.min(open,close)+'" width="'+bodyW+'" height="'+Math.max(1,Math.abs(close-open))+'" fill="'+color+'" fill-opacity="'+opacity+'"'+(forecast?' stroke="'+color+'" stroke-dasharray="2 2"':'')+'/>';if(index%4===0){const d=new Date(Number(c.time)*1000);svg+='<text x="'+x+'" y="'+(height-8)+'" text-anchor="middle" font-size="9" fill="#888">'+String(d.getUTCHours()).padStart(2,'0')+':00</text>';}});
+						const boundary=(data.actual||[]).length;if(boundary>0&&boundary<candles.length){const x=left+slot*boundary;svg+='<line x1="'+x+'" y1="'+top+'" x2="'+x+'" y2="'+(height-bottom)+'" stroke="#ff9800" stroke-width="1.5" stroke-dasharray="3 3"/><text x="'+(x+4)+'" y="'+(top+11)+'" font-size="9" fill="#ff9800">NOW</text>';}
+						return svg;
+					}
+
+					function renderExpiryPricing() {
+						const data=expiryPricingData, summary=document.getElementById('expiry-pricing-summary'), flows=document.getElementById('expiry-pricing-flows'), svg=document.getElementById('expiry-pricing-svg');
+						if (!data || !data.available) { if(summary)summary.textContent='No active nearest expiry data.'; if(flows)flows.replaceChildren(); if(svg)svg.innerHTML=''; return; }
+						const generated=new Date(data.generated_at), next=new Date(generated.getTime()+900000);
+						if(summary) summary.innerHTML=radarEsc(data.regime)+' · Score '+(Number(data.direction_score)*100).toFixed(1)+' · Confidence '+Number(data.confidence)+'% · '+Number(data.hours_to_expiry).toFixed(1)+'h to expiry · next '+next.toLocaleTimeString('en-GB',{timeZone:'UTC',hour:'2-digit',minute:'2-digit'})+' UTC (<span id="expiry-pricing-countdown">—</span>)';
+						if(flows){flows.innerHTML=['BC','BP','SC','SP'].map(key=>{const labels={BC:'Buyer Call',BP:'Buyer Put',SC:'Seller Call',SP:'Seller Put'};return '<div class="expiry-flow-card"><b>'+labels[key]+'</b>'+expiryNumber(data.contracts?.[key],2)+' contracts<br/>Effective '+expiryNumber(data.effective_flow?.[key],2)+'</div>';}).join('');}
+						if(svg) svg.innerHTML=expiryPricingSvg(data);
+						updateExpiryPricingCountdown();
+					}
+
+					function storeExpiryPricingSnapshot(data){
+						try{
+							const bucket=Math.floor(new Date(data.generated_at).getTime()/900000);
+							let rows=JSON.parse(localStorage.getItem(EXPIRY_PRICING_SNAPSHOT_KEY)||'[]');
+							if(!Array.isArray(rows)) rows=[];
+							if(!rows.some(row=>row.bucket===bucket)) rows.push({bucket,generated_at:data.generated_at,expiry:data.expiry,spot:data.spot,regime:data.regime,direction_score:data.direction_score,confidence:data.confidence,targets:data.targets,forecast:data.forecast});
+							localStorage.setItem(EXPIRY_PRICING_SNAPSHOT_KEY,JSON.stringify(rows.slice(-192)));
+						}catch(e){console.warn('Expiry Pricing snapshot unavailable',e);}
+					}
+
+					function updateExpiryPricingCountdown(){
+						const node=document.getElementById('expiry-pricing-countdown');if(!node||!expiryPricingData?.generated_at)return;
+						const seconds=Math.max(0,Math.ceil((new Date(expiryPricingData.generated_at).getTime()+900000-Date.now())/1000));
+						node.textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+					}
+
+					async function refreshExpiryPricing() {
+						if (!SHOW_EXPIRY_PRICING || MINIMAL_CHART) return;
+						const response=await fetch(EXPIRY_PRICING_URL);
+						if(!response.ok) throw new Error('Expiry Pricing HTTP '+response.status);
+						expiryPricingData=await response.json();
+						if(expiryPricingData.available) storeExpiryPricingSnapshot(expiryPricingData);
+						if(SHOW_EXPIRY_PRICING) renderExpiryPricing();
+					}
+
+					function closeExpiryPricing(){SHOW_EXPIRY_PRICING=false;const toggle=document.getElementById('expiry-pricing-toggle');if(toggle)toggle.checked=false;const panel=document.getElementById('expiry-pricing-panel');if(panel)panel.style.display='none';}
+					function onToggleExpiryPricing(){SHOW_EXPIRY_PRICING=Boolean(document.getElementById('expiry-pricing-toggle')?.checked);const panel=document.getElementById('expiry-pricing-panel');if(panel)panel.style.display=SHOW_EXPIRY_PRICING?'flex':'none';if(SHOW_EXPIRY_PRICING)safeRefresh('Expiry Pricing',refreshExpiryPricing);}
 
 					let nearestExpiryStr = null;
 					let lastTradeCount = 0;
@@ -2949,6 +3046,7 @@
 						await Promise.allSettled([
 							safeRefresh('Gamma Horizon', refreshGammaHorizon),
 							safeRefresh('Strategy Radar', refreshStrategyRadar),
+							safeRefresh('Expiry Pricing', refreshExpiryPricing),
 							safeRefresh('Bands', refreshBands),
 							safeRefresh('Smart Liquidity', refreshLiveBandDots),
 							safeRefresh('Zones', refreshZonesBoxes),
@@ -2964,6 +3062,8 @@
 					setInterval(refreshLastTrade, REFRESH);
 					setInterval(() => safeRefresh('Gamma Horizon', refreshGammaHorizon), REFRESH);
 					setInterval(() => safeRefresh('Strategy Radar', refreshStrategyRadar), Math.max(REFRESH, 60000));
+					setInterval(() => safeRefresh('Expiry Pricing', refreshExpiryPricing), 900000);
+					setInterval(updateExpiryPricingCountdown, 1000);
 					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
 					// underlying dankbit.bands rows only ever change once per
 					// hourly compute_snapshot() cron tick, so polling any faster
