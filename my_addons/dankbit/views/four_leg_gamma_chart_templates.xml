@@ -313,8 +313,13 @@
 						Window Line
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
-					<button class="tf-btn" id="refresh-lines-btn" onclick="refreshFourLegGamma()">Refresh Lines</button>
+					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh Lines</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+					<!-- Live countdown to the next automatic line refresh (the
+					     dankbit.refresh_interval setting). Bold, non-interactive
+					     label — resets on every line refresh (routine poll or the
+					     "Refresh Lines" button). Same feature as /sli65/<asset>. -->
+					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until the gamma lines next auto-refresh (dankbit.refresh_interval)">Next Update: &#8212;</span>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -343,6 +348,11 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					// Epoch ms of the next scheduled gamma-line auto-refresh —
+					// drives the #refresh-countdown toolbar label. Re-armed for
+					// real by scheduleGammaRefresh() / refreshFourLegGamma()'s
+					// finally.
+					let nextRefreshAt = Date.now() + REFRESH;
 					// "Timeframe" dropdown — same options as the Delta/Gamma/
 					// Strike Gamma charts' own dropdown; was 15m by default,
 					// then changed to 4h (matching those pages), then to 1d
@@ -1047,7 +1057,49 @@
 							}
 						} finally {
 							hideSpinner();
+							// The next automatic refresh is REFRESH ms from the
+							// moment this one finished — keeps the countdown honest
+							// for manual (Refresh Lines / Window / Expiry / …)
+							// triggers too, not just the routine poll.
+							nextRefreshAt = Date.now() + REFRESH;
+							updateRefreshCountdown();
 						}
+					}
+
+					// Self-rescheduling gamma-line auto-refresh: re-arms only
+					// after each refresh actually finishes, so a slow recompute
+					// can't stack requests, and a manual "Refresh Lines" click
+					// (manualRefreshLines()) restarts the countdown from a full
+					// interval rather than leaving a stale timer to fire early.
+					let gammaRefreshTimer = null;
+					function scheduleGammaRefresh() {
+						if (gammaRefreshTimer) clearTimeout(gammaRefreshTimer);
+						nextRefreshAt = Date.now() + REFRESH;
+						updateRefreshCountdown();
+						gammaRefreshTimer = setTimeout(async () => {
+							await refreshFourLegGamma();
+							scheduleGammaRefresh();
+						}, REFRESH);
+					}
+
+					// "Refresh Lines" button — recompute the gamma legs + AVG
+					// now, then restart the countdown from a clean full interval.
+					function manualRefreshLines() {
+						refreshFourLegGamma().then(scheduleGammaRefresh);
+					}
+
+					// Ticks the #refresh-countdown label down once a second (own
+					// setInterval below). "Next Update: MM:SS" while waiting,
+					// "refreshing…" during the brief window a fetch is in flight
+					// before refreshFourLegGamma()'s finally re-arms nextRefreshAt.
+					function updateRefreshCountdown() {
+						const el = document.getElementById('refresh-countdown');
+						if (!el) return;
+						const secs = Math.round((nextRefreshAt - Date.now()) / 1000);
+						if (secs <= 0) { el.textContent = 'refreshing…'; return; }
+						const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+						const ss = String(secs % 60).padStart(2, '0');
+						el.textContent = 'Next Update: ' + mm + ':' + ss;
 					}
 
 					function applyTheme() {
@@ -1157,20 +1209,24 @@
 							setStatus(statusText());
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
+						// Arm the self-scheduling gamma-line refresh only once the
+						// initial load has settled, so the first countdown starts
+						// from a full clean interval.
+						finally { scheduleGammaRefresh(); }
 					}
 					init();
+					updateRefreshCountdown();
 					setInterval(updateLatestCandle, 5000);
 					// Keep the Window line advancing with real time (same 5s
 					// cadence /l24/<asset> uses) — its target instant is
 					// "now - Window", which drifts continuously.
 					setInterval(updateWindowVLine, 5000);
+					setInterval(updateRefreshCountdown, 1000);
 					// Every "Expiry" option now isolates to a single
 					// instrument (see SELECTED_INSTRUMENT above) — no more
 					// cumulative "all expiries at once" mode to skip polling
-					// for, so this always refreshes.
-					setInterval(() => {
-						refreshFourLegGamma();
-					}, REFRESH);
+					// for, so the gamma-line refresh (scheduleGammaRefresh, armed
+					// in init()) always runs.
 					setInterval(refreshLastTrade, REFRESH);
 				//]]></script>
 			</body>
