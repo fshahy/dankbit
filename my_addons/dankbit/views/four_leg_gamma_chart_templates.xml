@@ -41,15 +41,9 @@
 	     further product decision, then put behind an opt-in checkbox per
 	     a still later product decision, then made unconditional again
 	     (checkbox removed) per a final product decision.
-	     Plus a 6th dashed "G" ("global") line — the /sli65/<asset>
-	     page's own "G" line ported here unchanged: the present-leg-only
-	     average of the 4 gamma PRICE levels computed cumulatively across
-	     EVERY active expiry over a FIXED 8h trailing window (?expiry=all
-	     plus hours=8), independent of this page's Expiry/Window/
-	     Cumulative selection. Same dominant-leg-derived color
-	     (avgLineColor()) and dashed width-2 styling as the AVG line;
-	     label "G | dom-leg $dom-leg-price | avg-gamma-value".
-	     Always drawn (no checkbox), same as on /sli65.
+	     (A 6th dashed "G" ("global") line was briefly ported here from
+	     the since-removed /sli65/<asset> page per a 2026-09-02 request,
+	     then removed per a further product decision the next day.)
 	     "Expiry" dropdown — dynamically loaded from every currently active
 	     (non-expired) instrument for the asset (loadExpiries(), sourced
 	     from /api/expiries/<asset>, dankbit.bands._distinct_expirations()/
@@ -68,24 +62,28 @@
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
-	     dropdown (Auto/2h/4h/6h/8h/24h/48h/3d/4d/5d/All, 8h default —
+	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/24h/All, 4h default —
 	     2h/4h/6h added per product decision (2026-09-01), which also
-	     moved the default from 24h to 4h; default then moved from 4h to
-	     8h per a further product decision;
-	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "2h"/"4h"/"6h"/"8h"/"24h"/"48h"/"72h"/"96h"/"120h"
-	     entries plus the "Auto" dynamic option and the "All" no-window-bound
-	     option;
+	     moved the default from 24h to 4h; default then moved 4h → 8h
+	     per a further product decision, then back 8h → 4h per a further
+	     product decision; then 48h/3d/4d/5d were removed and 1h/3h/5h/7h
+	     added per a further product decision;
+	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "1h".."8h"/"24h" entries plus
+	     the "All" no-window-bound option;
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
-	     main.py for this choice set's full history. "00:00 UTC"/"12h"
-	     were also once offered here — the server-side "midnight"/"12"
-	     ?hours= resolutions, and windowLabel()'s own display
-	     strings for them, are unchanged and still reachable by a direct
-	     API call, just no longer offered from this page's UI) independently
-	     picks the trailing-hours trade window via ?hours= on that same
-	     endpoint; "Auto" (?hours=auto) lets the server shrink the
-	     trailing-hours window as the selected Expiry's own settlement
-	     nears — see _auto_window_hours() in main.py for the bucket mapping
-	     and its rationale. -->
+	     main.py for this choice set's full history. "00:00 UTC"/"12h" and
+	     the "Auto (Time to Expiry)" dynamic option were also once offered
+	     here — the server-side "midnight"/"12"/"auto" ?hours= resolutions
+	     (and windowLabel()'s own display strings for them) are unchanged
+	     and still reachable by a direct API call, just no longer offered
+	     from this page's UI) independently picks the trailing-hours trade
+	     window via ?hours= on that same endpoint.
+	     (A "Cumulative" checkbox — switching the selected Expiry's own
+	     domain from single-instrument isolation to CUMULATIVE across every
+	     instrument expiring on or before it, via ?cumulative=1 — was
+	     removed per product decision, along with /tm/<asset>'s own; the
+	     ?cumulative=1 route mode itself is unchanged and still reachable
+	     by a direct API call.) -->
 
 	<template id="dankbit_four_leg_gamma_chart" name="Dankbit 4L Chart">
 		<html>
@@ -135,27 +133,6 @@
 						font-family: monospace; font-size: 11pt;
 						color: #555; padding: 0 2px;
 					}
-					#forecast-status:empty { display: none; }
-					#forecast-status { color: #2e7d32; font-weight: bold; }
-					body.dark #forecast-status { color: #a5d6a7; }
-					/* Forecast confidence-breakdown panel — top-right, shown only
-					   while the "Forecast" checkbox is on and a path is drawn. */
-					#forecast-panel {
-						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 8px); right: 64px;
-						z-index: 12; display: none; user-select: text;
-						font-family: monospace; font-size: 10.5pt; line-height: 1.5;
-						background: rgba(255,255,255,0.96); color: #222;
-						border: 1px solid #ccc; border-radius: 5px; padding: 8px 12px;
-						min-width: 264px; box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-					}
-					body.dark #forecast-panel { background: rgba(22,22,22,0.94); color: #ddd; border-color: #555; }
-					#forecast-panel .fp-title { font-weight: bold; font-size: 12pt; margin-bottom: 4px; }
-					#forecast-panel .fp-row { display: flex; justify-content: space-between; gap: 18px; }
-					#forecast-panel .fp-sub { padding-left: 12px; color: #777; }
-					body.dark #forecast-panel .fp-sub { color: #999; }
-					#forecast-panel .fp-op { color: #999; }
-					#forecast-panel .fp-sep { border-top: 1px solid #ddd; margin: 5px 0; }
-					body.dark #forecast-panel .fp-sep { border-color: #444; }
 					#ruler-info {
 						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 4px); left: 12px;
 						font-family: monospace; font-size: 12pt; font-weight: bold;
@@ -259,8 +236,8 @@
 					/* Single vertical line marking the start of the currently
 					   selected trailing Window (Window=48h means a line at the
 					   candle 48 hours ago) — redrawn on every Window change,
-					   hidden entirely when Window is "All". Same plain
-					   fixed-position DOM overlay approach the l24 chart uses
+					   hidden entirely when Window is "All". A plain
+					   fixed-position DOM overlay
 					   (Lightweight Charts v4 has no native vertical-line
 					   primitive), repositioned via
 					   chart.timeScale().timeToCoordinate() — see
@@ -305,11 +282,9 @@
 				<div id="spinner"/>
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
-				<div id="forecast-panel"/>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
-						<option value="15m">15m</option>
 						<option value="1h" selected="selected">1h</option>
 						<option value="4h">4h</option>
 						<option value="1d">1d</option>
@@ -317,22 +292,17 @@
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 					</select>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
-						Cumulative
-					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="1">1h</option>
 						<option value="2">2h</option>
-						<option value="4">4h</option>
+						<option value="3">3h</option>
+						<option value="4" selected="selected">4h</option>
+						<option value="5">5h</option>
 						<option value="6">6h</option>
-						<option value="8" selected="selected">8h</option>
+						<option value="7">7h</option>
+						<option value="8">8h</option>
 						<option value="24">24h</option>
-						<option value="48">48h</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -344,18 +314,13 @@
 						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
 						Window Line
 					</label>
-					<label class="tf-label" id="forecast-toggle-wrap" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="forecast-toggle" onchange="onToggleForecast()"/>
-						Forecast
-					</label>
-					<span class="tf-label" id="forecast-status"></span>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
-					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
 					<!-- Live countdown to the next automatic line refresh (the
 					     dankbit.refresh_interval setting). Bold, non-interactive
 					     label — resets on every line refresh (routine poll or the
-					     "Refresh Lines" button). Same feature as /sli65/<asset>. -->
+					     "Refresh Lines" button). -->
 					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until the gamma lines next auto-refresh (dankbit.refresh_interval)">Next Update: &#8212;</span>
 				</div>
 				<div id="ruler-info"/>
@@ -424,96 +389,33 @@
 					let SELECTED_INSTRUMENT = null;
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
-					// SELECTED_INSTRUMENT. Choice set (1h/2h/3h/4h/5h/6h/7h/8h/12h/24h/All)
-					// split out from /gt/<asset>'s own 12h/24h/48h.
-					// 16h/20h/48h/72h were offered at one point and removed
-					// per product decision; 3h/5h/7h were added later,
-					// filling in the gaps left in the original
-					// 1h/2h/4h/6h/8h/12h set; 24h and "All" (?hours=all,
-					// skipping the trailing-hours trade filter entirely —
-					// a number in every other case) were both re-added
-					// afterwards per later product decisions;
-					// 1h/2h/3h/4h/5h/6h/7h/8h were then removed in a
-					// further round, leaving only 12h/24h/All, and the
-					// default moved from 8h to "All" at that point; 8h was
-					// then re-added per a still later product decision
-					// (default stayed "All"), and 4h after that; the
-					// default then moved back to 8h per a later product
-					// decision (also cutting the routine per-poll cost of
-					// the other 4 lines, since "All" meant every poll
-					// scanned the selected instrument's entire trade
-					// history — see FOUR_LEG_DEFAULT_WINDOW_HOURS), then to
-					// 24h, then to 4h, then back to 24h per still later
-					// product decisions; 1h/2h/3h/5h/6h/7h were then
-					// re-added per a still later product decision, filling
-					// this dropdown back out to every 1h step from 1h
-					// through 8h plus 12h/24h/All. (Since relabeled to
-					// 4h/8h/12h/1d-10d/All, given a "00:00 UTC" default
-					// option, then given an "Auto (Time to Expiry)" option
-					// which itself later became the default in place of
-					// "00:00 UTC", then "All" became the default in "Auto"'s
-					// place, then "Auto" was made the default again per a
-					// still later product decision, then "All" was made the
-					// default again per a further product decision, then
-					// "24h" was made the default per a still later product
-					// decision, then back to "Auto" per a still later
-					// product decision, then back to "24h" per a still
-					// later product decision, then to "4h" per a further
-					// product decision (2026-09-01), then to "8h" per a
-					// further product decision — see main.py's own
-					// FOUR_LEG_WINDOW_HOURS_CHOICES/_auto_window_hours for
-					// the current full history.)
-					let WINDOW_HOURS = 8;
-					// When WINDOW_HOURS === 'auto', this is the numeric hours
-					// /api/four-leg-gamma actually resolved it to (its own
-					// `window_hours` response field, via _auto_window_hours()
-					// server-side — shrinks as the selected Expiry's own
-					// settlement nears) — null until the first fetch resolves,
-					// so windowLabel() can fall back to a plain "Auto" label
-					// before that.
+					// SELECTED_INSTRUMENT. Current set: 1h/2h/3h/4h/5h/6h/7h/
+					// 8h/24h plus "All" (?hours=all — skips the trailing-hours
+					// trade filter entirely; a number in every other case),
+					// 4h default. This set and its default have moved many
+					// times across product decisions (see main.py's own
+					// FOUR_LEG_WINDOW_HOURS_CHOICES comment for the history);
+					// a "00:00 UTC" (?hours=midnight) and an "Auto (Time to
+					// Expiry)" (?hours=auto) option were both offered here at
+					// various points — the server-side resolutions for both
+					// are unchanged and still reachable by a direct API call,
+					// just no longer in this dropdown.
+					let WINDOW_HOURS = 4;
+					// If ?hours=auto is ever driven in (not from this
+					// dropdown any more — see above), this holds the numeric
+					// hours the server resolved it to (its `window_hours`
+					// response field, via _auto_window_hours()); null
+					// otherwise, so windowLabel() falls back to a plain label.
 					let autoResolvedHours = null;
-					// "Cumulative" checkbox — off by default. When checked,
-					// /api/four-leg-gamma's own `?cumulative=1` (see
-					// four_leg_gamma_json in main.py) switches the resolved
-					// instrument (SELECTED_INSTRUMENT — whichever
-					// fourLegGammaUrl() below is currently using) from an
-					// ISOLATED single-instrument trade domain to a CUMULATIVE
-					// one spanning every instrument whose own expiration falls
-					// between "now" and that instrument's own expiration,
-					// inclusive — same behavior /tm/<asset> (Time Machine)'s
-					// own "Cumulative" checkbox drives, just relative to "now"
-					// instead of a user-picked As-Of moment (this page has no
-					// As-Of concept — it's always live). The Window dropdown's
-					// trailing-hours filter still applies on top, same as the
-					// isolated path.
-					let CUMULATIVE = false;
+					// Each Expiry option ISOLATES trades to that one instrument
+					// (four_leg_gamma_json's own `?instrument=`). The route still
+					// supports a `?cumulative=1` mode (span every instrument
+					// expiring between "now" and the selected one) reachable by a
+					// direct API call, but this page no longer offers a checkbox
+					// for it — removed per product decision, along with /tm's.
 					const fourLegGammaUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
-						+ (CUMULATIVE ? '&cumulative=1' : '');
+						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS;
 
-					// The "G" ("global") line — the present-leg-only average of
-					// the 4 gamma PRICE levels computed cumulatively across every
-					// one of ASSET's own active expiries, over a FIXED 8h trailing
-					// trade window (?expiry=all&hours=8), independent of this
-					// page's own Expiry/Window/Cumulative selection. Same line,
-					// dominant-leg-derived color (avgLineColor()) and dashed
-					// styling as the /sli65/<asset> page's own "G" line; label
-					// "G | <dom leg> $<dom leg price> | <avg gamma value>".
-					// Always drawn (no checkbox), same as on /sli65.
-					const G_WINDOW_HOURS = 8;
-					const gGammaUrl = () => '/api/four-leg-gamma/' + ASSET + '?expiry=all&hours=' + G_WINDOW_HOURS;
-
-					// Deterministic 240-minute forecast-candle overlay — see
-					// /api/four-leg-forecast/<asset> (controllers/four_leg_forecast.py).
-					// Opt-in ("Forecast" checkbox), unchecked by default. For now
-					// this is PINNED to the nearest active expiry + a trailing 8h
-					// window server-side (it ignores this page's own Expiry/
-					// Window/Cumulative selection), so the only param it needs is
-					// &timeframe= for the candle step. Hidden on the 1d timeframe
-					// (no sub-candle to draw for the 240-min forward horizon).
-					let SHOW_FORECAST = false;
-					const fourLegForecastUrl = () =>
-						'/api/four-leg-forecast/' + ASSET + '?timeframe=' + INTERVAL;
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -564,9 +466,8 @@
 					// The AVG line's color is derived from its dominant leg, not a
 					// user setting: a call-side dominant leg (LC/SC) -> light green,
 					// a put-side one (LP/SP) -> light red — same light green/red this
-					// addon uses for the Thales Forecast candle bodies and the /sli65
-					// page's own single line, so the association reads consistently
-					// across pages. Was a "Chart Appearance" color picker until
+					// addon uses for the Thales Forecast candle bodies, so the
+					// association reads consistently across pages. Was a "Chart Appearance" color picker until
 					// product decision (2026-08-31) made it dominant-leg-derived.
 					const AVG_LINE_COLOR_CALL = '#a5d6a7';
 					const AVG_LINE_COLOR_PUT  = '#ef9a9a';
@@ -669,18 +570,6 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// Deterministic 4h forecast-candle overlay (see
-					// fourLegForecastUrl / refreshForecast below). Light
-					// green/red — same palette the Delta Chart's Thales
-					// Forecast candles and this page's own AVG line use — so
-					// it stays visually distinct from the real Coinbase
-					// candlestick series above.
-					const forecastSeries = chart.addCandlestickSeries({
-						upColor: '#a5d6a7', downColor: '#ef9a9a', borderVisible: false,
-						wickUpColor: '#66bb6a', wickDownColor: '#e57373',
-						lastValueVisible: false, priceLineVisible: false,
-					});
-
 					// The 4 gamma "lines" are horizontal reference lines at the
 					// CURRENT (latest) value only — same createPriceLine()
 					// pattern /gt/<asset> uses for its own gamma_band lines —
@@ -688,7 +577,7 @@
 					// on every poll (REFRESH, from dankbit.refresh_interval),
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null, gGammaPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -712,14 +601,14 @@
 					// recent UTC midnight instead of a trailing-hours count),
 					// the string 'auto' when the "Auto (Time to Expiry)"
 					// option is selected (server picks the window, see
-					// autoResolvedHours above), or a number otherwise. Values
-					// >=24 (the 1d-10d dropdown entries — still raw hours
-					// under the hood, see the window-select options) display
-					// in days rather than hours, matching the dropdown's own
-					// labels; 12h and below stay hour-labeled — hoursLabel()
-					// applies that same day/hour split to autoResolvedHours
-					// too, so "Auto" reads identically to picking that same
-					// resolved value by hand.
+					// autoResolvedHours above), or a number otherwise. A value
+					// that's a whole multiple of 24 displays in days rather
+					// than hours (matters mainly for "Auto", which can resolve
+					// to a multi-day span for a far-dated expiry — the dropdown
+					// itself now only offers 1h..8h/24h/All); everything else
+					// stays hour-labeled — hoursLabel() applies that same
+					// day/hour split to autoResolvedHours too, so "Auto" reads
+					// identically to picking that same resolved value by hand.
 					function hoursLabel(hours) {
 						if (hours >= 24 && hours % 24 === 0) return (hours / 24) + 'd';
 						return hours + 'h';
@@ -737,13 +626,7 @@
 
 					function statusText() {
 						return ASSET + ' · 4L (' + windowLabel() + ', live)'
-							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
 							+ lastTradeSuffix() + tradeCountSuffix();
-					}
-
-					function onToggleCumulative() {
-						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
-						refreshFourLegGamma();
 					}
 
 					async function refreshLastTrade() {
@@ -828,8 +711,7 @@
 					// time axis — not an arbitrary instant — so the target
 					// "now - N hours" is first snapped to the nearest loaded
 					// candle at-or-before it (binary search over the
-					// already-ascending realCandles). Same technique
-					// /l24/<asset>'s own updateWindowVLine() uses.
+					// already-ascending realCandles).
 					function nearestCandleTimeAtOrBefore(t) {
 						if (!realCandles.length) return null;
 						let lo = 0, hi = realCandles.length - 1, ans = -1;
@@ -949,8 +831,6 @@
 					async function setTf(iv) {
 						INTERVAL = iv;
 						await loadCandles();
-						updateForecastVisibility();
-						refreshForecast();
 					}
 
 					async function setExpiry(instr) {
@@ -1007,39 +887,6 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
-					// Draws (or clears) the "G" line — the present-leg-only
-					// average of the 4 gamma PRICE levels of a /api/four-leg-gamma
-					// ?expiry=all&hours=8 response's latest point, colored by the
-					// dominant leg (avgLineColor(): call-side light green,
-					// put-side light red), dashed, width 2 — byte-for-byte the
-					// same line the /sli65/<asset> page draws as its own "G" line.
-					// `data` null / no present leg → the line is just cleared.
-					function drawGLine(data) {
-						if (gGammaPriceLine) { series.removePriceLine(gGammaPriceLine); gGammaPriceLine = null; }
-						const points = (data && data.points) || [];
-						const latest = points.length ? points[points.length - 1] : null;
-						if (!latest) return;
-						const gLegs = [
-							{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
-							{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
-							{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
-							{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
-						].filter(leg => leg.price);
-						if (!gLegs.length) return;
-						const avgPrice = gLegs.reduce((a, leg) => a + leg.price, 0) / gLegs.length;
-						const avgValue = gLegs.reduce((a, leg) => a + leg.value, 0) / gLegs.length;
-						const dominantLeg = gLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
-						const gColor = avgLineColor(dominantLeg.name);
-						gGammaPriceLine = series.createPriceLine({
-							price: avgPrice, color: gColor, lineWidth: 2,
-							lineStyle: LightweightCharts.LineStyle.Dashed,
-							axisLabelVisible: true, axisLabelColor: gColor,
-							title: 'G | ' + dominantLeg.name
-								+ ' $' + Math.round(dominantLeg.price).toLocaleString('en-US')
-								+ ' | ' + formatAbbreviated(avgValue),
-						});
-					}
-
 					// Only the LATEST persisted row is used — /api/four-leg-gamma
 					// still returns the full history (unchanged backend), this
 					// page just draws a horizontal line at each leg's own
@@ -1056,10 +903,7 @@
 					async function refreshFourLegGamma() {
 						showSpinner();
 						try {
-							const [data, gData] = await Promise.all([
-								fetch(fourLegGammaUrl()).then(r => r.json()),
-								fetch(gGammaUrl()).then(r => r.json()).catch(() => null),
-							]);
+							const data = await (await fetch(fourLegGammaUrl())).json();
 							const points = data.points || [];
 							const latest = points.length ? points[points.length - 1] : null;
 
@@ -1078,12 +922,6 @@
 							// tell "0 trades" apart from "not loaded".
 							tradeCount = latest ? latest.trade_count : 0;
 							setStatus(statusText());
-
-							// The "G" line is independent of the selected Expiry/
-							// Window — draw it here, before the `if (!latest)` early
-							// return below, so it still shows even when the chosen
-							// expiry itself has no trades in its own window.
-							drawGLine(gData);
 
 							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
@@ -1163,7 +1001,7 @@
 								// which single leg is driving it and where it sits.
 								// Label: "<dom leg> $<dom leg price> | <avg gamma value>",
 								// e.g. "LC $81,200 | 71M" (positions swapped + $ added
-								// per product decision 2026-08-31, matching /sli65).
+								// per product decision 2026-08-31).
 								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
 								const avgColor = avgLineColor(dominantLeg.name);
 								avgGammaPriceLine = series.createPriceLine({
@@ -1181,136 +1019,6 @@
 							// triggers too, not just the routine poll.
 							nextRefreshAt = Date.now() + REFRESH;
 							updateRefreshCountdown();
-							// Refresh the forecast overlay on the same cycle
-							// (routine poll, and manual Refresh Lines / Window /
-							// Expiry / Cumulative triggers) — self-guarded, a
-							// no-op when the Forecast checkbox is off.
-							refreshForecast();
-						}
-					}
-
-					function clearForecastLines() {
-						forecastSeries.setData([]);
-						const el = document.getElementById('forecast-status');
-						if (el) el.textContent = '';
-						const panel = document.getElementById('forecast-panel');
-						if (panel) panel.style.display = 'none';
-					}
-
-					// Top-right box: the same confidence-breakdown table the
-					// endpoint's `meta.confidence_breakdown` carries (see
-					// four_leg_forecast_json). Base score + its 3 components,
-					// then the two haircut multipliers, then the two target
-					// levels — matching how the final `confidence` is built.
-					function renderForecastPanel(data) {
-						const panel = document.getElementById('forecast-panel');
-						if (!panel) return;
-						const m = data.meta || {};
-						const b = m.confidence_breakdown;
-						if (!b) { panel.style.display = 'none'; return; }
-						const n2 = x => (x == null ? '–' : Number(x).toFixed(2));
-						const pct = x => Math.round((x || 0) * 100) + '%';
-						const usd = x => '$' + Math.round(x).toLocaleString('en-US');
-						const leg = data.dominant_leg || '?';
-						const row = (l, v, cls) => '<div class="fp-row' + (cls ? ' ' + cls : '') + '"><span>' + l + '</span><span>' + v + '</span></div>';
-						let h = '<div class="fp-title">Forecast Confidence: ' + pct(data.confidence) + '</div>';
-						h += row('nearest expiry · ' + (b.window_hours || 8) + 'h window', '', 'fp-sub');
-						h += '<div class="fp-sep"></div>';
-						h += row('Base score', n2(b.base));
-						h += row('vol_conf · ' + (m.dom_trade_count || 0) + '/' + b.trade_target + ' ' + leg + ' trades', n2(b.vol_conf), 'fp-sub');
-						h += row('sep · ' + leg + ' ' + formatAbbreviated(m.dominant_leg_abs) + ' vs next ' + formatAbbreviated(b.next_leg_abs), n2(b.sep), 'fp-sub');
-						h += row('burst · trade pace', n2(b.burst_conf), 'fp-sub');
-						h += '<div class="fp-sep"></div>';
-						h += row('<span class="fp-op">× flow haircut</span>', n2(b.disagree_haircut));
-						h += row('p_fast ' + usd(m.p_fast) + ' vs p_slow ' + usd(m.p_slow), '', 'fp-sub');
-						h += row('<span class="fp-op">× gamma reach</span>', n2(b.gamma_reach_haircut));
-						h += row('avg γ ' + formatAbbreviated(m.avg_gamma_value) + ' (ref ' + (b.gamma_strength_ref_m || 30) + 'M)', '', 'fp-sub');
-						h += '<div class="fp-sep"></div>';
-						h += row('Target ' + leg, usd(m.p_slow) + (m.p_slow_met_recently ? ' ✓ met' : ''));
-						h += row('→ AVG line', usd(m.p_avg));
-						panel.innerHTML = h;
-						panel.style.display = 'block';
-					}
-
-					// Show the "Forecast" checkbox only where a 240-minute
-					// horizon spans at least one candle — hidden on 1d (a 4h
-					// projection can't be drawn as a daily candle).
-					function updateForecastVisibility() {
-						const wrap = document.getElementById('forecast-toggle-wrap');
-						const status = document.getElementById('forecast-status');
-						const supported = INTERVAL !== '1d';
-						if (wrap) wrap.style.display = supported ? 'flex' : 'none';
-						if (status) status.style.display = supported ? '' : 'none';
-						if (!supported) clearForecastLines();
-					}
-
-					function onToggleForecast() {
-						SHOW_FORECAST = document.getElementById('forecast-toggle').checked;
-						if (SHOW_FORECAST) refreshForecast(); else clearForecastLines();
-					}
-
-					// Deterministic 4h forecast candles from
-					// /api/four-leg-forecast/<asset> (dominant-leg gamma-peak
-					// migration + timed order-flow imbalance). Re-anchored to
-					// the live chart client-side: each returned candle's body
-					// size and wick lengths are preserved, but the first Open is
-					// pinned to the latest real Close and every later Open to the
-					// preceding forecast Close — only the vertical anchor is
-					// translated, same technique as the Delta Chart's own
-					// forecast series (dankbit_templates.xml).
-					async function refreshForecast() {
-						if (!SHOW_FORECAST || INTERVAL === '1d' || !realCandles.length) { clearForecastLines(); return; }
-						try {
-							const data = await (await fetch(fourLegForecastUrl())).json();
-							const points = data.points || [];
-							const statusEl = document.getElementById('forecast-status');
-							if (!points.length) {
-								clearForecastLines();
-								if (statusEl) statusEl.textContent = 'low conviction — no path';
-								return;
-							}
-							const intervalSec = INTERVAL_SECONDS[INTERVAL] || 3600;
-							const firstTime = realCandles[realCandles.length - 1].time + intervalSec;
-							let chainedOpen = Number(realCandles[realCandles.length - 1].close);
-							const rendered = points.map((p, i) => {
-								const body = Number(p.close) - Number(p.open);
-								const upperWick = Math.max(0, Number(p.high) - Math.max(Number(p.open), Number(p.close)));
-								const lowerWick = Math.max(0, Math.min(Number(p.open), Number(p.close)) - Number(p.low));
-								const open = chainedOpen;
-								const close = open + body;
-								chainedOpen = close;
-								return {
-									time: firstTime + i * intervalSec,
-									open, close,
-									high: Math.max(open, close) + upperWick,
-									low: Math.min(open, close) - lowerWick,
-								};
-							});
-							forecastSeries.setData(rendered);
-							if (statusEl) {
-								const m = data.meta || {};
-								const usd = x => '$' + Math.round(x).toLocaleString('en-US');
-								// Two-phase target: seek the dominant-leg wall (the
-								// AVG label value) first, then the AVG line — unless
-								// real price already met p_slow in the trailing
-								// window, in which case that target is done
-								// ("met · → AVG").
-								let seek = '';
-								if (typeof m.p_slow === 'number' && typeof m.p_avg === 'number') {
-									const leg = data.dominant_leg || '?';
-									// | -31M gamma-strength figure (same as the AVG-line
-									// label); flag when it's too thin to pull price there.
-									const gv = (typeof m.avg_gamma_value === 'number') ? ' | ' + formatAbbreviated(m.avg_gamma_value) : '';
-									const weak = (typeof m.gamma_reach === 'number' && m.gamma_reach < 1) ? ' (weak γ)' : '';
-									seek = m.p_slow_met_recently
-										? leg + ' ' + usd(m.p_slow) + gv + ' met · → AVG ' + usd(m.p_avg) + weak + ' · '
-										: 'seek ' + leg + ' ' + usd(m.p_slow) + gv + ' → AVG ' + usd(m.p_avg) + weak + ' · ';
-								}
-								statusEl.textContent = seek + 'conf ' + Math.round((data.confidence || 0) * 100) + '%';
-							}
-							renderForecastPanel(data);
-						} catch (e) {
-							clearForecastLines();
 						}
 					}
 
@@ -1452,7 +1160,6 @@
 						try {
 							await loadCandles();
 							await loadExpiries();
-							updateForecastVisibility();
 							await refreshFourLegGamma();
 							await refreshLastTrade();
 							setStatus(statusText());
@@ -1466,9 +1173,8 @@
 					init();
 					updateRefreshCountdown();
 					setInterval(updateLatestCandle, 5000);
-					// Keep the Window line advancing with real time (same 5s
-					// cadence /l24/<asset> uses) — its target instant is
-					// "now - Window", which drifts continuously.
+					// Keep the Window line advancing with real time — its
+					// target instant is "now - Window", which drifts continuously.
 					setInterval(updateWindowVLine, 5000);
 					setInterval(updateRefreshCountdown, 1000);
 					// Every "Expiry" option now isolates to a single

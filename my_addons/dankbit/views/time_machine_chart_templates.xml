@@ -2,19 +2,19 @@
 	<!-- Standalone, minimal TradingView page for /tm/<asset> — "Time Machine",
 	     a historical-replay sibling of /4l/<asset>
 	     (four_leg_gamma_chart_templates.xml, which this file is structurally
-	     based on — it was rebuilt around /l24/<asset> for a while, then moved
+	     based on — it was rebuilt around the since-removed /l24/<asset>
+	     page for a while, then moved
 	     back onto /4l per a later request and re-synced to /4l's current
 	     state): same Coinbase-spot candle source, same 4-gamma-leg
 	     (BCG/BPG/SCG/SPG) + dashed AVG line rendering (dominant-leg-derived
 	     AVG color/label, no combined SC/SP magnitude suffix), same
-	     Timeframe/Expiry/Cumulative/Window/Theme/Window Line/Ruler/Settings
-	     controls, same per-instrument-ISOLATED-or-CUMULATIVE 4-leg
+	     Timeframe/Expiry/Window/Theme/Window Line/Ruler/Settings
+	     controls, same per-instrument-ISOLATED 4-leg
 	     computation, and the same single vertical Window reference line +
 	     label. Like /4l it has an "Expiry" dropdown (dynamically loaded from
-	     /api/expiries/<asset>) and a "Cumulative" checkbox, and its "Window"
-	     dropdown is /4l's own set (Auto/2h/4h/6h/8h/24h/48h/3d/4d/5d/All);
-	     this page's own default was 24h, moved to 4h per product decision
-	     (2026-09-01, matching /4l's own default). NOT carried over from
+	     /api/expiries/<asset>); its "Window"
+	     dropdown mirrors /4l's own (1h/2h/3h/4h/5h/6h/7h/8h/24h/All,
+	     4h default). NOT carried over from
 	     /4l: the "Refresh Lines" button and
 	     the "Last trade:" footer — a frozen As-Of view has nothing to force
 	     a re-fetch of (changing As Of / Timeframe / Expiry / Window is
@@ -34,8 +34,8 @@
 	     and hadn't yet expired AS OF that moment (/api/expiries/<asset>
 	     ?as_of=<AS_OF_ISO> -> dankbit.bands._distinct_expirations_asof()),
 	     the 4-leg gamma computation runs against trades up to AS_OF_ISO
-	     (/api/four-leg-gamma/<asset>?instrument=<i>&hours=<N>&as_of=<AS_OF_ISO>,
-	     optionally &cumulative=1 — the same route /4l uses, whose every
+	     (/api/four-leg-gamma/<asset>?instrument=<i>&hours=<N>&as_of=<AS_OF_ISO>
+	     — the same route /4l uses, whose every
 	     ?expiry=/?instrument=/?hours= resolution is already written relative
 	     to a local `as_of` variable and whose trade searches already run
 	     with active_test=False so archived, long-expired instruments' trades
@@ -50,7 +50,7 @@
 	     this page has NO auto-refresh timer at all (no periodic
 	     candle/gamma-leg/vline poll): every fetch and every vline reposition
 	     only re-runs when the user changes As Of / Timeframe / Expiry /
-	     Cumulative / Window by hand, or pans/zooms/resizes the chart. See
+	     Window by hand, or pans/zooms/resizes the chart. See
 	     main.py's time_machine_chart for the full route docstring — this
 	     page adds no new backend computation of its own, it just asks
 	     /api/klines-coinbase, /api/expiries and /api/four-leg-gamma (the
@@ -194,7 +194,7 @@
 					body.dark .modal-close:hover { color: #f66; }
 
 					/* Shown while any fetch driven by As Of/Timeframe/Expiry/
-					   Cumulative/Window is in flight — this page has no live
+					   Window is in flight — this page has no live
 					   poll, so a fetch only ever happens in direct response to
 					   the user changing one of those controls. */
 					#spinner {
@@ -215,8 +215,7 @@
 					   the inspected moment. Redrawn on every Window change,
 					   shown/hidden by the "Window Line" checkbox. Lightweight
 					   Charts v4 has no native vertical-line primitive, so this
-					   is a plain fixed-position DOM overlay (same technique the
-					   l24 chart uses), repositioned via
+					   is a plain fixed-position DOM overlay, repositioned via
 					   chart.timeScale().timeToCoordinate() — see
 					   updateWindowVLine()/nearestCandleTimeAtOrBefore() below.
 					   Its label ("#window-vline-label", ".vline-label" class)
@@ -265,7 +264,6 @@
 					<button class="tf-btn" id="now-btn" onclick="jumpToNow()">Now</button>
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
-						<option value="15m">15m</option>
 						<option value="1h" selected="selected">1h</option>
 						<option value="4h">4h</option>
 						<option value="1d">1d</option>
@@ -273,22 +271,17 @@
 					<span class="tf-label">Expiry:</span>
 					<select class="tf-btn" id="expiry-select" onchange="setExpiry(this.value)">
 					</select>
-					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="cumulative-toggle" onchange="onToggleCumulative()"/>
-						Cumulative
-					</label>
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="auto">Auto (Time to Expiry)</option>
+						<option value="1">1h</option>
 						<option value="2">2h</option>
+						<option value="3">3h</option>
 						<option value="4" selected="selected">4h</option>
+						<option value="5">5h</option>
 						<option value="6">6h</option>
+						<option value="7">7h</option>
 						<option value="8">8h</option>
 						<option value="24">24h</option>
-						<option value="48">48h</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -458,9 +451,9 @@
 
 					// "Timeframe" dropdown — same options as /4l/<asset>'s own,
 					// defaulting to 1h here (was 4h — this page's own
-					// pre-rebuild default — changed per product decision so it
-					// agrees with /l24/<asset>'s own 1h; kept at 1h through the
-					// move back onto /4l, whose own default is 4h). See
+					// pre-rebuild default — changed per product decision, kept
+					// at 1h through the move back onto /4l, whose own default
+					// is 4h). See
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with /4l.
 					let INTERVAL = '1h';
@@ -474,39 +467,30 @@
 					// ?as_of=<AS_OF_ISO> — dankbit.bands._distinct_expirations_asof()),
 					// soonest-first, reloaded whenever the As-Of moment changes.
 					// Each option ISOLATES trades to that one instrument's own
-					// trades via four_leg_gamma_json's own ?instrument= override
-					// (unless "Cumulative" is checked, see below).
+					// trades via four_leg_gamma_json's own ?instrument= override.
+					// (A "Cumulative" checkbox — ?cumulative=1, span every
+					// instrument expiring on or before the selected one — was
+					// removed per product decision, along with /4l/<asset>'s
+					// own; the route mode itself is unchanged, still reachable
+					// by a direct API call.)
 					let SELECTED_INSTRUMENT = null;
-					// "Cumulative" checkbox — off by default. When checked,
-					// /api/four-leg-gamma's own `?cumulative=1` switches
-					// SELECTED_INSTRUMENT from an ISOLATED single-instrument
-					// trade domain to a CUMULATIVE one spanning every
-					// instrument whose own expiration falls between AS_OF_ISO
-					// and the selected instrument's own expiration, inclusive.
-					// The Window dropdown's trailing-hours filter still applies
-					// on top, same as the isolated path.
-					let CUMULATIVE = false;
 					// "Window" dropdown — trailing-hours trade window ending at
 					// AS_OF_ISO (not "now"), fed into the selected expiry's
-					// trades. Same option set as /4l/<asset>
-					// (Auto/2h/4h/6h/8h/24h/48h/3d/4d/5d/All), own default
-					// was 24h, moved to 4h per product decision (2026-09-01,
-					// matching /4l/<asset>'s own default). 'all' skips
-					// the trailing-hours filter entirely; 'auto' lets the
-					// server shrink the window as the selected Expiry's own
-					// settlement nears (see autoResolvedHours below); a number
-					// otherwise.
+					// trades. Mirrors /4l/<asset>'s own option set
+					// (1h/2h/3h/4h/5h/6h/7h/8h/24h/All, 4h default).
+					// 'all' skips the trailing-hours filter entirely; a number
+					// otherwise. (A "00:00 UTC" and an "Auto (Time to Expiry)"
+					// option were both offered here at various points — the
+					// server-side ?hours=midnight/?hours=auto resolutions are
+					// unchanged and still reachable by a direct API call, just
+					// no longer in this dropdown.)
 					let WINDOW_HOURS = 4;
-					// When WINDOW_HOURS === 'auto', this is the numeric hours
-					// /api/four-leg-gamma actually resolved it to (its own
-					// `window_hours` response field, via _auto_window_hours()
-					// server-side) — null until the first fetch resolves, so
-					// windowLabel() can fall back to a plain "Auto" label
-					// before that.
+					// If ?hours=auto is ever driven in (not from this dropdown
+					// any more), this holds the numeric hours the server
+					// resolved it to; null otherwise.
 					let autoResolvedHours = null;
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
-						+ (CUMULATIVE ? '&cumulative=1' : '')
 						+ '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
 					// Trade count for the currently selected Window/Expiry —
@@ -539,8 +523,7 @@
 					// The AVG line's color is derived from its dominant leg, not a
 					// user setting: a call-side dominant leg (LC/SC) -> light green,
 					// a put-side one (LP/SP) -> light red — same light green/red this
-					// addon uses for the Thales Forecast candle bodies and the /sli65
-					// page's own single line. Was a "Chart Appearance" color picker
+					// addon uses for the Thales Forecast candle bodies. Was a "Chart Appearance" color picker
 					// until product decision (2026-08-31) made it dominant-leg-derived.
 					const AVG_LINE_COLOR_CALL = '#a5d6a7';
 					const AVG_LINE_COLOR_PUT  = '#ef9a9a';
@@ -643,7 +626,7 @@
 					// The 4 gamma "lines" are horizontal reference lines at the
 					// resolved As-Of/Window reading — same createPriceLine()
 					// pattern /4l/<asset> uses — redrawn fresh whenever As
-					// Of/Timeframe/Expiry/Cumulative/Window changes.
+					// Of/Timeframe/Expiry/Window changes.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
@@ -656,9 +639,11 @@
 					// selected (no trailing-hours trade filter), the string
 					// 'auto' when the "Auto (Time to Expiry)" option is selected
 					// (server picks the window, see autoResolvedHours above), or
-					// a number otherwise. Values >=24 that divide evenly display
-					// in days rather than hours, matching the dropdown's own
-					// labels.
+					// a number otherwise. A value that's a whole multiple of 24
+					// displays in days rather than hours (matters mainly for
+					// "Auto", which can resolve to a multi-day span for a
+					// far-dated expiry — the dropdown itself now only offers
+					// 1h..8h/24h/All); everything else stays hour-labeled.
 					function hoursLabel(hours) {
 						if (hours >= 24 && hours % 24 === 0) return (hours / 24) + 'd';
 						return hours + 'h';
@@ -681,14 +666,8 @@
 						const utc = AS_OF_ISO ? AS_OF_ISO + 'Z' : '?';
 						return ASSET + ' · TM · ' + (SELECTED_INSTRUMENT || '?')
 							+ ' (' + windowLabel() + ')'
-							+ (CUMULATIVE ? ' · Cumulative (→ Expiry)' : '')
 							+ '  ·  As of ' + berlin + ' Berlin (' + utc + ')'
 							+ tradeCountSuffix();
-					}
-
-					function onToggleCumulative() {
-						CUMULATIVE = document.getElementById('cumulative-toggle').checked;
-						refreshFourLegGamma();
 					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
@@ -925,7 +904,7 @@
 					}
 
 					// Fetches and redraws the 4 gamma-leg lines (+ AVG) for the
-					// current Expiry/Cumulative/Window as of AS_OF_ISO — same
+					// current Expiry/Window as of AS_OF_ISO — same
 					// shape as /4l/<asset>'s own refreshFourLegGamma() (SC/SP
 					// labels with no combined magnitude suffix, AVG label
 					// "<dom leg> $<dom leg price> | <avg gamma value>"), minus
