@@ -29,7 +29,8 @@
 	     /api/four-leg-gamma's own latest reading (BCG/BPG/SCG/SPG — where
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms), plus
-	     a 5th dashed AVG line, always drawn alongside the
+	     a 5th solid AVG line (was dashed, changed to solid per product
+	     decision (2026-09-05)), always drawn alongside the
 	     other 4 — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
 	     prices (no server field of its own). Its color is dominant-leg-
@@ -62,12 +63,13 @@
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
-	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/24h/All, 4h default —
+	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/24h/All, 24h default —
 	     2h/4h/6h added per product decision (2026-09-01), which also
 	     moved the default from 24h to 4h; default then moved 4h → 8h
 	     per a further product decision, then back 8h → 4h per a further
 	     product decision; then 48h/3d/4d/5d were removed and 1h/3h/5h/7h
-	     added per a further product decision;
+	     added per a further product decision; default then moved 4h → 24h
+	     per a further product decision (2026-09-05);
 	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "1h".."8h"/"24h" entries plus
 	     the "All" no-window-bound option;
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
@@ -285,8 +287,8 @@
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
-						<option value="1h" selected="selected">1h</option>
-						<option value="4h">4h</option>
+						<option value="1h">1h</option>
+						<option value="4h" selected="selected">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
@@ -297,12 +299,12 @@
 						<option value="1">1h</option>
 						<option value="2">2h</option>
 						<option value="3">3h</option>
-						<option value="4" selected="selected">4h</option>
+						<option value="4">4h</option>
 						<option value="5">5h</option>
 						<option value="6">6h</option>
 						<option value="7">7h</option>
 						<option value="8">8h</option>
-						<option value="24">24h</option>
+						<option value="24" selected="selected">24h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -360,10 +362,11 @@
 					// then changed to 4h (matching those pages), then to 1d
 					// per a further product decision (2026-08-19), then back
 					// to 4h per a still later product decision, then to 1h
-					// per a further product decision (2026-09-01) — see
+					// per a further product decision (2026-09-01), then back
+					// to 4h per a further product decision (2026-09-05) — see
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
-					let INTERVAL = '1h';
+					let INTERVAL = '4h';
 					// Coinbase spot, same symbol convention /tm/<asset> uses
 					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -392,15 +395,16 @@
 					// SELECTED_INSTRUMENT. Current set: 1h/2h/3h/4h/5h/6h/7h/
 					// 8h/24h plus "All" (?hours=all — skips the trailing-hours
 					// trade filter entirely; a number in every other case),
-					// 4h default. This set and its default have moved many
-					// times across product decisions (see main.py's own
-					// FOUR_LEG_WINDOW_HOURS_CHOICES comment for the history);
-					// a "00:00 UTC" (?hours=midnight) and an "Auto (Time to
-					// Expiry)" (?hours=auto) option were both offered here at
-					// various points — the server-side resolutions for both
-					// are unchanged and still reachable by a direct API call,
-					// just no longer in this dropdown.
-					let WINDOW_HOURS = 4;
+					// 24h default (was 4h, moved back to 24h per a further
+					// product decision (2026-09-05)). This set and its default
+					// have moved many times across product decisions (see
+					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES comment for
+					// the history); a "00:00 UTC" (?hours=midnight) and an
+					// "Auto (Time to Expiry)" (?hours=auto) option were both
+					// offered here at various points — the server-side
+					// resolutions for both are unchanged and still reachable
+					// by a direct API call, just no longer in this dropdown.
+					let WINDOW_HOURS = 24;
 					// If ?hours=auto is ever driven in (not from this
 					// dropdown any more — see above), this holds the numeric
 					// hours the server resolved it to (its `window_hours`
@@ -1006,7 +1010,7 @@
 								const avgColor = avgLineColor(dominantLeg.name);
 								avgGammaPriceLine = series.createPriceLine({
 									price: avgGammaPrice, color: avgColor, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
+									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: avgColor,
 									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
 								});
