@@ -33,10 +33,14 @@
 	     decision (2026-09-05)), always drawn alongside the
 	     other 4 — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
-	     prices (no server field of its own). Its color is dominant-leg-
-	     derived (avgLineColor(): light green for an LC/SC dominant leg,
-	     light red for LP/SP), NOT a "Chart Appearance" picker — that
-	     picker was removed per product decision (2026-08-31). Removed per an earlier
+	     prices (no server field of its own). Its color defaults to violet
+	     and is user-recolorable via the "Chart Appearance" modal
+	     (chartColors.avg / DEFAULT_COLORS.avg, same localStorage-persisted
+	     dankbit_4l_chart_colors key as the 4 gamma-leg lines) — it was
+	     dominant-leg-derived (light green for an LC/SC dominant leg, light
+	     red for LP/SP) with no picker of its own from product decision
+	     (2026-08-31) until a further product decision restored a
+	     dedicated, fixed-default AVG color picker. Removed per an earlier
 	     product decision alongside a heavier "ALL AVG" all-expiries
 	     variant, then restored on its own (ALL AVG stays removed) per a
 	     further product decision, then put behind an opt-in checkbox per
@@ -316,6 +320,10 @@
 						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
 						Window Line
 					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="gamma-legs-toggle" onchange="onToggleGammaLegs()"/>
+						Gamma Legs
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
@@ -341,6 +349,8 @@
 							<label class="color-row">Long Put (LP) <input type="color" id="color-bpg"/></label>
 							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
+							<label class="color-row">Average (AVG) <input type="color" id="color-avg"/></label>
+							<label class="color-row">Nearest+1 Average (N+1 AVG) <input type="color" id="color-n1avg"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -420,6 +430,20 @@
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS;
 
+					// Nearest+1 AVG line — independent of the page's own
+					// Expiry/Window selection: always the Nearest+1 expiry
+					// (`?expiry=nearest_plus_1`, the same ordinal family
+					// `four_leg_gamma_json` already resolves for the removed
+					// Expiry dropdown option, still reachable by direct API
+					// call), always a fixed trailing 24h window
+					// (`&hours=24`), regardless of `SELECTED_INSTRUMENT`/
+					// `WINDOW_HOURS`. Always drawn, no checkbox of its own —
+					// its color IS user-configurable though, via chartColors.n1avg
+					// / DEFAULT_COLORS.n1avg (see the "Chart Appearance" modal
+					// below), default light violet `#ce93d8`.
+					const nearestPlus1AvgUrl = () =>
+						'/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=24';
+
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
 					// signal that dankbit_ws has stalled (its DB connection
@@ -467,29 +491,18 @@
 					let DARK_MODE = localStorage.getItem(THEME_STORAGE_KEY) === 'dark';
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
-					// The AVG line's color is derived from its dominant leg, not a
-					// user setting: a call-side dominant leg (LC/SC) -> light green,
-					// a put-side one (LP/SP) -> light red — same light green/red this
-					// addon uses for the Thales Forecast candle bodies, so the
-					// association reads consistently across pages. Was a "Chart Appearance" color picker until
-					// product decision (2026-08-31) made it dominant-leg-derived.
-					const AVG_LINE_COLOR_CALL = '#a5d6a7';
-					const AVG_LINE_COLOR_PUT  = '#ef9a9a';
-					function avgLineColor(legName) {
-						return (legName === 'LC' || legName === 'SC') ? AVG_LINE_COLOR_CALL : AVG_LINE_COLOR_PUT;
-					}
-
 					// "Settings" button/dialog (see openSettingsModal() below,
 					// after Ruler) — user-pickable colors for this page's own
-					// 4 gamma-leg lines, persisted per-browser to localStorage
-					// under a key completely separate from the Delta Chart's
-					// own 'dankbit_chart_colors' (dankbit_templates.xml) — the
+					// 4 gamma-leg lines plus the AVG and N+1 AVG lines,
+					// persisted per-browser to localStorage under a key
+					// completely separate from the Delta Chart's own
+					// 'dankbit_chart_colors' (dankbit_templates.xml) — the
 					// two pages' color settings are deliberately independent,
 					// not shared/synced, since they're maintained by different
 					// people (Delta Chart: Thales's dev; this page: dankbit's
 					// own). No line-style picker (unlike the Delta Chart's own
-					// modal) since these 4 lines are always solid
-					// createPriceLine()s. Defaults match this page's original
+					// modal) since these lines are always solid/dotted
+					// createPriceLine()s, never user-restylable. Defaults match this page's original
 					// fixed colors (LC/LP black, SC/SP orange) — no longer
 					// tied to DARK_MODE the way the old axisBlack()-based LC/LP
 					// color was, same as every other user-configurable color
@@ -498,7 +511,7 @@
 					// chosen rather than swapping with the theme).
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
 					const DEFAULT_COLORS = {
-						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00',
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#8e24aa', n1avg: '#ce93d8',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -507,11 +520,12 @@
 							if (savedColors[key]) chartColors[key] = savedColors[key];
 						});
 					} catch (e) { /* malformed stored value — fall back to defaults */ }
-					// Average of the 4 gamma legs' own price levels (dashed
-					// line, see avgGammaPriceLine below). Its color is NOT in
-					// chartColors / the "Chart Appearance" modal — it's derived
-					// from the dominant leg via avgLineColor() (light green for a
-					// call-side dominant leg, light red for a put-side one).
+					// Average of the 4 gamma legs' own price levels (solid
+					// line, see avgGammaPriceLine below). Defaults to violet
+					// and is user-recolorable via chartColors.avg / the "Chart
+					// Appearance" modal, same as the 4 gamma-leg lines — no
+					// longer dominant-leg-derived (that scheme was reverted
+					// per product decision).
 
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
@@ -582,6 +596,10 @@
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
+					// Nearest+1 AVG line (light violet, always drawn — no
+					// checkbox) — see nearestPlus1AvgUrl()/drawNearestPlus1Avg()
+					// below.
+					let n1AvgPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -735,6 +753,30 @@
 					function onToggleVLine() {
 						VLINE_SHOWN = document.getElementById('vline-toggle').checked;
 						updateWindowVLine();
+					}
+
+					// "Gamma Legs" checkbox (right after "Window Line",
+					// UNCHECKED by default) — plain client-side show/hide flag
+					// for the 4 gamma-leg lines (LC/LP/SC/SP) only. The AVG
+					// line is always drawn regardless of this flag — its own
+					// gammaLegs/avgGammaPrice/avgGammaValue computation in
+					// refreshFourLegGamma() reads straight off `latest.*`, not
+					// off the 4 drawn price-line objects, so hiding the 4 lines
+					// has no effect on it. Unchecking removes the 4 lines
+					// immediately without a fetch; checking re-fetches via
+					// refreshFourLegGamma() since the last-fetched `latest`
+					// values aren't cached client-side.
+					let SHOW_GAMMA_LEGS = false;
+					function onToggleGammaLegs() {
+						SHOW_GAMMA_LEGS = document.getElementById('gamma-legs-toggle').checked;
+						if (!SHOW_GAMMA_LEGS) {
+							if (bcgPriceLine) { series.removePriceLine(bcgPriceLine); bcgPriceLine = null; }
+							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
+							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
+							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
+						} else {
+							refreshFourLegGamma();
+						}
 					}
 
 					// Positions the single Window reference line (and its label)
@@ -896,6 +938,49 @@
 					// page just draws a horizontal line at each leg's own
 					// current value instead of the whole time series.
 					//
+					// Nearest+1 AVG line — same present-leg-only average of
+					// BCG/BPG/SCG/SPG the primary AVG line computes, but
+					// always against the Nearest+1 expiry over a fixed
+					// trailing 24h window (nearestPlus1AvgUrl() above),
+					// completely independent of the page's own Expiry/Window
+					// selection or the "Gamma Legs" checkbox — no checkbox of
+					// its own, always drawn. Called fire-and-forget from
+					// refreshFourLegGamma() below (own try/catch so a failure
+					// here can't break the primary gamma-leg refresh); a
+					// failed fetch leaves the previously drawn line in place
+					// rather than clearing it, same as the primary lines'
+					// own behavior on a thrown fetch.
+					async function refreshNearestPlus1Avg() {
+						try {
+							const data = await (await fetch(nearestPlus1AvgUrl())).json();
+							const points = data.points || [];
+							const latest = points.length ? points[points.length - 1] : null;
+							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
+							if (!latest) return;
+							const legs = [
+								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
+								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
+								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
+								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
+							].filter(leg => leg.price);
+							if (!legs.length) return;
+							const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
+							const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
+							// Dominant leg — whichever present leg has the largest
+							// |gamma value| — same convention the primary AVG
+							// line's own label uses. Label: "N+1 | <dom leg> |
+							// <avg gamma value>", e.g. "N+1 | LC | 6M".
+							const dominantLeg = legs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
+							const n1Color = chartColors.n1avg;
+							n1AvgPriceLine = series.createPriceLine({
+								price: avgPrice, color: n1Color, lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Dotted,
+								axisLabelVisible: true, axisLabelColor: n1Color,
+								title: 'N+1 | ' + dominantLeg.name + ' | ' + formatAbbreviated(avgValue),
+							});
+						} catch (e) { /* leave the previously drawn line in place */ }
+					}
+
 					// Shows #spinner for the duration of the fetch — this
 					// endpoint recomputes the 4-leg gamma curve fresh
 					// server-side on every call (no persisted history behind
@@ -906,6 +991,7 @@
 					// refreshGammaTriple() uses.
 					async function refreshFourLegGamma() {
 						showSpinner();
+						refreshNearestPlus1Avg();
 						try {
 							const data = await (await fetch(fourLegGammaUrl())).json();
 							const points = data.points || [];
@@ -946,8 +1032,11 @@
 							// with 4 lines on one chart. Colors come from
 							// chartColors (user-configurable via the "Settings"
 							// button/dankbit_4l_chart_colors — see above), not a
-							// theme-reactive axisBlack()/fixed constant.
-							if (latest.bcg_price) {
+							// theme-reactive axisBlack()/fixed constant. Also
+							// gated on the "Gamma Legs" checkbox (SHOW_GAMMA_LEGS)
+							// — the AVG line below is NOT gated by it, since it's
+							// always shown regardless (see onToggleGammaLegs()).
+							if (SHOW_GAMMA_LEGS && latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
 									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
@@ -955,7 +1044,7 @@
 									title: 'LC ' + formatAbbreviated(latest.bcg_value),
 								});
 							}
-							if (latest.bpg_price) {
+							if (SHOW_GAMMA_LEGS && latest.bpg_price) {
 								bpgPriceLine = series.createPriceLine({
 									price: latest.bpg_price, color: chartColors.bpg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
@@ -963,7 +1052,7 @@
 									title: 'LP ' + formatAbbreviated(latest.bpg_value),
 								});
 							}
-							if (latest.scg_price) {
+							if (SHOW_GAMMA_LEGS && latest.scg_price) {
 								scgPriceLine = series.createPriceLine({
 									price: latest.scg_price, color: chartColors.scg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
@@ -971,7 +1060,7 @@
 									title: 'SC ' + formatAbbreviated(latest.scg_value),
 								});
 							}
-							if (latest.spg_price) {
+							if (SHOW_GAMMA_LEGS && latest.spg_price) {
 								spgPriceLine = series.createPriceLine({
 									price: latest.spg_price, color: chartColors.spg, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
@@ -1000,19 +1089,22 @@
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								// Dominant leg — whichever present leg has the largest
-								// |gamma value| — leads the label (with its own
-								// $-prefixed price), so the AVG line also communicates
-								// which single leg is driving it and where it sits.
-								// Label: "<dom leg> $<dom leg price> | <avg gamma value>",
-								// e.g. "LC $81,200 | 71M" (positions swapped + $ added
-								// per product decision 2026-08-31).
+								// |gamma value| — leads the label, so the AVG line also
+								// communicates which single leg is driving it. The
+								// dominant leg's own $-prefixed price was dropped from
+								// the label per product decision — the line itself is
+								// drawn at avgGammaPrice (the 4-leg average), not the
+								// dominant leg's own price, so showing that price next
+								// to the label read as if it were the line's own price
+								// and confused readers.
+								// Label: "<dom leg> | <avg gamma value>", e.g. "LC | 71M".
 								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
-								const avgColor = avgLineColor(dominantLeg.name);
+								const avgColor = chartColors.avg;
 								avgGammaPriceLine = series.createPriceLine({
 									price: avgGammaPrice, color: avgColor, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: avgColor,
-									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
+									title: dominantLeg.name + ' | ' + formatAbbreviated(avgGammaValue),
 								});
 							}
 						} finally {
