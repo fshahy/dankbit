@@ -45,6 +45,16 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = tuple(range(1, 73)) + (96, 120, 144, 168, 192, 2
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
+# /ll/<asset> (the LL chart — ll_avg_gamma_json) computes one 4-leg gamma
+# AVG per active expiry, then draws only the 2 with the biggest |AVG gamma
+# value|. It has no "Expiry" dropdown — every active expiry is considered
+# on every poll, each an isolated options.per_leg_gamma() curve build, so
+# the loop is capped at the soonest N expiries to bound worst-case cost
+# (Deribit realistically lists ~18-21 active BTC/ETH expiries at once, and
+# the far-dated ones carry negligible flow anyway — the top-2 by |gamma|
+# are always among the nearer, actively-traded ones).
+LL_MAX_EXPIRIES = 24
+
 
 def _auto_window_hours(dte_hours):
     """`?hours=auto` on /api/four-leg-gamma resolves to this — the
@@ -2887,6 +2897,136 @@ class ChartController(http.Controller):
             headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
         )
 
+    @http.route("/api/ll-gamma/<string:asset>", type="http", auth="user", website=False, csrf=False)
+    def ll_avg_gamma_json(self, asset, **kw):
+        """Computed fresh on every request — no model/table behind this
+        route. Backs the /ll/<asset> ("LL") chart: for each of the soonest
+        LL_MAX_EXPIRIES active expiries of `asset`, isolate that
+        instrument's own trades (anchored `=ilike`, `iv <> 0`,
+        `deribit_ts <= now`, optionally within a trailing `?hours=` window)
+        and run options.per_leg_gamma() — the same gamma-only slice of
+        options.per_leg_greeks() four_leg_gamma_json uses — to get that
+        expiry's 4 leg gamma peak/bottom prices+values (BCG/BPG/SCG/SPG).
+        Each expiry is then reduced to ONE reading: the present-leg average
+        of those 4 prices (`avg_price`) and of those 4 values
+        (`avg_value`) — "present" meaning a leg with at least one trade
+        (options.per_leg_gamma() reports an absent leg's price as None),
+        so a missing leg is excluded from the mean rather than dragging it
+        toward 0, same convention /4l/<asset>'s own client-side AVG line
+        uses.
+
+        Response `expiries` is sorted by `abs_value` (|avg_value|)
+        descending, so the client draws the top 2 — "only show 2 lines
+        with the biggest absolute gamma value". No "Expiry" dropdown on
+        the LL page: every active expiry is always considered, unlike
+        four_leg_gamma_json which isolates to one instrument at a time.
+        The trailing-hours Window (`?hours=`) is the LL page's only
+        trade-domain control — same FOUR_LEG_WINDOW_HOURS_CHOICES /
+        "all" / "midnight" resolution four_leg_gamma_json uses, falling
+        back to FOUR_LEG_DEFAULT_WINDOW_HOURS for a missing/malformed
+        value. `?hours=auto` is NOT supported here (no single expiry to
+        size a time-to-expiry window against).
+
+        Returns {asset, window_hours (the resolved int, or the string
+        "all"/"midnight"), trade_count (summed across every returned
+        expiry), expiries: [{instrument, expiration (epoch ms), avg_price,
+        avg_value, abs_value, dominant_leg ("LC"/"LP"/"SC"/"SP" — the
+        present leg with the largest |gamma value|), trade_count}, ...]}.
+        `expiries` is empty (same nothing-computable-yet convention every
+        other route in this addon follows) when nothing is active / no
+        expiry has any usable trades in the window.
+        """
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.make_response(
+                json.dumps({"error": "Unknown asset"}),
+                headers=[("Content-Type", "application/json")],
+            )
+
+        icp = request.env["ir.config_parameter"].sudo()
+        if asset == "BTC":
+            from_price = float(icp.get_param("dankbit.from_price", default=100000))
+            to_price = float(icp.get_param("dankbit.to_price", default=150000))
+            step = float(icp.get_param("dankbit.steps", default=100))
+        else:
+            from_price = float(icp.get_param("dankbit.eth_from_price", default=2000))
+            to_price = float(icp.get_param("dankbit.eth_to_price", default=5000))
+            step = float(icp.get_param("dankbit.eth_steps", default=50))
+        STs = np.arange(from_price, to_price, step, dtype=np.float64)
+
+        hours_param = request.httprequest.args.get("hours")
+        if hours_param in ("all", "midnight"):
+            hours = hours_param
+        else:
+            try:
+                hours = int(hours_param)
+            except (TypeError, ValueError):
+                hours = None
+            if hours not in FOUR_LEG_WINDOW_HOURS_CHOICES:
+                hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
+
+        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        if hours == "all":
+            window_start = None
+        elif hours == "midnight":
+            window_start = options.day_window_start(as_of)
+        else:
+            window_start = as_of - timedelta(hours=hours)
+
+        _LEG_CODES = {"long_call": "LC", "long_put": "LP", "short_call": "SC", "short_put": "SP"}
+
+        bands_model = request.env["dankbit.bands"]
+        expirations = bands_model._distinct_expirations(asset, as_of, LL_MAX_EXPIRIES)
+
+        trade_model = request.env["dankbit.trade"].with_context(active_test=False)
+        expiries = []
+        for exp in expirations:
+            instrument = bands_model._format_instrument(asset, exp)
+            domain = [
+                ("name", "=ilike", f"{instrument}-%"),
+                ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
+            ]
+            if window_start is not None:
+                domain.append(("deribit_ts", ">=", window_start))
+            trades = trade_model.search(domain)
+            if not trades:
+                continue
+
+            legs = options.per_leg_gamma(STs, trades)
+            present = [
+                (_LEG_CODES[name], leg["gamma_price"], leg["gamma_value"])
+                for name, leg in legs.items()
+                if leg["gamma_price"] is not None
+            ]
+            if not present:
+                continue
+
+            avg_price = sum(p for _, p, _ in present) / len(present)
+            avg_value = sum(v for _, _, v in present) / len(present)
+            dominant_code = max(present, key=lambda t: abs(t[2]))[0]
+            expiries.append({
+                "instrument": instrument,
+                "expiration": int(exp.replace(tzinfo=timezone.utc).timestamp() * 1000),
+                "avg_price": avg_price,
+                "avg_value": avg_value,
+                "abs_value": abs(avg_value),
+                "dominant_leg": dominant_code,
+                "trade_count": len(trades),
+            })
+
+        expiries.sort(key=lambda e: e["abs_value"], reverse=True)
+
+        payload = {
+            "asset": asset,
+            "window_hours": hours,
+            "trade_count": sum(e["trade_count"] for e in expiries),
+            "expiries": expiries,
+        }
+        return request.make_response(
+            json.dumps(payload),
+            headers=[("Content-Type", "application/json"), ("Cache-Control", "no-cache")],
+        )
+
     @http.route("/4l/<string:asset>", type="http", auth="user", website=True)
     def four_leg_gamma_chart(self, asset):
         """Standalone TradingView page — 4 horizontal price lines (BCG/
@@ -2979,6 +3119,30 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_four_leg_gamma_chart", ctx)
+
+    @http.route("/ll/<string:asset>", type="http", auth="user", website=True)
+    def ll_avg_gamma_chart(self, asset):
+        """Standalone TradingView page — structurally a stripped-down
+        /4l/<asset> (four_leg_gamma_chart): same Coinbase-spot candle
+        source, same Timeframe/Window/Theme/Window Line/Ruler/Settings/
+        Refresh controls, same single vertical Window reference line.
+        Differences: NO "Expiry" dropdown, and NO "Gamma Legs"/"AVG"/
+        "N+1 AVG" checkboxes. Instead of 4 per-leg gamma lines for one
+        chosen expiry, it draws at most 2 horizontal lines — the 4-leg
+        gamma AVG (present-leg average of BCG/BPG/SCG/SPG) for whichever 2
+        active expiries currently have the biggest |AVG gamma value|,
+        recomputed live on every poll (dankbit.refresh_interval) via
+        /api/ll-gamma/<asset> (no model/table behind this page). Renders
+        its own standalone template (dankbit_ll_avg_gamma_chart). 404 for
+        an unrecognized asset."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        icp = request.env["ir.config_parameter"].sudo()
+        refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
+        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        return request.render("dankbit.dankbit_ll_avg_gamma_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
