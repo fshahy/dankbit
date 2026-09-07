@@ -1,13 +1,14 @@
 <odoo>
 	<!-- Standalone, minimal TradingView page for /4l/<asset> — its own file.
-	     "Timeframe" dropdown (15m/1h/4h/1d, 1h default — 15m added
-	     since Coinbase natively
-	     supports it too, and was originally also this page's own default
-	     until it was changed to 4h per product decision (matching the
-	     Delta/Gamma/Strike Gamma charts' own default), then to 1d per a
-	     further product decision (2026-08-19), then back to 4h per a
-	     still later product decision, then to 1h per a further product
-	     decision (2026-09-01)), candles
+	     "Timeframe" dropdown (1h/4h/1d, 1h default — a 15m option
+	     Coinbase natively supports was once offered here and was this
+	     page's own original default, removed per product decision
+	     (2026-09-03); the default has been 4h (matching the
+	     Delta/Gamma/Strike Gamma charts), then 1d per a further product
+	     decision (2026-08-19), then back to 4h, then 1h per a further
+	     product decision (2026-09-01), then back to 4h per a further
+	     product decision (2026-09-05), then 1h → 4h → 1h per
+	     further product decisions (2026-09-07)), candles
 	     from Coinbase spot (dankbit.trade.get_candles_coinbase(), same
 	     /api/klines-coinbase/<asset> proxy /tm/<asset> uses — Coinbase
 	     has no native 4h resolution, so "4h" is bucketed server-side from
@@ -30,10 +31,12 @@
 	     each of the 4 trade legs' own portfolio dollar-gamma curve, over
 	     trailing trades restricted to one expiry, peaks or bottoms), plus
 	     a 5th solid AVG line (was dashed, changed to solid per product
-	     decision (2026-09-05)), always drawn alongside the
+	     decision (2026-09-05)), drawn alongside the
 	     other 4 — the average of whichever of those 4 are actually
 	     present, computed and drawn purely client-side off the same 4
-	     prices (no server field of its own). Its color defaults to violet
+	     prices (no server field of its own). Shown/hidden via the "AVG"
+	     checkbox (right after "Gamma Legs", checked by default, plain
+	     client-side toggle — added 2026-09-07). Its color defaults to violet
 	     and is user-recolorable via the "Chart Appearance" modal
 	     (chartColors.avg / DEFAULT_COLORS.avg, same localStorage-persisted
 	     dankbit_4l_chart_colors key as the 4 gamma-leg lines) — it was
@@ -67,15 +70,16 @@
 	     routine poll (dankbit.refresh_interval) always refreshes now — no
 	     cumulative "all expiries at once" option exists on this dropdown
 	     (never did), so there is nothing to skip polling for. "Window"
-	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/24h/All, 24h default —
+	     dropdown (1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/All, 4h default —
 	     2h/4h/6h added per product decision (2026-09-01), which also
 	     moved the default from 24h to 4h; default then moved 4h → 8h
 	     per a further product decision, then back 8h → 4h per a further
 	     product decision; then 48h/3d/4d/5d were removed and 1h/3h/5h/7h
 	     added per a further product decision; default then moved 4h → 24h
-	     per a further product decision (2026-09-05);
-	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "1h".."8h"/"24h" entries plus
-	     the "All" no-window-bound option;
+	     per a further product decision (2026-09-05); 12h/16h added and the
+	     default moved 24h → 4h per a further product decision (2026-09-07);
+	     FOUR_LEG_WINDOW_HOURS_CHOICES' own "1h".."8h"/"12h"/"16h"/"24h"
+	     entries plus the "All" no-window-bound option;
 	     see FOUR_LEG_WINDOW_HOURS_CHOICES/FOUR_LEG_DEFAULT_WINDOW_HOURS in
 	     main.py for this choice set's full history. "00:00 UTC"/"12h" and
 	     the "Auto (Time to Expiry)" dynamic option were also once offered
@@ -291,8 +295,8 @@
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
-						<option value="1h">1h</option>
-						<option value="4h" selected="selected">4h</option>
+						<option value="1h" selected="selected">1h</option>
+						<option value="4h">4h</option>
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Expiry:</span>
@@ -303,12 +307,14 @@
 						<option value="1">1h</option>
 						<option value="2">2h</option>
 						<option value="3">3h</option>
-						<option value="4">4h</option>
+						<option value="4" selected="selected">4h</option>
 						<option value="5">5h</option>
 						<option value="6">6h</option>
 						<option value="7">7h</option>
 						<option value="8">8h</option>
-						<option value="24" selected="selected">24h</option>
+						<option value="12">12h</option>
+						<option value="16">16h</option>
+						<option value="24">24h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -323,6 +329,14 @@
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
 						<input type="checkbox" id="gamma-legs-toggle" onchange="onToggleGammaLegs()"/>
 						Gamma Legs
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="avg-toggle" checked="checked" onchange="onToggleAvg()"/>
+						AVG
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="n1avg-toggle" checked="checked" onchange="onToggleN1Avg()"/>
+						N+1 AVG
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
@@ -376,7 +390,7 @@
 					// to 4h per a further product decision (2026-09-05) — see
 					// TF_WINDOW below for the per-timeframe visible-window
 					// convention this page shares with those pages.
-					let INTERVAL = '4h';
+					let INTERVAL = '1h';
 					// Coinbase spot, same symbol convention /tm/<asset> uses
 					// (server-side _COINBASE_SYMBOL_MAP).
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
@@ -403,10 +417,11 @@
 					// "Window" dropdown — trailing-hours trade window fed
 					// into that same expiry's trades, independent of
 					// SELECTED_INSTRUMENT. Current set: 1h/2h/3h/4h/5h/6h/7h/
-					// 8h/24h plus "All" (?hours=all — skips the trailing-hours
-					// trade filter entirely; a number in every other case),
-					// 24h default (was 4h, moved back to 24h per a further
-					// product decision (2026-09-05)). This set and its default
+					// 8h/12h/16h/24h plus "All" (?hours=all — skips the
+					// trailing-hours trade filter entirely; a number in every
+					// other case), 4h default (was 24h, moved 24h → 4h per a
+					// further product decision (2026-09-07); 12h/16h added the
+					// same day). This set and its default
 					// have moved many times across product decisions (see
 					// main.py's own FOUR_LEG_WINDOW_HOURS_CHOICES comment for
 					// the history); a "00:00 UTC" (?hours=midnight) and an
@@ -414,7 +429,7 @@
 					// offered here at various points — the server-side
 					// resolutions for both are unchanged and still reachable
 					// by a direct API call, just no longer in this dropdown.
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 4;
 					// If ?hours=auto is ever driven in (not from this
 					// dropdown any more — see above), this holds the numeric
 					// hours the server resolved it to (its `window_hours`
@@ -430,19 +445,24 @@
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS;
 
-					// Nearest+1 AVG line — independent of the page's own
-					// Expiry/Window selection: always the Nearest+1 expiry
+					// Nearest+1 AVG line — always the Nearest+1 expiry
 					// (`?expiry=nearest_plus_1`, the same ordinal family
 					// `four_leg_gamma_json` already resolves for the removed
 					// Expiry dropdown option, still reachable by direct API
-					// call), always a fixed trailing 24h window
-					// (`&hours=24`), regardless of `SELECTED_INSTRUMENT`/
-					// `WINDOW_HOURS`. Always drawn, no checkbox of its own —
-					// its color IS user-configurable though, via chartColors.n1avg
-					// / DEFAULT_COLORS.n1avg (see the "Chart Appearance" modal
-					// below), default light violet `#ce93d8`.
+					// call), regardless of `SELECTED_INSTRUMENT` (the page's
+					// own Expiry pick) — but it now tracks the page's own
+					// "Window" dropdown (`&hours=` + WINDOW_HOURS, same value
+					// `fourLegGammaUrl()` sends), so the primary AVG and the
+					// N+1 AVG are computed over the same trailing window, just
+					// against different expiries. Was a fixed trailing 24h
+					// window (`&hours=24`) until product decision (2026-09-07).
+					// Shown/hidden via the "N+1 AVG" checkbox (SHOW_N1_AVG,
+					// checked by default) — its color IS user-configurable
+					// though, via chartColors.n1avg / DEFAULT_COLORS.n1avg (see
+					// the "Chart Appearance" modal below), default light violet
+					// `#ce93d8`.
 					const nearestPlus1AvgUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=24';
+						'/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=' + WINDOW_HOURS;
 
 					// Same "Last trade:" footer field the Delta Chart uses —
 					// a growing gap between this and "now" is the at-a-glance
@@ -596,9 +616,10 @@
 					// each replacing its own previous line rather than
 					// accumulating one per hour.
 					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
-					// Nearest+1 AVG line (light violet, always drawn — no
-					// checkbox) — see nearestPlus1AvgUrl()/drawNearestPlus1Avg()
-					// below.
+					// Nearest+1 AVG line (light violet) — see
+					// nearestPlus1AvgUrl()/refreshNearestPlus1Avg() below.
+					// Shown/hidden via the "N+1 AVG" checkbox (checked by
+					// default, plain client-side toggle — added 2026-09-07).
 					let n1AvgPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
@@ -757,12 +778,12 @@
 
 					// "Gamma Legs" checkbox (right after "Window Line",
 					// UNCHECKED by default) — plain client-side show/hide flag
-					// for the 4 gamma-leg lines (LC/LP/SC/SP) only. The AVG
-					// line is always drawn regardless of this flag — its own
-					// gammaLegs/avgGammaPrice/avgGammaValue computation in
-					// refreshFourLegGamma() reads straight off `latest.*`, not
-					// off the 4 drawn price-line objects, so hiding the 4 lines
-					// has no effect on it. Unchecking removes the 4 lines
+					// for the 4 gamma-leg lines (LC/LP/SC/SP) only. The two AVG
+					// lines are gated by their OWN checkboxes ("AVG"/"N+1 AVG"),
+					// not this one — their gammaLegs/avgGammaPrice/avgGammaValue
+					// computation reads straight off `latest.*`, not off the 4
+					// drawn price-line objects, so hiding the 4 legs has no
+					// effect on either AVG line. Unchecking removes the 4 lines
 					// immediately without a fetch; checking re-fetches via
 					// refreshFourLegGamma() since the last-fetched `latest`
 					// values aren't cached client-side.
@@ -776,6 +797,38 @@
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 						} else {
 							refreshFourLegGamma();
+						}
+					}
+
+					// "AVG" checkbox (right after "Gamma Legs", CHECKED by
+					// default) — plain client-side show/hide flag for the
+					// primary AVG line (nearest expiry, this page's own
+					// Expiry/Window selection). Unchecking removes the line
+					// immediately without a fetch; checking re-fetches via
+					// refreshFourLegGamma() since `latest` isn't cached.
+					let SHOW_AVG = true;
+					function onToggleAvg() {
+						SHOW_AVG = document.getElementById('avg-toggle').checked;
+						if (!SHOW_AVG) {
+							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+						} else {
+							refreshFourLegGamma();
+						}
+					}
+
+					// "N+1 AVG" checkbox (right after "AVG", CHECKED by
+					// default) — plain client-side show/hide flag for the
+					// Nearest+1 AVG line (Nearest+1 expiry, page's own selected
+					// Window, its own fetch). Unchecking removes the line
+					// immediately without a fetch; checking re-fetches via
+					// refreshNearestPlus1Avg().
+					let SHOW_N1_AVG = true;
+					function onToggleN1Avg() {
+						SHOW_N1_AVG = document.getElementById('n1avg-toggle').checked;
+						if (!SHOW_N1_AVG) {
+							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
+						} else {
+							refreshNearestPlus1Avg();
 						}
 					}
 
@@ -939,18 +992,23 @@
 					// current value instead of the whole time series.
 					//
 					// Nearest+1 AVG line — same present-leg-only average of
-					// BCG/BPG/SCG/SPG the primary AVG line computes, but
-					// always against the Nearest+1 expiry over a fixed
-					// trailing 24h window (nearestPlus1AvgUrl() above),
-					// completely independent of the page's own Expiry/Window
-					// selection or the "Gamma Legs" checkbox — no checkbox of
-					// its own, always drawn. Called fire-and-forget from
+					// BCG/BPG/SCG/SPG the primary AVG line computes, over the
+					// same trailing Window (nearestPlus1AvgUrl() above, &hours=
+					// + WINDOW_HOURS), but against the Nearest+1 expiry rather
+					// than the page's own selected Expiry, and independent of
+					// the "Gamma Legs" checkbox. Gated by its own "N+1 AVG"
+					// checkbox (SHOW_N1_AVG, checked by default — returns
+					// early here when off). Called fire-and-forget from
 					// refreshFourLegGamma() below (own try/catch so a failure
 					// here can't break the primary gamma-leg refresh); a
 					// failed fetch leaves the previously drawn line in place
 					// rather than clearing it, same as the primary lines'
 					// own behavior on a thrown fetch.
 					async function refreshNearestPlus1Avg() {
+						if (!SHOW_N1_AVG) {
+							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
+							return;
+						}
 						try {
 							const data = await (await fetch(nearestPlus1AvgUrl())).json();
 							const points = data.points || [];
@@ -1034,8 +1092,8 @@
 							// button/dankbit_4l_chart_colors — see above), not a
 							// theme-reactive axisBlack()/fixed constant. Also
 							// gated on the "Gamma Legs" checkbox (SHOW_GAMMA_LEGS)
-							// — the AVG line below is NOT gated by it, since it's
-							// always shown regardless (see onToggleGammaLegs()).
+							// — the AVG line below has its own "AVG" checkbox
+							// (SHOW_AVG), independent of this one.
 							if (SHOW_GAMMA_LEGS && latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
 									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
@@ -1085,7 +1143,7 @@
 								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
 								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
 							].filter(leg => leg.price);
-							if (gammaLegs.length) {
+							if (SHOW_AVG && gammaLegs.length) {
 								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
 								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
 								// Dominant leg — whichever present leg has the largest
