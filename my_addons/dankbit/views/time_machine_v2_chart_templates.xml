@@ -1,32 +1,58 @@
 <odoo>
-	<!-- Standalone, minimal TradingView page for /ll/<asset> — its own file,
-	     structurally a stripped-down /4l/<asset>
-	     (four_leg_gamma_chart_templates.xml). Same Coinbase-spot candle
-	     source (dankbit.trade.get_candles_coinbase(), /api/klines-coinbase/
-	     <asset> proxy), same "Timeframe" dropdown (1h/4h/1d, 1h default).
-	     "Window" dropdown is 1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/36h/48h/72h
-	     (1h default) — no "All" option, unlike /4l/<asset>. Same
-	     Theme/Window Line/Ruler/Settings/Refresh
+	<!-- Standalone, minimal TradingView page for /tm2/<asset> — "Time Machine
+	     v2", a historical-replay sibling of /ll/<asset>
+	     (ll_avg_gamma_chart_templates.xml, which this file is structurally
+	     based on) — the same relationship /tm/<asset>
+	     (time_machine_chart_templates.xml) has to /4l/<asset>. Same
+	     Coinbase-spot candle source (dankbit.trade.get_candles_coinbase(),
+	     /api/klines-coinbase/<asset> proxy), same "Timeframe" dropdown
+	     (1h/4h/1d, 1h default), same "Window" dropdown
+	     (1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/36h/48h/72h, 1h default — LL's
+	     own set, no "All" option), same Theme/Window Line/Ruler/Settings
 	     controls, same single vertical Window reference line + label.
 
-	     Differences from /4l:
-	     - NO "Expiry" dropdown. Every active expiry is always considered.
-	     - NO "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes.
-	     - Instead of 4 per-leg gamma lines (BCG/BPG/SCG/SPG) for one chosen
-	       expiry, it draws at most 2 horizontal lines: the 4-leg gamma AVG
-	       (present-leg average of BCG/BPG/SCG/SPG) for whichever 2 active
-	       expiries currently have the biggest |AVG gamma value|. Sourced
-	       from /api/ll-gamma/<asset> (ll_avg_gamma_json — one AVG per
-	       expiry, response sorted by |avg gamma value| desc; this page
-	       draws the top 2), recomputed live on every poll
-	       (dankbit.refresh_interval). No model/table behind this page. -->
+	     From /ll/<asset> it keeps: NO "Expiry" dropdown (every active expiry
+	     is always considered), NO "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes,
+	     and — instead of 4 per-leg gamma lines — at most 2 horizontal lines,
+	     the 4-leg gamma AVG (present-leg average of BCG/BPG/SCG/SPG) for
+	     whichever 2 active expiries have the biggest |AVG gamma value|,
+	     sourced from /api/ll-gamma/<asset> (ll_avg_gamma_json). Own 2 color
+	     pickers, persisted per-browser under `dankbit_tm2_chart_colors`
+	     (independent of /ll's own `dankbit_ll_chart_colors`).
 
-	<template id="dankbit_ll_avg_gamma_chart" name="Dankbit LL Chart">
+	     From /tm/<asset> it takes the "As Of" historical-replay shell:
+	     everything is anchored to a user-picked past moment instead of
+	     "now". The <input type="datetime-local"> and this page's own URL
+	     `?as_of=` are both EUROPE/BERLIN wall-clock time (DST-aware) — per
+	     product decision, since this Thales tool's users think in Berlin
+	     time; it is converted to UTC client-side (berlinNaiveToUtcIso(), the
+	     single conversion point) before any backend call, so the server
+	     still only ever receives UTC (AS_OF_ISO). Candles end at that moment
+	     (/api/klines-coinbase/<asset>?as_of=<AS_OF_ISO> ->
+	     get_candles_coinbase()'s own `as_of_ts`), the AVG lines run against
+	     trades up to AS_OF_ISO and consider only expiries that had already
+	     traded and hadn't yet expired as of it (/api/ll-gamma/<asset>
+	     ?as_of=<AS_OF_ISO> -> dankbit.bands._distinct_expirations_asof(),
+	     active_test=False so archived instruments' trades are still found),
+	     and the Window vertical line is measured back from AS_OF_ISO instead
+	     of real "now".
+
+	     A past "as of" moment is frozen by definition, so — like
+	     /tm/<asset>, unlike /ll/<asset> — this page has NO auto-refresh
+	     timer at all (no candle poll, no AVG-line poll, no vline-advance
+	     tick), NO "Refresh" button, and NO "Last trade:" footer. Every fetch
+	     and every vline reposition only re-runs when the user changes As Of
+	     / Timeframe / Window by hand (or presses "Now"), or pans/zooms/
+	     resizes the chart. Own "Dankbit Time Machine 2" chart-canvas
+	     watermark. See main.py's time_machine_v2_chart for the full route
+	     docstring. -->
+
+	<template id="dankbit_time_machine_v2_chart" name="Dankbit Time Machine v2 Chart">
 		<html>
 			<head>
 				<meta charset="utf-8"/>
 				<meta name="viewport" content="width=device-width, initial-scale=1"/>
-				<title><t t-esc="asset"/> — LL</title>
+				<title><t t-esc="asset"/> — Time Machine 2</title>
 				<script src="https://unpkg.com/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" type="text/javascript"> </script>
 				<style>
 					* { margin: 0; padding: 0; box-sizing: border-box; }
@@ -70,6 +96,11 @@
 					}
 					.tf-btn:hover { background: #f0f0f0; }
 					.tf-btn.active { background: #333; color: #fff; border-color: #333; }
+					#as-of-input {
+						font-family: monospace; font-size: 11pt;
+						color: #555; background: rgba(255,255,255,0.88);
+						padding: 1px 6px; border-radius: 4px; border: 1px solid #ccc;
+					}
 
 					#context-menu {
 						position: fixed;
@@ -86,7 +117,7 @@
 
 					/* "Settings" button/dialog — color pickers for this page's
 					   own 2 AVG lines. Plain centered overlay + box, no
-					   library — same hand-rolled shape as the 4L chart's own
+					   library — same hand-rolled shape as the LL chart's own
 					   modal, copied rather than shared so the two pages' color
 					   settings stay independent (own COLOR_STORAGE_KEY below). */
 					.modal-overlay {
@@ -123,6 +154,7 @@
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn:hover { background: #262626; }
 					body.dark .tf-btn.active { background: #e0e0e0; color: #000; border-color: #e0e0e0; }
+					body.dark #as-of-input { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark #context-menu { background: #1a1a1a; border-color: #555; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
 					body.dark #context-menu .context-menu-item { color: #ddd; }
 					body.dark #context-menu .context-menu-item:hover { background: #333; }
@@ -130,10 +162,10 @@
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
 
-					/* Shown while refreshLlGamma() is fetching/computing the AVG
-					   lines (a fresh options.per_leg_gamma() call per active
-					   expiry server-side each time — no persisted history behind
-					   this page). Hidden as soon as that fetch resolves. */
+					/* Shown while any fetch driven by As Of/Timeframe/Window is
+					   in flight — this page has no live poll, so a fetch only
+					   ever happens in direct response to the user changing one
+					   of those controls. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -166,7 +198,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div t-att-data-asset="asset" t-att-data-as-of="as_of" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="window-vline"/>
 				<div id="window-vline-label" class="vline-label">1h</div>
@@ -174,6 +206,9 @@
 				<div id="status">Loading…</div>
 				<div id="exchange-label"/>
 				<div id="tf-bar">
+					<span class="tf-label">As Of (Berlin):</span>
+					<input type="datetime-local" id="as-of-input" onchange="onAsOfChange()"/>
+					<button class="tf-btn" id="now-btn" onclick="jumpToNow()">Now</button>
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
 						<option value="1h" selected="selected">1h</option>
@@ -208,8 +243,6 @@
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
-					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
-					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until the AVG lines next auto-refresh (dankbit.refresh_interval)">Next Update: &#8212;</span>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -233,46 +266,112 @@
 					</div>
 				</div>
 				<script>//<![CDATA[
-					const cfg      = document.getElementById('cfg').dataset;
-					const ASSET    = cfg.asset;
-					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
-					let nextRefreshAt = Date.now() + REFRESH;
+					const cfg   = document.getElementById('cfg').dataset;
+					const ASSET = cfg.asset;
+					// Server-rendered `?as_of=` from the page's own URL — pre-fills
+					// the "As Of" input so a specific historical view is
+					// bookmarkable. Interpreted as EUROPE/BERLIN wall-clock time
+					// (the picker's own zone), same as a value the user types; it
+					// is converted to UTC client-side before any backend call.
+					// Empty string means "start at now", same as a bare
+					// /tm2/<asset> visit.
+					const INITIAL_AS_OF = cfg.asOf || '';
 					let INTERVAL = '1h';
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
-					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
-					// "Window" dropdown — trailing-hours trade window fed into
-					// /api/ll-gamma/<asset>. 1h..8h/12h/16h/24h/36h/48h/72h,
-					// 1h default.
-					// This is the LL page's ONLY trade-domain control — there
-					// is no "Expiry" dropdown: every active expiry is always
-					// considered, and the 2 with the biggest |AVG gamma value|
-					// are drawn. The server also accepts "all"/"midnight"/
-					// "auto" ?hours= values (not offered here — "All" was
-					// removed from this dropdown per product decision
-					// 2026-09-08) reachable by a direct API call, hence the
-					// string handling kept below.
+					// "As Of" — the single moment this whole page is frozen at.
+					// The <input type="datetime-local"> and the URL's own
+					// `?as_of=` are both EUROPE/BERLIN wall-clock time (DST-aware),
+					// per product decision. AS_OF_ISO is the equivalent naive-UTC
+					// "YYYY-MM-DDTHH:MM:SS" (converted by berlinNaiveToUtcIso() in
+					// setAsOfInput() — the single Berlin→UTC conversion point).
+					// Every fetch appends `&as_of=` + AS_OF_ISO, and the Window
+					// vertical line is measured back from it (asOfEpochSeconds()),
+					// not from real "now".
+					let AS_OF_ISO = null;
+
+					function pad(n) { return String(n).padStart(2, '0'); }
+
+					function toDatetimeLocalUTC(date) {
+						return date.getUTCFullYear() + '-' + pad(date.getUTCMonth() + 1) + '-' + pad(date.getUTCDate())
+							+ 'T' + pad(date.getUTCHours()) + ':' + pad(date.getUTCMinutes());
+					}
+
+					// Europe/Berlin wall-clock "YYYY-MM-DDTHH:00" — DST-aware via
+					// Intl ('sv-SE' renders ISO-like "YYYY-MM-DD HH:MM:SS"). Minutes
+					// are ALWAYS truncated to :00 (the picker only ever operates at
+					// hour granularity, matching the Window dropdown's whole-hour
+					// steps and the hour-granular trade filtering downstream).
+					function toDatetimeLocalBerlin(date) {
+						return date.toLocaleString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(' ', 'T').slice(0, 13) + ':00';
+					}
+
+					// Europe/Berlin's UTC offset in seconds at `refDate`, DST-aware
+					// (CET/CEST) via the same "diff two toLocaleString renderings
+					// of the same instant" idiom `tzOffset` below uses.
+					function berlinOffsetSeconds(refDate) {
+						const utc = new Date(refDate.toLocaleString('en-US', { timeZone: 'UTC' }));
+						const berlin = new Date(refDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
+						return (berlin - utc) / 1000;
+					}
+
+					// Berlin wall-clock "YYYY-MM-DDTHH:MM[:SS]" -> equivalent
+					// naive-UTC "YYYY-MM-DDTHH:MM:SS" (AS_OF_ISO). DST-aware: the
+					// offset is resolved for the TARGET date itself (CET vs CEST),
+					// not "now". The ~1h ambiguity right at a DST transition is
+					// inherent to any naive-local→instant conversion and immaterial
+					// for a historical-inspection tool.
+					function berlinNaiveToUtcIso(berlinNaive) {
+						const [datePart, timePart] = berlinNaive.slice(0, 16).split('T');
+						const [y, m, d] = datePart.split('-').map(Number);
+						const [H, M] = timePart.split(':').map(Number);
+						const guessUTC = Date.UTC(y, m - 1, d, H, M, 0);
+						const offsetSec = berlinOffsetSeconds(new Date(guessUTC));
+						return toDatetimeLocalUTC(new Date(guessUTC - offsetSec * 1000)) + ':00';
+					}
+
+					// The page's own default "As Of" when no `?as_of=` was given —
+					// the current Berlin date and hour, minutes zeroed.
+					function defaultAsOfBerlinNaive() {
+						return toDatetimeLocalBerlin(new Date());
+					}
+
+					function setAsOfInput(value) {
+						const berlin = value.slice(0, 16);
+						document.getElementById('as-of-input').value = berlin;
+						AS_OF_ISO = berlinNaiveToUtcIso(berlin);
+					}
+
+					// AS_OF_ISO is a naive-UTC string, so `new Date(AS_OF_ISO)`
+					// would parse it as browser-LOCAL time in most engines —
+					// appending 'Z' forces UTC. null before setAsOfInput()'s first
+					// call.
+					function asOfEpochSeconds() {
+						if (!AS_OF_ISO) return null;
+						return Math.floor(Date.parse(AS_OF_ISO + 'Z') / 1000);
+					}
+
+					const klineUrl = (iv, limit) =>
+						'/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit + '&as_of=' + encodeURIComponent(AS_OF_ISO);
+
+					// "Window" dropdown — trailing-hours trade window ending at
+					// AS_OF_ISO (not "now"), fed into /api/ll-gamma/<asset>. LL's
+					// own set (1h..8h/12h/16h/24h/36h/48h/72h, 1h default) — no
+					// "All" option. This is the only trade-domain control (no
+					// "Expiry" dropdown: every active expiry is considered, and the
+					// 2 with the biggest |AVG gamma value| are drawn). The server
+					// also accepts "all"/"midnight"/"auto" ?hours= values, not
+					// offered here but kept harmless in the string handling below.
 					let WINDOW_HOURS = 1;
 					let autoResolvedHours = null;
 					const llGammaUrl = () =>
-						'/api/ll-gamma/' + ASSET + '?hours=' + WINDOW_HOURS;
+						'/api/ll-gamma/' + ASSET + '?hours=' + WINDOW_HOURS + '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
-					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
-					let   lastTradeTs = null;
 					// Total trades across every active expiry considered this
-					// poll (the response's own summed `trade_count`), not just
+					// fetch (the response's own summed `trade_count`), not just
 					// the 2 drawn. null until the first refreshLlGamma() resolves.
-					let   tradeCount = null;
-
-					function formatLastTradeTs(iso) {
-						if (!iso) return null;
-						return new Date(iso).toLocaleString('de-DE', {
-							timeZone: 'UTC',
-							year: 'numeric', month: '2-digit', day: '2-digit',
-							hour: '2-digit', minute: '2-digit', second: '2-digit',
-						}) + ' UTC';
-					}
+					let tradeCount = null;
 
 					const tzOffset = (() => {
 						let zone;
@@ -293,11 +392,12 @@
 
 					// "Settings" button/dialog — user-pickable colors for this
 					// page's own 2 AVG lines, persisted per-browser to
-					// localStorage under a key completely separate from
-					// /4l/<asset>'s own 'dankbit_4l_chart_colors' and the Delta
-					// Chart's 'dankbit_chart_colors'. avg1 = the strongest
-					// (|AVG gamma value|) expiry's line, avg2 = the 2nd.
-					const COLOR_STORAGE_KEY = 'dankbit_ll_chart_colors';
+					// localStorage under a key completely separate from /ll's own
+					// 'dankbit_ll_chart_colors', /4l's 'dankbit_4l_chart_colors',
+					// /tm's 'dankbit_tm_chart_colors', and the Delta Chart's
+					// 'dankbit_chart_colors'. avg1 = the strongest (|AVG gamma
+					// value|) expiry's line, avg2 = the 2nd.
+					const COLOR_STORAGE_KEY = 'dankbit_tm2_chart_colors';
 					const DEFAULT_COLORS = { avg1: '#8e24aa', avg2: '#00897b' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -310,6 +410,17 @@
 					document.getElementById('theme-select').value = DARK_MODE ? 'dark' : 'light';
 					document.body.classList.toggle('dark', DARK_MODE);
 
+					// Watermark — this page only, via Lightweight Charts v4's own
+					// built-in `watermark` chart option (drawn onto the chart's own
+					// canvas). Fixed mid-gray at moderate alpha, deliberately NOT
+					// theme-reactive — a light/dark-switching black-ish/white-ish
+					// color went invisible in practice (white-on-white in Light,
+					// black-on-black in Dark). Same approach /tm/<asset> uses, just
+					// a "2" in the label so a TM and a TM2 tab are told apart at a
+					// glance.
+					const WATERMARK_TEXT = 'Dankbit Time Machine 2';
+					const WATERMARK_COLOR = 'rgba(120,120,120,0.35)';
+
 					const chart = LightweightCharts.createChart(document.getElementById('chart-container'), {
 						width: window.innerWidth, height: window.innerHeight,
 						layout: {
@@ -320,6 +431,7 @@
 						crosshair: { mode: LightweightCharts.CrosshairMode.Normal, horzLine: { labelBackgroundColor: 'blue' } },
 						rightPriceScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc' },
 						timeScale: { borderColor: DARK_MODE ? '#444444' : '#cccccc', timeVisible: true, secondsVisible: false },
+						watermark: { visible: true, text: WATERMARK_TEXT, fontSize: 36, color: WATERMARK_COLOR, horzAlign: 'center', vertAlign: 'center' },
 						localization: {
 							timeFormatter: ts => new Date(ts * 1000).toLocaleString('de-DE', {
 								timeZone: 'UTC',
@@ -353,10 +465,11 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The AVG "lines" are horizontal reference lines at the
-					// CURRENT value only (createPriceLine()), redrawn fresh on
-					// every poll — at most 2, one per top-|AVG gamma value|
-					// expiry. Held in an array so the count can vary (0/1/2).
+					// The AVG "lines" are horizontal reference lines at the As-Of/
+					// Window reading only (createPriceLine()), redrawn fresh
+					// whenever As Of/Timeframe/Window changes — at most 2, one per
+					// top-|AVG gamma value| expiry. Held in an array so the count
+					// can vary (0/1/2).
 					let llLines = [];
 					function clearLlLines() {
 						llLines.forEach(l => series.removePriceLine(l));
@@ -364,11 +477,6 @@
 					}
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
-
-					function lastTradeSuffix() {
-						const label = formatLastTradeTs(lastTradeTs);
-						return label ? '  ·  Last trade: ' + label : '';
-					}
 
 					function tradeCountSuffix() {
 						return tradeCount !== null ? '  ·  ' + tradeCount + ' trades' : '';
@@ -380,7 +488,6 @@
 					}
 					function windowLabel() {
 						if (WINDOW_HOURS === 'all') return 'all trades';
-						if (WINDOW_HOURS === 'midnight') return 'since 00:00 UTC';
 						if (WINDOW_HOURS === 'auto') {
 							return autoResolvedHours !== null
 								? 'Auto → ' + hoursLabel(autoResolvedHours) + ' trailing window'
@@ -390,14 +497,11 @@
 					}
 
 					function statusText() {
-						return ASSET + ' · LL (' + windowLabel() + ', live)'
-							+ lastTradeSuffix() + tradeCountSuffix();
-					}
-
-					async function refreshLastTrade() {
-						const data = await (await fetch(LAST_TRADE_URL)).json();
-						lastTradeTs = data.last_trade_ts || null;
-						setStatus(statusText());
+						const berlin = document.getElementById('as-of-input').value || '?';
+						const utc = AS_OF_ISO ? AS_OF_ISO + 'Z' : '?';
+						return ASSET + ' · TM2 (' + windowLabel() + ')'
+							+ '  ·  As of ' + berlin + ' Berlin (' + utc + ')'
+							+ tradeCountSuffix();
 					}
 
 					function showSpinner() { document.getElementById('spinner').style.display = 'block'; }
@@ -437,13 +541,11 @@
 						updateWindowVLine();
 					}
 
+					// "All"/unresolved "Auto" have no start edge to mark; a number
+					// otherwise.
 					function effectiveWindowHours() {
 						if (WINDOW_HOURS === 'all') return null;
 						if (WINDOW_HOURS === 'auto') return autoResolvedHours;
-						if (WINDOW_HOURS === 'midnight') {
-							const nowSec = Math.floor(Date.now() / 1000);
-							return (nowSec % 86400) / 3600;
-						}
 						return WINDOW_HOURS;
 					}
 
@@ -464,17 +566,25 @@
 						updateWindowVLine();
 					}
 
+					// Positions the single Window reference line (+ label) at the
+					// candle effectiveWindowHours() hours before AS_OF_ISO — the
+					// start of the currently selected trailing Window, relative to
+					// the inspected moment rather than real "now" (asOfEpochSeconds()
+					// instead of Date.now(), the one difference from /ll's own
+					// updateWindowVLine()). An As-Of moment is frozen, so this line
+					// never needs a timer to keep creeping forward.
 					function updateWindowVLine() {
 						const vline = document.getElementById('window-vline');
 						const label = document.getElementById('window-vline-label');
 						if (!vline) return;
 						const hrs = effectiveWindowHours();
+						const asOfEpoch = asOfEpochSeconds();
 						const hideAll = () => {
 							vline.style.display = 'none';
 							if (label) label.style.display = 'none';
 						};
-						if (!VLINE_SHOWN || hrs === null || hrs === undefined) { hideAll(); return; }
-						const t = Math.floor(Date.now() / 1000) - hrs * 3600 + tzOffset;
+						if (!VLINE_SHOWN || hrs === null || hrs === undefined || asOfEpoch === null) { hideAll(); return; }
+						const t = asOfEpoch - hrs * 3600 + tzOffset;
 						const snapped = nearestCandleTimeAtOrBefore(t);
 						const x = snapped === null ? null : chart.timeScale().timeToCoordinate(snapped);
 						if (x === null || x === undefined) { hideAll(); return; }
@@ -537,26 +647,14 @@
 						updateWindowVLine();
 					}
 
-					async function updateLatestCandle() {
-						const resp = await (await fetch(klineUrl(INTERVAL, 2))).json();
-						const klines = resp.result || [];
-						if (!klines.length) return;
-						const updated = toCandle(klines[0]);
-						if (realCandles.length && realCandles[realCandles.length - 1].time === updated.time) {
-							realCandles[realCandles.length - 1] = updated;
-						} else {
-							realCandles.push(updated);
-						}
-						rebuildSeriesData();
-					}
-
 					async function setTf(iv) {
 						INTERVAL = iv;
 						await loadCandles();
+						setStatus(statusText());
 					}
 
 					async function setWindow(hours) {
-						WINDOW_HOURS = (hours === 'all' || hours === 'midnight' || hours === 'auto') ? hours : parseInt(hours, 10);
+						WINDOW_HOURS = (hours === 'all' || hours === 'auto') ? hours : parseInt(hours, 10);
 						autoResolvedHours = null;
 						updateWindowVLine();
 						await refreshLlGamma();
@@ -571,16 +669,14 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
-					// Fetches /api/ll-gamma/<asset> (one 4-leg gamma AVG per
-					// active expiry, response sorted by |avg gamma value|
-					// desc), then draws horizontal lines for only the top 2 —
-					// "only show 2 lines with the biggest absolute gamma
-					// value". Line 1 (strongest) uses chartColors.avg1, line 2
-					// chartColors.avg2. Label: "<dom leg> | <avg gamma value> |
-					// <instrument>", e.g. "LC | 71M | BTC-9SEP26" — dominant
-					// leg first, expiry name last.
-					// A failed fetch leaves the previously drawn lines in
-					// place (cleared only once a fresh response arrives).
+					// Fetches /api/ll-gamma/<asset> (one 4-leg gamma AVG per active
+					// expiry as of AS_OF_ISO, response sorted by |avg gamma value|
+					// desc), then draws horizontal lines for only the top 2. Line 1
+					// (strongest) uses chartColors.avg1, line 2 chartColors.avg2.
+					// Label: "<dom leg> | <avg gamma value> | <instrument>",
+					// e.g. "LC | 71M | BTC-9SEP26". A failed fetch leaves the
+					// previously drawn lines in place (cleared only once a fresh
+					// response arrives).
 					async function refreshLlGamma() {
 						showSpinner();
 						try {
@@ -608,34 +704,7 @@
 							});
 						} finally {
 							hideSpinner();
-							nextRefreshAt = Date.now() + REFRESH;
-							updateRefreshCountdown();
 						}
-					}
-
-					let gammaRefreshTimer = null;
-					function scheduleGammaRefresh() {
-						if (gammaRefreshTimer) clearTimeout(gammaRefreshTimer);
-						nextRefreshAt = Date.now() + REFRESH;
-						updateRefreshCountdown();
-						gammaRefreshTimer = setTimeout(async () => {
-							await refreshLlGamma();
-							scheduleGammaRefresh();
-						}, REFRESH);
-					}
-
-					function manualRefreshLines() {
-						refreshLlGamma().then(scheduleGammaRefresh);
-					}
-
-					function updateRefreshCountdown() {
-						const el = document.getElementById('refresh-countdown');
-						if (!el) return;
-						const secs = Math.round((nextRefreshAt - Date.now()) / 1000);
-						if (secs <= 0) { el.textContent = 'refreshing…'; return; }
-						const mm = String(Math.floor(secs / 60)).padStart(2, '0');
-						const ss = String(secs % 60).padStart(2, '0');
-						el.textContent = 'Next Update: ' + mm + ':' + ss;
 					}
 
 					function applyTheme() {
@@ -728,22 +797,54 @@
 						}
 					});
 
-					async function init() {
+					// Re-runs every As-Of-dependent fetch against the current
+					// AS_OF_ISO — called whenever the "As Of" input changes or the
+					// "Now" button is pressed. Candles and the AVG lines both
+					// depend on AS_OF_ISO, so both are re-fetched together (unlike
+					// setTf/setWindow, which each only touch the one thing they
+					// control).
+					async function reloadForAsOf() {
+						showSpinner();
 						try {
 							await loadCandles();
 							await refreshLlGamma();
-							await refreshLastTrade();
+							setStatus(statusText());
+						} catch (e) {
+							setStatus('Error: ' + e.message);
+						} finally {
+							hideSpinner();
+						}
+					}
+
+					function onAsOfChange() {
+						const value = document.getElementById('as-of-input').value;
+						if (!value) return;
+						setAsOfInput(value);
+						reloadForAsOf();
+					}
+
+					// Jumps the picker to the current Berlin date and hour
+					// (minutes zeroed).
+					function jumpToNow() {
+						setAsOfInput(toDatetimeLocalBerlin(new Date()));
+						reloadForAsOf();
+					}
+
+					async function init() {
+						try {
+							setAsOfInput(INITIAL_AS_OF || defaultAsOfBerlinNaive());
+							await loadCandles();
+							await refreshLlGamma();
 							setStatus(statusText());
 						}
 						catch (e) { setStatus('Error: ' + e.message); }
-						finally { scheduleGammaRefresh(); }
 					}
 					init();
-					updateRefreshCountdown();
-					setInterval(updateLatestCandle, 5000);
-					setInterval(updateWindowVLine, 5000);
-					setInterval(updateRefreshCountdown, 1000);
-					setInterval(refreshLastTrade, REFRESH);
+					// No setInterval calls at all on this page — an As-Of moment is
+					// frozen by definition, so unlike /ll/<asset> (candle poll,
+					// AVG-line poll, refresh countdown, vline-advance tick) there's
+					// nothing here that needs to keep moving in real time once
+					// AS_OF_ISO stops changing.
 				//]]></script>
 			</body>
 		</html>

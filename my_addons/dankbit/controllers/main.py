@@ -2345,9 +2345,9 @@ class ChartController(http.Controller):
     def klines_coinbase_proxy(self, asset, interval="4h", limit="500"):
         """Coinbase-spot equivalent of klines_proxy above — sourced from
         dankbit.trade.get_candles_coinbase() instead of get_candles()
-        (Binance spot). Used by /4l/<asset>'s own candle
-        series, per product decision to move that page off Deribit
-        perpetual futures onto Coinbase spot (was
+        (Binance spot). Used by /4l/<asset>'s, /tm/<asset>'s, /ll/<asset>'s
+        and /tm2/<asset>'s own candle series, per product decision to move
+        those pages off Deribit perpetual futures onto Coinbase spot (was
         /api/klines-futures/<asset> when it sourced Deribit
         perpetuals instead).
 
@@ -2355,8 +2355,9 @@ class ChartController(http.Controller):
         the returned window's right edge to that past moment instead of
         "now" — the `limit` candles ending at/before it, forwarded as
         get_candles_coinbase()'s own `as_of_ts` (unix seconds). Used by
-        /tm/<asset> (Time Machine) for its own candle series; every other
-        caller (no `as_of`) is unaffected."""
+        /tm/<asset> (Time Machine) and /tm2/<asset> (Time Machine v2) for
+        their own candle series; every other caller (no `as_of`) is
+        unaffected."""
         as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
         as_of_ts = as_of_override.replace(tzinfo=timezone.utc).timestamp() if as_of_override is not None else None
         candles = request.env["dankbit.trade"].get_candles_coinbase(
@@ -2927,6 +2928,17 @@ class ChartController(http.Controller):
         value. `?hours=auto` is NOT supported here (no single expiry to
         size a time-to-expiry window against).
 
+        An optional `?as_of=` query param (see _parse_as_of_param)
+        substitutes for "now" everywhere in this route — the active-expiry
+        lookup switches to dankbit.bands._distinct_expirations_asof() (only
+        expiries that had already traded and hadn't yet expired as of that
+        moment) and every trailing-window / `deribit_ts <=` cut is measured
+        back from it instead of the live present. Backs /tm2/<asset> (Time
+        Machine v2, see time_machine_v2_chart), the LL-based historical-
+        replay sibling of /tm/<asset>. The per-expiry trade search already
+        runs with active_test=False, so archived (long-expired) instruments'
+        trades from that period are still found.
+
         Returns {asset, window_hours (the resolved int, or the string
         "all"/"midnight"), trade_count (summed across every returned
         expiry), expiries: [{instrument, expiration (epoch ms), avg_price,
@@ -2965,7 +2977,8 @@ class ChartController(http.Controller):
             if hours not in FOUR_LEG_WINDOW_HOURS_CHOICES:
                 hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
 
-        as_of = datetime.now(timezone.utc).replace(tzinfo=None)
+        as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
+        as_of = as_of_override or datetime.now(timezone.utc).replace(tzinfo=None)
         if hours == "all":
             window_start = None
         elif hours == "midnight":
@@ -2976,7 +2989,10 @@ class ChartController(http.Controller):
         _LEG_CODES = {"long_call": "LC", "long_put": "LP", "short_call": "SC", "short_put": "SP"}
 
         bands_model = request.env["dankbit.bands"]
-        expirations = bands_model._distinct_expirations(asset, as_of, LL_MAX_EXPIRIES)
+        if as_of_override is not None:
+            expirations = bands_model._distinct_expirations_asof(asset, as_of, LL_MAX_EXPIRIES)
+        else:
+            expirations = bands_model._distinct_expirations(asset, as_of, LL_MAX_EXPIRIES)
 
         trade_model = request.env["dankbit.trade"].with_context(active_test=False)
         expiries = []
@@ -3143,6 +3159,48 @@ class ChartController(http.Controller):
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
         ctx = {"asset": asset, "refresh_interval": refresh_interval}
         return request.render("dankbit.dankbit_ll_avg_gamma_chart", ctx)
+
+    @http.route("/tm2/<string:asset>", type="http", auth="user", website=True)
+    def time_machine_v2_chart(self, asset):
+        """"Time Machine v2" — a historical-replay sibling of /ll/<asset>
+        (ll_avg_gamma_chart), the same relationship /tm/<asset>
+        (time_machine_chart) has to /4l/<asset>. Renders its own standalone
+        template (dankbit_time_machine_v2_chart): the LL page's rendering
+        (at most 2 horizontal 4-leg-gamma AVG lines for the top-2 active
+        expiries by |AVG gamma value|, no "Expiry" dropdown, no
+        "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes, its own 2 color pickers
+        under localStorage key `dankbit_tm2_chart_colors`) wrapped in the
+        same "As Of" historical shell /tm/<asset> uses: a Europe/Berlin
+        wall-clock datetime-local picker + bookmarkable `?as_of=` on the
+        page URL (converted to UTC client-side before any fetch), NO
+        auto-refresh/polling of any kind, a "Now" button, no "Refresh"
+        button, no "Last trade:" footer, the #window-vline measured back
+        from the As-Of moment rather than real "now", and a
+        "Dankbit Time Machine 2" chart-canvas watermark.
+
+        Needs no new backend computation beyond the two endpoints it drives
+        both gaining an `?as_of=` branch: /api/klines-coinbase/<asset>
+        (already had one — historical candles ending at that moment, via
+        get_candles_coinbase()'s own `as_of_ts`) and /api/ll-gamma/<asset>
+        (see ll_avg_gamma_json — its active-expiry lookup switches to
+        _distinct_expirations_asof() and every trailing-window cut is
+        measured back from `as_of`; its per-expiry trade search already
+        runs with active_test=False so archived instruments' trades are
+        still found).
+
+        `?as_of=` on this page's own URL (e.g.
+        /tm2/BTC?as_of=2026-03-01T00:00, read as 00:00 BERLIN on that date)
+        pre-fills the picker so a specific historical view is bookmarkable;
+        missing/malformed defaults client-side to the current Berlin date
+        and hour with minutes zeroed, so a bare /tm2/<asset> starts out
+        looking like a frozen snapshot of the live /ll/<asset> page."""
+        asset = asset.upper()
+        if not (asset.startswith("BTC") or asset.startswith("ETH")):
+            return request.not_found()
+
+        as_of_param = request.httprequest.args.get("as_of") or ""
+        ctx = {"asset": asset, "as_of": as_of_param}
+        return request.render("dankbit.dankbit_time_machine_v2_chart", ctx)
 
     @http.route("/tm/<string:asset>", type="http", auth="user", website=True)
     def time_machine_chart(self, asset):
