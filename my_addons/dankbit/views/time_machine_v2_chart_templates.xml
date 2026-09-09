@@ -7,7 +7,7 @@
 	     Coinbase-spot candle source (dankbit.trade.get_candles_coinbase(),
 	     /api/klines-coinbase/<asset> proxy), same "Timeframe" dropdown
 	     (1h/4h/1d, 1h default), same "Window" dropdown
-	     (1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/36h/48h/72h, 1h default — LL's
+	     (1h/2h/3h/4h/5h/6h/7h/8h/9h/10h/11h/12h/16h/1d/2d/3d/4d/5d/10d/20d/30d, 1h default — LL's
 	     own set, no "All" option), same Theme/Window Line/Ruler/Settings
 	     controls, same single vertical Window reference line + label.
 
@@ -225,12 +225,19 @@
 						<option value="6">6h</option>
 						<option value="7">7h</option>
 						<option value="8">8h</option>
+						<option value="9">9h</option>
+						<option value="10">10h</option>
+						<option value="11">11h</option>
 						<option value="12">12h</option>
 						<option value="16">16h</option>
-						<option value="24">24h</option>
-						<option value="36">36h</option>
-						<option value="48">48h</option>
-						<option value="72">72h</option>
+						<option value="24">1d</option>
+						<option value="48">2d</option>
+						<option value="72">3d</option>
+						<option value="96">4d</option>
+						<option value="120">5d</option>
+						<option value="240">10d</option>
+						<option value="480">20d</option>
+						<option value="720">30d</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -357,7 +364,7 @@
 
 					// "Window" dropdown — trailing-hours trade window ending at
 					// AS_OF_ISO (not "now"), fed into /api/ll-gamma/<asset>. LL's
-					// own set (1h..8h/12h/16h/24h/36h/48h/72h, 1h default) — no
+					// own set (1h..12h/16h/1d/2d/3d/4d/5d/10d/20d/30d, 1h default) — no
 					// "All" option. This is the only trade-domain control (no
 					// "Expiry" dropdown: every active expiry is considered, and the
 					// 2 with the biggest |AVG gamma value| are drawn). The server
@@ -398,7 +405,7 @@
 					// 'dankbit_chart_colors'. avg1 = the strongest (|AVG gamma
 					// value|) expiry's line, avg2 = the 2nd.
 					const COLOR_STORAGE_KEY = 'dankbit_tm2_chart_colors';
-					const DEFAULT_COLORS = { avg1: '#8e24aa', avg2: '#00897b' };
+					const DEFAULT_COLORS = { avg1: '#FF00FF', avg2: '#BA55D3' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
