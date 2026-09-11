@@ -2,14 +2,45 @@
 
 import logging
 
+from werkzeug.routing import BaseConverter
+
 from odoo import models
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
 
 
+class DankbitSymbolConverter(BaseConverter):
+    """Matches only a Dankbit asset/instrument path segment — one
+    starting with "BTC" or "ETH" (case-sensitive, same convention every
+    ``asset.startswith("BTC")``/``startswith("ETH")`` check in
+    controllers/main.py already uses), e.g. "BTC", "BTC-25JUL26",
+    "ETH-29NOV24-98000-P".
+
+    Without this, this addon's own bare top-level routes
+    (``/<instrument>``, ``/<instrument>/zones``, ``/<asset>/weekly``,
+    etc. — see controllers/main.py) used the plain ``string`` converter,
+    which matches ANY single path segment. That silently swallowed
+    website's own built-in pages living at a bare path — e.g.
+    ``/contactus`` is not a hardcoded werkzeug route but a
+    ``website.page`` record rendered through ir.http's generic
+    page-serving fallback, which only ever runs when no controller
+    matched the path at all. Since ``/<string:instrument>`` DID match
+    "/contactus" (as instrument="contactus"), Dankbit's own chart
+    controller always won and the fallback never got a chance to render
+    the real Contact Us page.
+    """
+    regex = r"(?:BTC|ETH)[^/]*"
+
+
 class IrHttp(models.AbstractModel):
     _inherit = "ir.http"
+
+    @classmethod
+    def _get_converters(cls):
+        converters = super()._get_converters()
+        converters["dankbit_symbol"] = DankbitSymbolConverter
+        return converters
 
     @classmethod
     def _dispatch(cls, endpoint):

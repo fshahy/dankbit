@@ -534,14 +534,14 @@ class ChartController(http.Controller):
     def help_page(self):
         return request.render("dankbit.dankbit_help")
 
-    @http.route("/<string:instrument>/s", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/s", type="http", auth="user", website=True)
     def chart_slideshow(self, instrument):
         return request.render("dankbit.dankbit_slideshow", {
             "instrument": instrument,
             "hours_list": [0, 4, 8, 12, 24],
         })
 
-    @http.route("/<string:instrument>/<int:hours>", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/<int:hours>", type="http", auth="user", website=True)
     def chart_png_hours(self, instrument, hours):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -680,7 +680,7 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:instrument>/zones", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/zones", type="http", auth="user", website=True)
     def chart_png_zones(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -1050,23 +1050,23 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:instrument>/lp", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/lp", type="http", auth="user", website=True)
     def chart_png_long_puts(self, instrument):
         return self._chart_png_single_leg(instrument, "lp")
 
-    @http.route("/<string:instrument>/lc", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/lc", type="http", auth="user", website=True)
     def chart_png_long_calls(self, instrument):
         return self._chart_png_single_leg(instrument, "lc")
 
-    @http.route("/<string:instrument>/sp", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/sp", type="http", auth="user", website=True)
     def chart_png_short_puts(self, instrument):
         return self._chart_png_single_leg(instrument, "sp")
 
-    @http.route("/<string:instrument>/sc", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>/sc", type="http", auth="user", website=True)
     def chart_png_short_calls(self, instrument):
         return self._chart_png_single_leg(instrument, "sc")
 
-    @http.route("/<string:instrument>", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:instrument>", type="http", auth="user", website=True)
     def chart_png_all(self, instrument):
         icp = request.env["ir.config_parameter"].sudo()
 
@@ -1215,7 +1215,7 @@ class ChartController(http.Controller):
             }
         )
 
-    @http.route("/<string:asset>/weekly", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:asset>/weekly", type="http", auth="user", website=True)
     def chart_png_weekly(self, asset):
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -1230,7 +1230,7 @@ class ChartController(http.Controller):
             )
         return self.chart_png_until(instrument)
 
-    @http.route("/<string:asset>/monthly", type="http", auth="user", website=True)
+    @http.route("/<dankbit_symbol:asset>/monthly", type="http", auth="user", website=True)
     def chart_png_monthly(self, asset):
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -1245,7 +1245,7 @@ class ChartController(http.Controller):
             )
         return self.chart_png_until(instrument)
 
-    @http.route("/i/<string:instrument>", type="http", auth="user", website=True)
+    @http.route("/i/<dankbit_symbol:instrument>", type="http", auth="user", website=True)
     def chart_png_until(self, instrument):
         # instrument is e.g. "BTC-3JUL26" — asset prefix + expiry, no strike/type
         parts = instrument.split("-", 1)
