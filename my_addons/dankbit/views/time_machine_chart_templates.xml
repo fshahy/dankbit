@@ -923,16 +923,31 @@
 					window.addEventListener('resize', hideContextMenu);
 					window.addEventListener('scroll', hideContextMenu, true);
 
-					async function loadCandles() {
+					// `preserveView` (used by reloadForAsOf() below) keeps
+					// whatever pan/zoom the user already set instead of
+					// snapping back to the default TF_WINDOW range — without
+					// this, nudging the "As Of" picker by even 1 hour used to
+					// discard a manually-adjusted view every time, since this
+					// function used to call applyVisibleRange() unconditionally
+					// on every reload. The saved range is real epoch
+					// timestamps (not bar indices), so it stays valid even
+					// though the newly-fetched 500 candles shift by however
+					// many bars the As-Of change moved.
+					async function loadCandles(preserveView) {
+						const savedRange = preserveView ? chart.timeScale().getVisibleRange() : null;
 						const resp = await (await fetch(klineUrl(INTERVAL, 500))).json();
 						const klines = (resp.result || []).slice().reverse();
 						realCandles = klines.map(toCandle);
 						rebuildSeriesData();
-						applyVisibleRange();
+						if (savedRange) {
+							chart.timeScale().setVisibleRange(savedRange);
+						} else {
+							applyVisibleRange();
+						}
 						// rebuildSeriesData() already calls updateWindowVLine() once,
-						// but that happens BEFORE applyVisibleRange() establishes
-						// the real visible window on first load — recompute here
-						// too so the line reflects the actual window immediately.
+						// but that happens BEFORE the visible range above is
+						// (re)established — recompute here too so the line
+						// reflects the actual window immediately.
 						updateWindowVLine();
 					}
 
@@ -1253,11 +1268,13 @@
 					// Expiry list, and the 4 gamma legs all depend on
 					// AS_OF_ISO, so all three are re-fetched together (unlike
 					// setTf/setExpiry/setWindow, which each only touch the one
-					// thing they control).
+					// thing they control). loadCandles(true) preserves the
+					// user's own pan/zoom instead of resetting it — see
+					// loadCandles() above.
 					async function reloadForAsOf() {
 						showSpinner();
 						try {
-							await loadCandles();
+							await loadCandles(true);
 							await loadExpiries();
 							await refreshFourLegGamma();
 							setStatus(statusText());
