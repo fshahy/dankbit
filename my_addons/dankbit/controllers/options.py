@@ -471,6 +471,57 @@ def per_leg_gamma(STs, trades, r=0.0):
     return result
 
 
+def max_pain_price(call_oi, put_oi):
+    """Standard "Max Pain" computation for a single expiry: the strike at
+    which the aggregate intrinsic-value payout option WRITERS would owe
+    option HOLDERS at settlement is smallest — i.e. the price where option
+    buyers collectively lose the most and sellers collectively pay out the
+    least. Candidate settlement prices are restricted to the expiry's own
+    actual listed strikes (the union of call_oi's and put_oi's keys), the
+    standard Max Pain convention, rather than a continuous price grid —
+    unlike every Greek curve elsewhere in this addon (delta.py/gamma.py/
+    etc.), which evaluate over a synthetic STs grid.
+
+    call_oi/put_oi: {strike: open_interest} dicts — current open interest
+    (contracts outstanding), NOT trade volume/count, since Max Pain is
+    about existing positions at expiration, not recent trade flow. Sourced
+    by the caller from dankbit.trade.get_open_interest_by_currency(), the
+    same live-OI lookup dankbit.forecast.snapshot's
+    trade_weighted_per_leg_greeks() path already uses — filtered down to
+    one expiry's own strikes there. May be sparse, only-partially
+    overlapping (a strike traded as a call but never as a put, or vice
+    versa), or both empty.
+
+    For each candidate strike S, a call struck at K owes
+    OI * max(S - K, 0) and a put struck at K owes OI * max(K - S, 0) —
+    the same combined-portfolio intrinsic-value formula chart_png_zones'
+    own Longs/Shorts payoff curves use per-leg, just aggregated by open
+    interest here instead of per-trade signed amount.
+
+    Returns (price, total_payout_by_strike) — price is a plain float
+    (never a synthetic price-grid-edge value), or (None, {}) with no
+    usable OI on either side at all (this addon's usual "no curve, no
+    fake price" convention, same as per_leg_greeks()'s own None gamma/
+    delta price for an empty leg)."""
+    strikes = sorted(set(k for k, oi in call_oi.items() if oi) | set(k for k, oi in put_oi.items() if oi))
+    if not strikes:
+        return None, {}
+
+    total_payout = {}
+    for candidate in strikes:
+        payout = 0.0
+        for strike, oi in call_oi.items():
+            if oi:
+                payout += oi * max(candidate - strike, 0.0)
+        for strike, oi in put_oi.items():
+            if oi:
+                payout += oi * max(strike - candidate, 0.0)
+        total_payout[candidate] = payout
+
+    best_strike = min(total_payout, key=total_payout.get)
+    return float(best_strike), total_payout
+
+
 def zone_summary(STs, longs_curve, shorts_curve):
     """Same extrema/box-boundary definitions used by dankbit.bands
     and the TradingView zones boxes: Shorts curve peak ("seller_max_profit"),

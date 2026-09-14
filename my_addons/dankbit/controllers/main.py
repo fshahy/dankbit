@@ -55,6 +55,18 @@ FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 # are always among the nearer, actively-traded ones).
 LL_MAX_EXPIRIES = 24
 
+# /ll/<asset>'s own "Window" control is a free-form number + Hours/Days
+# unit picker (not a fixed dropdown, unlike /4l/<asset>'s own Window
+# select), so ll_avg_gamma_json's `?hours=` no longer validates against
+# the discrete FOUR_LEG_WINDOW_HOURS_CHOICES set (silently substituting
+# FOUR_LEG_DEFAULT_WINDOW_HOURS for anything off that list would make a
+# typed-in value like "100" hours silently render as 24h) — any positive
+# integer is accepted and just clamped into 1..LL_MAX_WINDOW_HOURS
+# instead. 8760h = 1 year, comfortably past this addon's own ~9-month
+# trade retention (see _delete_expired_trades), so the clamp only ever
+# guards against a malformed/absurd value, not a legitimate one.
+LL_MAX_WINDOW_HOURS = 8760
+
 
 def _auto_window_hours(dte_hours):
     """`?hours=auto` on /api/four-leg-gamma resolves to this — the
@@ -2842,6 +2854,22 @@ class ChartController(http.Controller):
         as_of case too, since that branch's own `expiration >= as_of`
         condition already excludes anything old enough to have been
         archived when as_of is "now").
+
+        Also computes Max Pain for the resolved single expiry (see
+        options.max_pain_price()) — the strike at which option buyers
+        would collectively lose the most / option writers would owe the
+        least at settlement. Unlike every other field on this route, Max
+        Pain does NOT depend on `?hours=`/the trailing-hours trades
+        Window at all — it's a function of currently outstanding open
+        interest (dankbit.trade.get_open_interest_by_currency()), not
+        recent trade flow, so it's the same regardless of the selected
+        Window. Only meaningful for a single resolved instrument: the
+        cumulative "all" scope and the `?from_instrument=`+
+        `?to_instrument=` range both leave `instrument` unset, so Max
+        Pain is skipped (0.0 — same absent-price convention as the 4
+        gamma legs) on those paths. Response fields `max_pain_price`
+        (0.0 = absent) and `max_pain_total_oi` (the summed call+put open
+        interest actually considered, for display alongside the price).
         """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -2883,6 +2911,43 @@ class ChartController(http.Controller):
             }
             points.append(point)
 
+        # Max Pain — independent of `hours`/the trades Window above (see
+        # this route's own docstring): a function of currently
+        # outstanding open interest, not recent trade flow. Only
+        # meaningful for a single resolved instrument (the ordinal/
+        # weekly/monthly/explicit-?instrument= families) — the cumulative
+        # "all"/from-to-range scopes leave `instrument` unset, so this
+        # stays at the absent-price default (0.0).
+        mp_price = 0.0
+        max_pain_total_oi = 0.0
+        if instrument:
+            oi_map = request.env["dankbit.trade"].get_open_interest_by_currency(asset)
+            # Same anchored left-prefix match every other instrument
+            # lookup in this addon uses (`f"{instrument}-%"` via =ilike
+            # elsewhere) — oi_map's own keys are full instrument names
+            # (e.g. "BTC-25JUL26-98000-C") across every expiry for
+            # `asset`, so this can't pull in another expiry's strikes.
+            prefix = f"{instrument}-"
+            call_oi, put_oi = {}, {}
+            for oi_instrument, oi in oi_map.items():
+                if not oi or not oi_instrument.startswith(prefix):
+                    continue
+                parts = oi_instrument.split("-")
+                if len(parts) != 4:
+                    continue
+                try:
+                    strike = int(parts[2])
+                except ValueError:
+                    continue
+                if parts[3] == "C":
+                    call_oi[strike] = call_oi.get(strike, 0.0) + oi
+                elif parts[3] == "P":
+                    put_oi[strike] = put_oi.get(strike, 0.0) + oi
+            resolved_max_pain, _ = options.max_pain_price(call_oi, put_oi)
+            if resolved_max_pain is not None:
+                mp_price = resolved_max_pain
+                max_pain_total_oi = sum(call_oi.values()) + sum(put_oi.values())
+
         # `hours` here is either "all"/"midnight" (as requested) or a
         # plain int — for a numeric Window selection that int is just an
         # echo of the request, but for "?hours=auto" it's the resolved
@@ -2892,6 +2957,7 @@ class ChartController(http.Controller):
             "asset": asset, "instrument": instrument, "window_hours": hours, "points": points,
             "from_instrument": from_instrument_param if ft_range else None,
             "to_instrument": to_instrument_param if ft_range else None,
+            "max_pain_price": mp_price, "max_pain_total_oi": max_pain_total_oi,
         }
         return request.make_response(
             json.dumps(payload),
@@ -2922,11 +2988,16 @@ class ChartController(http.Controller):
         the LL page: every active expiry is always considered, unlike
         four_leg_gamma_json which isolates to one instrument at a time.
         The trailing-hours Window (`?hours=`) is the LL page's only
-        trade-domain control — same FOUR_LEG_WINDOW_HOURS_CHOICES /
-        "all" / "midnight" resolution four_leg_gamma_json uses, falling
-        back to FOUR_LEG_DEFAULT_WINDOW_HOURS for a missing/malformed
-        value. `?hours=auto` is NOT supported here (no single expiry to
-        size a time-to-expiry window against).
+        trade-domain control. Unlike four_leg_gamma_json, this does NOT
+        validate against the discrete FOUR_LEG_WINDOW_HOURS_CHOICES set —
+        the LL page's own Window control is a free-form number + Hours/
+        Days picker, not a fixed dropdown, so any positive integer is
+        accepted and clamped into 1..LL_MAX_WINDOW_HOURS (8760h/1 year);
+        `"all"`/`"midnight"` are still accepted as their own sentinels
+        (reachable by a direct API call, not offered in the page's own
+        UI); a missing/malformed value falls back to
+        FOUR_LEG_DEFAULT_WINDOW_HOURS. `?hours=auto` is NOT supported
+        here (no single expiry to size a time-to-expiry window against).
 
         An optional `?as_of=` query param (see _parse_as_of_param)
         substitutes for "now" everywhere in this route — the active-expiry
@@ -2974,8 +3045,10 @@ class ChartController(http.Controller):
                 hours = int(hours_param)
             except (TypeError, ValueError):
                 hours = None
-            if hours not in FOUR_LEG_WINDOW_HOURS_CHOICES:
+            if hours is None:
                 hours = FOUR_LEG_DEFAULT_WINDOW_HOURS
+            else:
+                hours = max(1, min(hours, LL_MAX_WINDOW_HOURS))
 
         as_of_override = _parse_as_of_param(request.httprequest.args.get("as_of"))
         as_of = as_of_override or datetime.now(timezone.utc).replace(tzinfo=None)
@@ -3157,7 +3230,12 @@ class ChartController(http.Controller):
 
         icp = request.env["ir.config_parameter"].sudo()
         refresh_interval = int(icp.get_param("dankbit.refresh_interval", default=60))
-        ctx = {"asset": asset, "refresh_interval": refresh_interval}
+        hide_expiry = icp.get_param("dankbit.ll_hide_expiry_in_avg_label", default="False") == "True"
+        ctx = {
+            "asset": asset,
+            "refresh_interval": refresh_interval,
+            "hide_expiry_in_avg_label": "true" if hide_expiry else "false",
+        }
         return request.render("dankbit.dankbit_ll_avg_gamma_chart", ctx)
 
     @http.route("/tm2/<string:asset>", type="http", auth="user", website=True)

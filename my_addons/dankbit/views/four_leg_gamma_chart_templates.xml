@@ -52,6 +52,20 @@
 	     (A 6th dashed "G" ("global") line was briefly ported here from
 	     the since-removed /sli65/<asset> page per a 2026-09-02 request,
 	     then removed per a further product decision the next day.)
+	     A "Max Pain" line (teal, dashed, default #00acc1, user-recolorable
+	     via the "Chart Appearance" modal) — the strike at which option
+	     buyers would collectively lose the most / option writers would
+	     owe the least at settlement, for the same resolved single Expiry
+	     instrument (options.max_pain_price(), see main.py's
+	     four_leg_gamma_json) — sourced from that same endpoint's own
+	     top-level max_pain_price/max_pain_total_oi fields, computed from
+	     LIVE OPEN INTEREST (dankbit.trade.get_open_interest_by_currency()),
+	     NOT the page's own "Window" trailing-hours trade filter — so
+	     unlike every other line here, it doesn't move when Window
+	     changes, and still draws even with zero trades in the selected
+	     Window. Gated by its own "Max Pain" checkbox (right after "N+1
+	     AVG", checked by default, plain client-side toggle). Label: "MP
+	     <total call+put OI abbreviated>".
 	     "Expiry" dropdown — dynamically loaded from every currently active
 	     (non-expired) instrument for the asset (loadExpiries(), sourced
 	     from /api/expiries/<asset>, dankbit.bands._distinct_expirations()/
@@ -338,6 +352,10 @@
 						<input type="checkbox" id="n1avg-toggle" checked="checked" onchange="onToggleN1Avg()"/>
 						N+1 AVG
 					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="maxpain-toggle" checked="checked" onchange="onToggleMaxPain()"/>
+						Max Pain
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
@@ -365,6 +383,7 @@
 							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
 							<label class="color-row">Average (AVG) <input type="color" id="color-avg"/></label>
 							<label class="color-row">Nearest+1 Average (N+1 AVG) <input type="color" id="color-n1avg"/></label>
+							<label class="color-row">Max Pain (MP) <input type="color" id="color-maxpain"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -532,6 +551,7 @@
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
 					const DEFAULT_COLORS = {
 						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#8e24aa', n1avg: '#ce93d8',
+						maxpain: '#00acc1',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -621,6 +641,16 @@
 					// Shown/hidden via the "N+1 AVG" checkbox (checked by
 					// default, plain client-side toggle — added 2026-09-07).
 					let n1AvgPriceLine = null;
+					// Max Pain line (teal) — see refreshFourLegGamma() below,
+					// where it's drawn from the same /api/four-leg-gamma
+					// response's own top-level `max_pain_price`/
+					// `max_pain_total_oi` fields (independent of `hours`/the
+					// trades Window and of whether any trades exist in it —
+					// see four_leg_gamma_json's own docstring in main.py, Max
+					// Pain is a function of currently outstanding open
+					// interest, not recent trade flow). Shown/hidden via its
+					// own "Max Pain" checkbox (checked by default).
+					let maxPainPriceLine = null;
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -829,6 +859,25 @@
 							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
 						} else {
 							refreshNearestPlus1Avg();
+						}
+					}
+
+					// "Max Pain" checkbox (right after "N+1 AVG", CHECKED by
+					// default) — plain client-side show/hide flag for the Max
+					// Pain line. Unlike every other line on this page, it's
+					// drawn from a top-level response field
+					// (data.max_pain_price), not from `latest`/the trades
+					// Window — see refreshFourLegGamma() below. Unchecking
+					// removes the line immediately without a fetch; checking
+					// re-fetches via refreshFourLegGamma() since the
+					// last-fetched value isn't cached client-side.
+					let SHOW_MAX_PAIN = true;
+					function onToggleMaxPain() {
+						SHOW_MAX_PAIN = document.getElementById('maxpain-toggle').checked;
+						if (!SHOW_MAX_PAIN) {
+							if (maxPainPriceLine) { series.removePriceLine(maxPainPriceLine); maxPainPriceLine = null; }
+						} else {
+							refreshFourLegGamma();
 						}
 					}
 
@@ -1076,6 +1125,27 @@
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
 							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+
+							// Max Pain — drawn from data's own top-level
+							// max_pain_price/max_pain_total_oi fields, not
+							// from `latest`/points, since it's independent
+							// of the trades Window (see four_leg_gamma_json's
+							// own docstring) and so must be drawn even when
+							// the selected Window/Expiry has zero trades in
+							// it (`latest` null below). 0.0 means absent —
+							// same convention as the 4 gamma legs' own
+							// price fields.
+							if (maxPainPriceLine) { series.removePriceLine(maxPainPriceLine); maxPainPriceLine = null; }
+							if (SHOW_MAX_PAIN && data.max_pain_price) {
+								const mpColor = chartColors.maxpain;
+								maxPainPriceLine = series.createPriceLine({
+									price: data.max_pain_price, color: mpColor, lineWidth: 2,
+									lineStyle: LightweightCharts.LineStyle.Dashed,
+									axisLabelVisible: true, axisLabelColor: mpColor,
+									title: 'MP ' + formatAbbreviated(data.max_pain_total_oi),
+								});
+							}
+
 							if (!latest) {
 								return;
 							}
