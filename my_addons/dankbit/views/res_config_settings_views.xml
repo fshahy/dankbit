@@ -44,6 +44,9 @@
                         <setting>
                             <field name="zones_box_window_hours" placeholder="Zones Box Trailing Window (h)"/>
                         </setting>
+                        <setting help="On the /ll/&lt;asset&gt; (&quot;LL&quot;) chart, hides the trailing &quot;| &lt;instrument&gt;&quot; segment from each AVG line's label (e.g. &quot;LC | 96M | BTC-2OCT26&quot; becomes &quot;LC | 96M&quot;). Display-only.">
+                            <field name="ll_hide_expiry_in_avg_label"/>
+                        </setting>
                     </block>
 
                     <block title="ETH Settings" id="dankbit_eth_graph_settings" groups="base.group_no_one">

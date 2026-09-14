@@ -56,6 +56,16 @@ class ResConfigSettings(models.TransientModel):
         help="How many trailing hours of trades the yellow/teal zones boxes use when the chart's trade-window toggle is set to \"X hours ago\" instead of \"00:00 UTC\". Defaults to 8.",
     )
 
+    ll_hide_expiry_in_avg_label = fields.Boolean(
+        string="LL Chart: Hide Expiry Name in AVG Line Labels",
+        config_parameter="dankbit.ll_hide_expiry_in_avg_label",
+        default=False,
+        help="On the /ll/<asset> (\"LL\") chart, each of the up-to-2 AVG price-line labels normally "
+             "ends with its own instrument name, e.g. \"LC | 96M | BTC-2OCT26\". Check this to drop "
+             "the trailing \"| <instrument>\" segment, leaving just \"LC | 96M\". Display-only — has "
+             "no effect on the underlying /api/ll-gamma/<asset> computation.",
+    )
+
     deribit_timeout = fields.Float(
         string="Deribit API timeout (s)",
         config_parameter="dankbit.deribit_timeout",

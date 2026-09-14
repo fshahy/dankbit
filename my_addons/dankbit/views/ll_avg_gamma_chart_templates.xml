@@ -19,7 +19,13 @@
 	       from /api/ll-gamma/<asset> (ll_avg_gamma_json — one AVG per
 	       expiry, response sorted by |avg gamma value| desc; this page
 	       draws the top 2), recomputed live on every poll
-	       (dankbit.refresh_interval). No model/table behind this page. -->
+	       (dankbit.refresh_interval). No model/table behind this page.
+	       Each AVG line's label ends with "| <instrument>" (e.g.
+	       "LC | 96M | BTC-2OCT26") unless res.config.settings'
+	       dankbit.ll_hide_expiry_in_avg_label is checked, in which case
+	       that trailing segment is dropped ("LC | 96M") —
+	       display-only, read server-side into the #cfg div's
+	       data-hide-expiry attribute. -->
 
 	<template id="dankbit_ll_avg_gamma_chart" name="Dankbit LL Chart">
 		<html>
@@ -166,7 +172,7 @@
 				</style>
 			</head>
 			<body>
-				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" id="cfg" style="display:none"/>
+				<div t-att-data-asset="asset" t-att-data-refresh="refresh_interval" t-att-data-hide-expiry="hide_expiry_in_avg_label" id="cfg" style="display:none"/>
 				<div id="chart-container"/>
 				<div id="window-vline"/>
 				<div id="window-vline-label" class="vline-label">1h</div>
@@ -181,28 +187,12 @@
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
-					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
-						<option value="1" selected="selected">1h</option>
-						<option value="2">2h</option>
-						<option value="3">3h</option>
-						<option value="4">4h</option>
-						<option value="5">5h</option>
-						<option value="6">6h</option>
-						<option value="7">7h</option>
-						<option value="8">8h</option>
-						<option value="9">9h</option>
-						<option value="10">10h</option>
-						<option value="11">11h</option>
-						<option value="12">12h</option>
-						<option value="16">16h</option>
-						<option value="24">1d</option>
-						<option value="48">2d</option>
-						<option value="72">3d</option>
-						<option value="96">4d</option>
-						<option value="120">5d</option>
-						<option value="240">10d</option>
-						<option value="480">20d</option>
-						<option value="720">30d</option>
+					<input type="number" class="tf-btn" id="window-value-input" min="1" step="1" value="1"
+						style="width:56px;" onchange="onWindowInputChange()"
+						onkeydown="if (event.key === 'Enter') { event.preventDefault(); onWindowInputChange(); }"/>
+					<select class="tf-btn" id="window-unit-select" onchange="onWindowInputChange()">
+						<option value="h" selected="selected">Hours</option>
+						<option value="d">Days</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -243,25 +233,35 @@
 					const cfg      = document.getElementById('cfg').dataset;
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
+					// res.config.settings: dankbit.ll_hide_expiry_in_avg_label —
+					// hides the trailing "| <instrument>" segment of each AVG
+					// line's label below.
+					const HIDE_EXPIRY_IN_AVG_LABEL = cfg.hideExpiry === 'true';
 					let nextRefreshAt = Date.now() + REFRESH;
 					let INTERVAL = '1h';
 					const COINBASE_SYMBOL = { BTC: 'BTC-USD', ETH: 'ETH-USD' }[ASSET] || (ASSET + '-USD');
 					document.getElementById('exchange-label').textContent = 'Coinbase · ' + COINBASE_SYMBOL;
 					const klineUrl = (iv, limit) => '/api/klines-coinbase/' + ASSET + '?interval=' + iv + '&limit=' + limit;
 
-					// "Window" dropdown — trailing-hours trade window fed into
-					// /api/ll-gamma/<asset>. 1h..12h/16h/1d/2d/3d/4d/5d/10d/20d/30d,
-					// 1h default.
+					// "Window" control — a free-form number + Hours/Days unit
+					// picker (replaced the former fixed dropdown of discrete
+					// choices, which wasn't flexible enough), fed as a plain
+					// trailing-hours count into /api/ll-gamma/<asset>. 1 Hour
+					// default, matching the former dropdown's own 1h default.
 					// This is the LL page's ONLY trade-domain control — there
 					// is no "Expiry" dropdown: every active expiry is always
 					// considered, and the 2 with the biggest |AVG gamma value|
-					// are drawn. The server also accepts "all"/"midnight"/
-					// "auto" ?hours= values (not offered here — "All" was
-					// removed from this dropdown per product decision
-					// 2026-09-08) reachable by a direct API call, hence the
-					// string handling kept below.
+					// are drawn. Clamped client-side to
+					// WINDOW_MAX_HOURS, mirroring ll_avg_gamma_json's own
+					// server-side LL_MAX_WINDOW_HOURS clamp, so the drawn
+					// #window-vline never disagrees with what the server
+					// actually windowed on. The server also still accepts
+					// "all"/"midnight" ?hours= sentinels (not offered here)
+					// reachable by a direct API call.
+					const WINDOW_MAX_HOURS = 8760; // 1 year — mirrors LL_MAX_WINDOW_HOURS
+					let WINDOW_VALUE = 1;
+					let WINDOW_UNIT  = 'h'; // 'h' or 'd'
 					let WINDOW_HOURS = 1;
-					let autoResolvedHours = null;
 					const llGammaUrl = () =>
 						'/api/ll-gamma/' + ASSET + '?hours=' + WINDOW_HOURS;
 
@@ -386,13 +386,6 @@
 						return hours + 'h';
 					}
 					function windowLabel() {
-						if (WINDOW_HOURS === 'all') return 'all trades';
-						if (WINDOW_HOURS === 'midnight') return 'since 00:00 UTC';
-						if (WINDOW_HOURS === 'auto') {
-							return autoResolvedHours !== null
-								? 'Auto → ' + hoursLabel(autoResolvedHours) + ' trailing window'
-								: 'Auto trailing window';
-						}
 						return hoursLabel(WINDOW_HOURS) + ' trailing window';
 					}
 
@@ -445,12 +438,6 @@
 					}
 
 					function effectiveWindowHours() {
-						if (WINDOW_HOURS === 'all') return null;
-						if (WINDOW_HOURS === 'auto') return autoResolvedHours;
-						if (WINDOW_HOURS === 'midnight') {
-							const nowSec = Math.floor(Date.now() / 1000);
-							return (nowSec % 86400) / 3600;
-						}
 						return WINDOW_HOURS;
 					}
 
@@ -490,10 +477,7 @@
 						vline.style.left = left + 'px';
 						vline.style.display = 'block';
 						if (label) {
-							const sel = document.getElementById('window-select');
-							label.textContent = (WINDOW_HOURS === 'auto' && autoResolvedHours !== null)
-								? hoursLabel(autoResolvedHours)
-								: (sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : hoursLabel(hrs));
+							label.textContent = hoursLabel(hrs);
 							label.style.left = left + 'px';
 							label.style.display = 'block';
 						}
@@ -562,9 +546,28 @@
 						await loadCandles();
 					}
 
-					async function setWindow(hours) {
-						WINDOW_HOURS = (hours === 'all' || hours === 'midnight' || hours === 'auto') ? hours : parseInt(hours, 10);
-						autoResolvedHours = null;
+					// Fired on both the number input's and the unit select's
+					// onchange (blur/Enter or a unit switch) — reads both
+					// controls, clamps into 1..WINDOW_MAX_HOURS (mirroring the
+					// server's own LL_MAX_WINDOW_HOURS clamp so the drawn
+					// #window-vline can't silently disagree with what the
+					// server actually windowed on), writes the clamped value
+					// back into the input so the field always reflects what's
+					// really in effect, then re-fetches.
+					async function onWindowInputChange() {
+						const valInput  = document.getElementById('window-value-input');
+						const unitSelect = document.getElementById('window-unit-select');
+						WINDOW_UNIT = unitSelect.value === 'd' ? 'd' : 'h';
+						let value = parseInt(valInput.value, 10);
+						if (!Number.isFinite(value) || value < 1) value = 1;
+						let hours = WINDOW_UNIT === 'd' ? value * 24 : value;
+						if (hours > WINDOW_MAX_HOURS) {
+							hours = WINDOW_MAX_HOURS;
+							value = WINDOW_UNIT === 'd' ? Math.floor(hours / 24) : hours;
+						}
+						WINDOW_VALUE = value;
+						WINDOW_HOURS = WINDOW_UNIT === 'd' ? WINDOW_VALUE * 24 : WINDOW_VALUE;
+						valInput.value = String(WINDOW_VALUE);
 						updateWindowVLine();
 						await refreshLlGamma();
 						setStatus(statusText());
@@ -596,9 +599,6 @@
 								.sort((a, b) => b.abs_value - a.abs_value)
 								.slice(0, 2);
 
-							autoResolvedHours = typeof data.window_hours === 'number' ? data.window_hours : null;
-							updateWindowVLine();
-
 							tradeCount = typeof data.trade_count === 'number' ? data.trade_count : 0;
 							setStatus(statusText());
 
@@ -606,11 +606,13 @@
 							expiries.forEach((e, i) => {
 								if (!e.avg_price) return;
 								const color = i === 0 ? chartColors.avg1 : chartColors.avg2;
+								const label = e.dominant_leg + ' | ' + formatAbbreviated(e.avg_value)
+									+ (HIDE_EXPIRY_IN_AVG_LABEL ? '' : ' | ' + e.instrument);
 								llLines.push(series.createPriceLine({
 									price: e.avg_price, color: color, lineWidth: 2,
 									lineStyle: LightweightCharts.LineStyle.Solid,
 									axisLabelVisible: true, axisLabelColor: color,
-									title: e.dominant_leg + ' | ' + formatAbbreviated(e.avg_value) + ' | ' + e.instrument,
+									title: label,
 								}));
 							});
 						} finally {
