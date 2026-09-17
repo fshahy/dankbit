@@ -121,6 +121,45 @@
 						padding: 4px 0; z-index: 20; display: none;
 						min-width: 160px;
 					}
+
+					/* "Help" button/dialog — the static trading-guide text below,
+					   same hand-rolled modal-overlay pattern the other pages in
+					   this addon's "Chart Appearance" settings modals use, just
+					   with no color pickers — a plain scrollable text box. */
+					.modal-overlay {
+						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+						background: rgba(0,0,0,0.4);
+						z-index: 30;
+						display: flex; align-items: center; justify-content: center;
+					}
+					.modal-box {
+						background: #fff; border-radius: 6px; padding: 16px 20px;
+						font-family: monospace; font-size: 11pt; color: #333;
+						box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+					}
+					.modal-header {
+						display: flex; justify-content: space-between; align-items: center;
+						font-weight: bold; margin-bottom: 12px; font-size: 12pt;
+					}
+					.modal-close { cursor: pointer; padding: 0 4px; }
+					.modal-close:hover { color: #c00; }
+					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
+					body.dark .modal-close:hover { color: #f66; }
+
+					#help-modal .modal-box { max-width: 640px; width: 90vw; max-height: 82vh; overflow-y: auto; }
+					#help-modal .help-content { line-height: 1.5; }
+					#help-modal .help-content p { margin: 6px 0; }
+					#help-modal h4 { margin: 14px 0 4px; font-size: 11.5pt; }
+					#help-modal h4:first-of-type { margin-top: 0; }
+					#help-modal ul { margin: 4px 0 8px 20px; }
+					#help-modal li { margin-bottom: 4px; }
+					#help-modal .regime-long-inline { color: #2e7d32; font-weight: bold; }
+					#help-modal .regime-short-inline { color: #c62828; font-weight: bold; }
+					#help-modal .caveat-block {
+						color: #888; font-size: 9.5pt; margin-top: 12px;
+						border-top: 1px solid #ccc; padding-top: 8px;
+					}
+					body.dark #help-modal .caveat-block { color: #999; border-color: #555; }
 					#context-menu .context-menu-item {
 						padding: 6px 14px; color: #333; cursor: pointer; white-space: nowrap;
 					}
@@ -198,10 +237,56 @@
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="refresh-btn" onclick="manualRefresh()">Refresh</button>
 					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until this page next auto-refreshes (dankbit.refresh_interval)">Next Update: &#8212;</span>
+					<button class="tf-btn" id="help-btn" onclick="openHelpModal()">Help</button>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
 					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
+				</div>
+				<div id="help-modal" class="modal-overlay" style="display:none" onclick="if (event.target === this) closeHelpModal()">
+					<div class="modal-box help-box">
+						<div class="modal-header">
+							<span>How to Trade Off the Dealer Hedging Simulator</span>
+							<span class="modal-close" onclick="closeHelpModal()">&#10005;</span>
+						</div>
+						<div class="help-content">
+							<p>This is a heuristic dealer-positioning read, not a signal generator — treat it as one input describing what kind of environment you're in (trending/breakout-prone vs. range-bound/pinned) and where the pressure points are, then combine it with your own entry/risk rules.</p>
+
+							<h4>Reading order</h4>
+							<p><b>1. Regime first</b> — decides your whole playbook.</p>
+							<ul>
+								<li><span class="regime-short-inline">SHORT GAMMA</span> — dealers must trade WITH price to stay hedged. Moves that start tend to continue; breakouts tend to run. Favor momentum/breakout entries, not fades.</li>
+								<li><span class="regime-long-inline">LONG GAMMA</span> — dealers trade AGAINST price. Expect chop/mean-reversion around the pin. Favor fading extremes, not chasing breakouts.</li>
+								<li>NEUTRAL — no edge here; wait, or lean on the addon's other tools (Bands, Zones, Signal Bot).</li>
+							</ul>
+							<p>Check magnitude too, not just sign — Dealer Gamma barely past the dead zone is a weak read; deeply negative/positive is the conviction case.</p>
+
+							<p><b>2. Where is price relative to the Gamma Flip line?</b> It's the boundary between the two regimes above. A clean break-and-hold through it is a genuine regime-change event — don't treat a brief wick through it as confirmation, wait for a close beyond it.</p>
+
+							<p><b>3. Use Gamma Walls as levels, not direction.</b></p>
+							<ul>
+								<li><b style="color:#2e7d32">Green wall</b> (dealer long gamma) = pin/support-resistance magnet. Good fade target in a long-gamma regime; a likely stalling point if you're riding a short-gamma move toward it.</li>
+								<li><b style="color:#c62828">Red wall</b> (dealer short gamma) = acceleration level, not a magnet. Don't fade it in a short-gamma regime — a clean break tends to extend, not reverse. Poor place to chase a breakout in a long-gamma regime (more likely to snap back).</li>
+							</ul>
+
+							<p><b>4. Use the simulated forecast path as a directional lean, not a target.</b> It only scales real recent momentum by the regime, so read its direction as confirmation, not its exact % as a take-profit. Best case: regime + flip position + forecast direction + wall layout all agree (confluence). If the forecast direction disagrees with the regime, trust the regime.</p>
+
+							<h4>Confluence checklist before entering</h4>
+							<ul>
+								<li>Regime has real conviction (not neutral / not barely past the dead zone)</li>
+								<li>Price is clearly on one side of the Gamma Flip, not straddling it</li>
+								<li>Forecast box direction agrees with the regime-implied bias</li>
+								<li>No opposing wall sitting immediately in your path</li>
+							</ul>
+							<p><b>Entry/stop sketch:</b> short-gamma momentum trade — enter in the predicted direction, first target = nearest same-direction wall, stop beyond the Gamma Flip. Long-gamma fade trade — enter back toward the nearest wall/flip, stop beyond the wall you're fading. Re-check every refresh — dealer positioning shifts as new flow prints.</p>
+
+							<h4>Recommended Expiry + Window</h4>
+							<p><b>Expiry: Nearest</b> (the default) — gamma scales roughly with 1/&#8730;T, so the nearest-dated contract dominates near-term hedging flow. Use Nearest+1 only as a secondary check. Avoid "All (cumulative)" for trade decisions — it blends distinct expiries' hedging dynamics together and is the heaviest, slowest read.</p>
+							<p><b>Window: All (full position)</b> for your primary regime/wall read — a dealer's real exposure is accumulated, not daily-reset. Pair it with a 24h (or 8h) read as a secondary check: if they agree, that's added confidence; if they sharply disagree, fresh flow is actively repositioning the book and the signal is less reliable until it settles.</p>
+
+							<div class="caveat-block">Caveats: dealers are assumed to be the counterparty to every trade — a simplification every public GEX tool makes, not verified counterparty data. The forecast path is a deterministic heuristic, not a price guarantee. Use alongside the rest of this addon (Bands, Zones, Signal Bot) and real risk management. This isn't financial advice.</div>
+						</div>
+					</div>
 				</div>
 				<script>//<![CDATA[
 					const cfg     = document.getElementById('cfg').dataset;
@@ -600,6 +685,9 @@
 						localStorage.setItem(THEME_STORAGE_KEY, DARK_MODE ? 'dark' : 'light');
 						applyTheme();
 					}
+
+					function openHelpModal() { document.getElementById('help-modal').style.display = 'flex'; }
+					function closeHelpModal() { document.getElementById('help-modal').style.display = 'none'; }
 
 					let rulerActive = false;
 					let rulerPrice1 = null;
