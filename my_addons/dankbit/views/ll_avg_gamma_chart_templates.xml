@@ -13,19 +13,31 @@
 	     - NO "Expiry" dropdown. Every active expiry is always considered.
 	     - NO "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes.
 	     - Instead of 4 per-leg gamma lines (BCG/BPG/SCG/SPG) for one chosen
-	       expiry, it draws at most 2 horizontal lines: the 4-leg gamma AVG
-	       (present-leg average of BCG/BPG/SCG/SPG) for whichever 2 active
-	       expiries currently have the biggest |AVG gamma value|. Sourced
-	       from /api/ll-gamma/<asset> (ll_avg_gamma_json — one AVG per
-	       expiry, response sorted by |avg gamma value| desc; this page
-	       draws the top 2), recomputed live on every poll
-	       (dankbit.refresh_interval). No model/table behind this page.
-	       Each AVG line's label ends with "| <instrument>" (e.g.
-	       "LC | 96M | BTC-2OCT26") unless res.config.settings'
-	       dankbit.ll_hide_expiry_in_avg_label is checked, in which case
-	       that trailing segment is dropped ("LC | 96M") —
-	       display-only, read server-side into the #cfg div's
-	       data-hide-expiry attribute. -->
+	       expiry, it draws ONE horizontal line PER active expiry, at that
+	       expiry's own dominant leg's price (the present leg — one with at
+	       least one trade — whose |gamma value| is largest). Sourced from
+	       /api/ll-gamma/<asset> (ll_avg_gamma_json — one dominant-leg
+	       reading per expiry, response sorted by |dominant gamma value|
+	       desc), recomputed live on every poll (dankbit.refresh_interval).
+	       No model/table behind this page. This used to instead draw at
+	       most 2 lines, each the present-leg AVERAGE of BCG/BPG/SCG/SPG for
+	       the top-2 |AVG gamma value| expiries — changed per product
+	       decision to show every expiry's own single strongest leg rather
+	       than a 2-expiry blended summary. The strongest expiry's line
+	       (biggest |dominant gamma value|) is drawn in a light magenta
+	       (`chartColors.avg1`), every other expiry's line in a dark magenta
+	       (`chartColors.avg2`) — both still user-recolorable via the
+	       "Chart Appearance" modal. Each line's label ends with
+	       "| <instrument>" (e.g. "LC | 96M | BTC-2OCT26") unless
+	       res.config.settings' dankbit.ll_hide_expiry_in_avg_label is
+	       checked, in which case that trailing segment is dropped
+	       ("LC | 96M") — display-only, read server-side into the #cfg
+	       div's data-hide-expiry attribute. The strongest expiry's own
+	       line is always shown; every other expiry's line is gated
+	       behind the "Other Expiries" checkbox (right after "Window
+	       Line", UNCHECKED by default) — unchecking/checking it redraws
+	       instantly from the last-fetched lastExpiries array via
+	       renderLlLines(), no re-fetch. -->
 
 	<template id="dankbit_ll_avg_gamma_chart" name="Dankbit LL Chart">
 		<html>
@@ -91,10 +103,11 @@
 					#context-menu .context-menu-item:hover { background: #f0f0f0; }
 
 					/* "Settings" button/dialog — color pickers for this page's
-					   own 2 AVG lines. Plain centered overlay + box, no
-					   library — same hand-rolled shape as the 4L chart's own
-					   modal, copied rather than shared so the two pages' color
-					   settings stay independent (own COLOR_STORAGE_KEY below). */
+					   dominant-leg lines (strongest expiry vs. the rest).
+					   Plain centered overlay + box, no library — same
+					   hand-rolled shape as the 4L chart's own modal, copied
+					   rather than shared so the two pages' color settings
+					   stay independent (own COLOR_STORAGE_KEY below). */
 					.modal-overlay {
 						position: fixed; top: 0; left: 0; width: 100%; height: 100%;
 						background: rgba(0,0,0,0.4);
@@ -136,10 +149,11 @@
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
 
-					/* Shown while refreshLlGamma() is fetching/computing the AVG
-					   lines (a fresh options.per_leg_gamma() call per active
-					   expiry server-side each time — no persisted history behind
-					   this page). Hidden as soon as that fetch resolves. */
+					/* Shown while refreshLlGamma() is fetching/computing the
+					   dominant-leg lines (a fresh options.per_leg_gamma() call
+					   per active expiry server-side each time — no persisted
+					   history behind this page). Hidden as soon as that fetch
+					   resolves. */
 					#spinner {
 						position: fixed; top: 50%; left: 50%;
 						width: 32px; height: 32px; margin: -16px 0 0 -16px;
@@ -203,10 +217,14 @@
 						<input type="checkbox" id="vline-toggle" checked="checked" onchange="onToggleVLine()"/>
 						Window Line
 					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="other-lines-toggle" onchange="onToggleOtherLines()"/>
+						Other Expiries
+					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 					<button class="tf-btn" id="refresh-lines-btn" onclick="manualRefreshLines()">Refresh</button>
-					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until the AVG lines next auto-refresh (dankbit.refresh_interval)">Next Update: &#8212;</span>
+					<span class="tf-label" id="refresh-countdown" style="font-weight:bold" title="Time until the dominant-leg lines next auto-refresh (dankbit.refresh_interval)">Next Update: &#8212;</span>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -219,9 +237,9 @@
 							<span class="modal-close" onclick="closeSettingsModal()">&#10005;</span>
 						</div>
 						<div class="modal-section">
-							<div class="modal-section-title">AVG Lines</div>
-							<label class="color-row">Strongest AVG (line 1) <input type="color" id="color-avg1"/></label>
-							<label class="color-row">2nd AVG (line 2) <input type="color" id="color-avg2"/></label>
+							<div class="modal-section-title">Dominant Leg Lines</div>
+							<label class="color-row">Strongest expiry <input type="color" id="color-avg1"/></label>
+							<label class="color-row">Other expiries <input type="color" id="color-avg2"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -234,8 +252,9 @@
 					const ASSET    = cfg.asset;
 					const REFRESH  = parseInt(cfg.refresh, 10) * 1000;
 					// res.config.settings: dankbit.ll_hide_expiry_in_avg_label —
-					// hides the trailing "| <instrument>" segment of each AVG
-					// line's label below.
+					// hides the trailing "| <instrument>" segment of each
+					// dominant-leg line's label below (field name kept as-is
+					// from when these lines were leg averages).
 					const HIDE_EXPIRY_IN_AVG_LABEL = cfg.hideExpiry === 'true';
 					let nextRefreshAt = Date.now() + REFRESH;
 					let INTERVAL = '1h';
@@ -250,8 +269,9 @@
 					// default, matching the former dropdown's own 1h default.
 					// This is the LL page's ONLY trade-domain control — there
 					// is no "Expiry" dropdown: every active expiry is always
-					// considered, and the 2 with the biggest |AVG gamma value|
-					// are drawn. Clamped client-side to
+					// considered, and each one that has usable trades in the
+					// window gets its own dominant-leg line. Clamped
+					// client-side to
 					// WINDOW_MAX_HOURS, mirroring ll_avg_gamma_json's own
 					// server-side LL_MAX_WINDOW_HOURS clamp, so the drawn
 					// #window-vline never disagrees with what the server
@@ -268,8 +288,9 @@
 					const LAST_TRADE_URL = '/api/last-trade/' + ASSET;
 					let   lastTradeTs = null;
 					// Total trades across every active expiry considered this
-					// poll (the response's own summed `trade_count`), not just
-					// the 2 drawn. null until the first refreshLlGamma() resolves.
+					// poll (the response's own summed `trade_count`, one per
+					// drawn line). null until the first refreshLlGamma()
+					// resolves.
 					let   tradeCount = null;
 
 					function formatLastTradeTs(iso) {
@@ -299,13 +320,15 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 2 AVG lines, persisted per-browser to
-					// localStorage under a key completely separate from
-					// /4l/<asset>'s own 'dankbit_4l_chart_colors' and the Delta
-					// Chart's 'dankbit_chart_colors'. avg1 = the strongest
-					// (|AVG gamma value|) expiry's line, avg2 = the 2nd.
+					// page's own dominant-leg lines (one per active expiry),
+					// persisted per-browser to localStorage under a key
+					// completely separate from /4l/<asset>'s own
+					// 'dankbit_4l_chart_colors' and the Delta Chart's
+					// 'dankbit_chart_colors'. avg1 = the strongest
+					// (|dominant gamma value|) expiry's line (light magenta),
+					// avg2 = every other expiry's line (dark magenta).
 					const COLOR_STORAGE_KEY = 'dankbit_ll_chart_colors';
-					const DEFAULT_COLORS = { avg1: '#FF00FF', avg2: '#BA55D3' };
+					const DEFAULT_COLORS = { avg1: '#FF66FF', avg2: '#8B008B' };
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
 						const savedColors = JSON.parse(localStorage.getItem(COLOR_STORAGE_KEY) || '{}');
@@ -360,14 +383,52 @@
 						lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 					});
 
-					// The AVG "lines" are horizontal reference lines at the
-					// CURRENT value only (createPriceLine()), redrawn fresh on
-					// every poll — at most 2, one per top-|AVG gamma value|
-					// expiry. Held in an array so the count can vary (0/1/2).
+					// The dominant-leg "lines" are horizontal reference lines at
+					// the CURRENT value only (createPriceLine()), redrawn fresh
+					// on every poll — one per active expiry that has usable
+					// trades in the current Window. Held in an array so the
+					// count can vary freely (0..LL_MAX_EXPIRIES).
 					let llLines = [];
 					function clearLlLines() {
 						llLines.forEach(l => series.removePriceLine(l));
 						llLines = [];
+					}
+
+					// The last-fetched, already-sorted (by |dominant_value| desc)
+					// expiries array from refreshLlGamma() — cached client-side so
+					// the "Other Expiries" checkbox below can instantly show/hide
+					// every line but the strongest via renderLlLines() without
+					// re-fetching /api/ll-gamma/<asset>.
+					let lastExpiries = [];
+
+					// The strongest expiry's own line (rank 0 in the sorted
+					// array) is always shown. This checkbox — unchecked by
+					// default — controls every OTHER expiry's line; unchecked
+					// hides all of them, checked shows them all.
+					let SHOW_OTHER_LINES = false;
+					function onToggleOtherLines() {
+						SHOW_OTHER_LINES = document.getElementById('other-lines-toggle').checked;
+						renderLlLines();
+					}
+
+					// Draws llLines from lastExpiries: rank 0 (strongest) is
+					// always drawn; every other rank only while
+					// SHOW_OTHER_LINES is checked.
+					function renderLlLines() {
+						clearLlLines();
+						lastExpiries.forEach((e, i) => {
+							if (i > 0 && !SHOW_OTHER_LINES) return;
+							if (!e.dominant_price) return;
+							const color = i === 0 ? chartColors.avg1 : chartColors.avg2;
+							const label = e.dominant_leg + ' | ' + formatAbbreviated(e.dominant_value)
+								+ (HIDE_EXPIRY_IN_AVG_LABEL ? '' : ' | ' + e.instrument);
+							llLines.push(series.createPriceLine({
+								price: e.dominant_price, color: color, lineWidth: 2,
+								lineStyle: LightweightCharts.LineStyle.Solid,
+								axisLabelVisible: true, axisLabelColor: color,
+								title: label,
+							}));
+						});
 					}
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
@@ -581,40 +642,33 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
-					// Fetches /api/ll-gamma/<asset> (one 4-leg gamma AVG per
-					// active expiry, response sorted by |avg gamma value|
-					// desc), then draws horizontal lines for only the top 2 —
-					// "only show 2 lines with the biggest absolute gamma
-					// value". Line 1 (strongest) uses chartColors.avg1, line 2
-					// chartColors.avg2. Label: "<dom leg> | <avg gamma value> |
-					// <instrument>", e.g. "LC | 71M | BTC-9SEP26" — dominant
-					// leg first, expiry name last.
+					// Fetches /api/ll-gamma/<asset> (one dominant-leg gamma
+					// reading per active expiry, response sorted by
+					// |dominant gamma value| desc), caches it into
+					// lastExpiries, then calls renderLlLines() to draw the
+					// strongest expiry's line always, plus every other
+					// expiry's line only while the "Other Expiries" checkbox
+					// is checked. The strongest expiry (rank 0) uses
+					// chartColors.avg1 (light magenta), every other expiry
+					// uses chartColors.avg2 (dark magenta). Label: "<dom leg>
+					// | <dominant gamma value> | <instrument>", e.g.
+					// "LC | 71M | BTC-9SEP26" — dominant leg first, expiry
+					// name last (unchanged from the former AVG-line label
+					// shape, just sourced from that leg's own price/value
+					// instead of a 4-leg average).
 					// A failed fetch leaves the previously drawn lines in
 					// place (cleared only once a fresh response arrives).
 					async function refreshLlGamma() {
 						showSpinner();
 						try {
 							const data = await (await fetch(llGammaUrl())).json();
-							const expiries = (data.expiries || []).slice()
-								.sort((a, b) => b.abs_value - a.abs_value)
-								.slice(0, 2);
+							lastExpiries = (data.expiries || []).slice()
+								.sort((a, b) => b.abs_value - a.abs_value);
 
 							tradeCount = typeof data.trade_count === 'number' ? data.trade_count : 0;
 							setStatus(statusText());
 
-							clearLlLines();
-							expiries.forEach((e, i) => {
-								if (!e.avg_price) return;
-								const color = i === 0 ? chartColors.avg1 : chartColors.avg2;
-								const label = e.dominant_leg + ' | ' + formatAbbreviated(e.avg_value)
-									+ (HIDE_EXPIRY_IN_AVG_LABEL ? '' : ' | ' + e.instrument);
-								llLines.push(series.createPriceLine({
-									price: e.avg_price, color: color, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Solid,
-									axisLabelVisible: true, axisLabelColor: color,
-									title: label,
-								}));
-							});
+							renderLlLines();
 						} finally {
 							hideSpinner();
 							nextRefreshAt = Date.now() + REFRESH;

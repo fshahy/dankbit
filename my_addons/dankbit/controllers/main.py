@@ -45,14 +45,14 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = tuple(range(1, 73)) + (96, 120, 144, 168, 192, 2
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
 
-# /ll/<asset> (the LL chart — ll_avg_gamma_json) computes one 4-leg gamma
-# AVG per active expiry, then draws only the 2 with the biggest |AVG gamma
-# value|. It has no "Expiry" dropdown — every active expiry is considered
-# on every poll, each an isolated options.per_leg_gamma() curve build, so
-# the loop is capped at the soonest N expiries to bound worst-case cost
-# (Deribit realistically lists ~18-21 active BTC/ETH expiries at once, and
-# the far-dated ones carry negligible flow anyway — the top-2 by |gamma|
-# are always among the nearer, actively-traded ones).
+# /ll/<asset> (the LL chart — ll_avg_gamma_json) computes each active
+# expiry's own dominant leg (the present leg with the biggest |gamma
+# value|) and draws one line per expiry that has usable trades. It has no
+# "Expiry" dropdown — every active expiry is considered on every poll,
+# each an isolated options.per_leg_gamma() curve build, so the loop is
+# capped at the soonest N expiries to bound worst-case cost (Deribit
+# realistically lists ~18-21 active BTC/ETH expiries at once, and the
+# far-dated ones carry negligible flow anyway).
 LL_MAX_EXPIRIES = 24
 
 # /ll/<asset>'s own "Window" control is a free-form number + Hours/Days
@@ -2974,19 +2974,20 @@ class ChartController(http.Controller):
         and run options.per_leg_gamma() — the same gamma-only slice of
         options.per_leg_greeks() four_leg_gamma_json uses — to get that
         expiry's 4 leg gamma peak/bottom prices+values (BCG/BPG/SCG/SPG).
-        Each expiry is then reduced to ONE reading: the present-leg average
-        of those 4 prices (`avg_price`) and of those 4 values
-        (`avg_value`) — "present" meaning a leg with at least one trade
-        (options.per_leg_gamma() reports an absent leg's price as None),
-        so a missing leg is excluded from the mean rather than dragging it
-        toward 0, same convention /4l/<asset>'s own client-side AVG line
-        uses.
+        Each expiry is then reduced to ONE reading: its DOMINANT leg —
+        the present leg (one with at least one trade;
+        options.per_leg_gamma() reports an absent leg's price as None)
+        with the largest |gamma value| — reported directly as
+        `dominant_price`/`dominant_value`, not averaged across all 4
+        legs (this route used to report a present-leg average instead;
+        changed per product decision so each expiry's line reflects its
+        single strongest leg rather than a blend).
 
-        Response `expiries` is sorted by `abs_value` (|avg_value|)
-        descending, so the client draws the top 2 — "only show 2 lines
-        with the biggest absolute gamma value". No "Expiry" dropdown on
-        the LL page: every active expiry is always considered, unlike
-        four_leg_gamma_json which isolates to one instrument at a time.
+        Response `expiries` is sorted by `abs_value` (|dominant_value|)
+        descending; the client draws ONE line per expiry (no longer
+        capped at 2). No "Expiry" dropdown on the LL page: every active
+        expiry is always considered, unlike four_leg_gamma_json which
+        isolates to one instrument at a time.
         The trailing-hours Window (`?hours=`) is the LL page's only
         trade-domain control. Unlike four_leg_gamma_json, this does NOT
         validate against the discrete FOUR_LEG_WINDOW_HOURS_CHOICES set —
@@ -3012,12 +3013,13 @@ class ChartController(http.Controller):
 
         Returns {asset, window_hours (the resolved int, or the string
         "all"/"midnight"), trade_count (summed across every returned
-        expiry), expiries: [{instrument, expiration (epoch ms), avg_price,
-        avg_value, abs_value, dominant_leg ("LC"/"LP"/"SC"/"SP" — the
-        present leg with the largest |gamma value|), trade_count}, ...]}.
-        `expiries` is empty (same nothing-computable-yet convention every
-        other route in this addon follows) when nothing is active / no
-        expiry has any usable trades in the window.
+        expiry), expiries: [{instrument, expiration (epoch ms),
+        dominant_price, dominant_value, abs_value, dominant_leg
+        ("LC"/"LP"/"SC"/"SP" — the present leg with the largest |gamma
+        value|), trade_count}, ...]}. `expiries` is empty (same
+        nothing-computable-yet convention every other route in this addon
+        follows) when nothing is active / no expiry has any usable trades
+        in the window.
         """
         asset = asset.upper()
         if not (asset.startswith("BTC") or asset.startswith("ETH")):
@@ -3090,15 +3092,13 @@ class ChartController(http.Controller):
             if not present:
                 continue
 
-            avg_price = sum(p for _, p, _ in present) / len(present)
-            avg_value = sum(v for _, _, v in present) / len(present)
-            dominant_code = max(present, key=lambda t: abs(t[2]))[0]
+            dominant_code, dominant_price, dominant_value = max(present, key=lambda t: abs(t[2]))
             expiries.append({
                 "instrument": instrument,
                 "expiration": int(exp.replace(tzinfo=timezone.utc).timestamp() * 1000),
-                "avg_price": avg_price,
-                "avg_value": avg_value,
-                "abs_value": abs(avg_value),
+                "dominant_price": dominant_price,
+                "dominant_value": dominant_value,
+                "abs_value": abs(dominant_value),
                 "dominant_leg": dominant_code,
                 "trade_count": len(trades),
             })
@@ -3217,9 +3217,9 @@ class ChartController(http.Controller):
         Refresh controls, same single vertical Window reference line.
         Differences: NO "Expiry" dropdown, and NO "Gamma Legs"/"AVG"/
         "N+1 AVG" checkboxes. Instead of 4 per-leg gamma lines for one
-        chosen expiry, it draws at most 2 horizontal lines — the 4-leg
-        gamma AVG (present-leg average of BCG/BPG/SCG/SPG) for whichever 2
-        active expiries currently have the biggest |AVG gamma value|,
+        chosen expiry, it draws ONE horizontal line per active expiry, at
+        that expiry's own dominant leg's price (the present leg — one
+        with at least one trade — whose |gamma value| is largest),
         recomputed live on every poll (dankbit.refresh_interval) via
         /api/ll-gamma/<asset> (no model/table behind this page). Renders
         its own standalone template (dankbit_ll_avg_gamma_chart). 404 for
@@ -3244,9 +3244,8 @@ class ChartController(http.Controller):
         (ll_avg_gamma_chart), the same relationship /tm/<asset>
         (time_machine_chart) has to /4l/<asset>. Renders its own standalone
         template (dankbit_time_machine_v2_chart): the LL page's rendering
-        (at most 2 horizontal 4-leg-gamma AVG lines for the top-2 active
-        expiries by |AVG gamma value|, no "Expiry" dropdown, no
-        "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes, its own 2 color pickers
+        (one horizontal dominant-leg line per active expiry, no "Expiry"
+        dropdown, no "Gamma Legs"/"AVG"/"N+1 AVG" checkboxes, its own 2 color pickers
         under localStorage key `dankbit_tm2_chart_colors`) wrapped in the
         same "As Of" historical shell /tm/<asset> uses: a Europe/Berlin
         wall-clock datetime-local picker + bookmarkable `?as_of=` on the
