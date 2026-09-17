@@ -27,6 +27,7 @@
         "views/ll_avg_gamma_chart_templates.xml",
         "views/time_machine_chart_templates.xml",
         "views/time_machine_v2_chart_templates.xml",
+        "views/dealer_hedging_chart_templates.xml",
         "wizard/plot_wizard_view.xml",
         "wizard/zones_wizard_view.xml",
     ],
