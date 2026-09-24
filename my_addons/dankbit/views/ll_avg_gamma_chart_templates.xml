@@ -4,8 +4,8 @@
 	     (four_leg_gamma_chart_templates.xml). Same Coinbase-spot candle
 	     source (dankbit.trade.get_candles_coinbase(), /api/klines-coinbase/
 	     <asset> proxy), same "Timeframe" dropdown (1h/4h/1d, 1h default).
-	     "Window" dropdown is 1h/2h/3h/4h/5h/6h/7h/8h/9h/10h/11h/12h/16h/1d/2d/3d/4d/5d/10d/20d/30d
-	     (1h default) — no "All" option, unlike /4l/<asset>. Same
+	     "Window" is a free-form number + Hours/Days unit picker
+	     (3 days default) — no "All" option, unlike /4l/<asset>. Same
 	     Theme/Window Line/Ruler/Settings/Refresh
 	     controls, same single vertical Window reference line + label.
 
@@ -36,7 +36,8 @@
 	       line (rank 0) is gated behind its own "Strongest" checkbox
 	       (right after "Window Line", CHECKED by default); every other
 	       expiry's line is gated behind the "Other Expiries" checkbox
-	       (right after "Strongest", UNCHECKED by default) —
+	       (right after "Strongest", CHECKED by default; only
+	       expiries with |dominant gamma value| above 1000M) —
 	       unchecking/checking either redraws instantly from the
 	       last-fetched lastExpiries array via renderLlLines(), no
 	       re-fetch.
@@ -254,12 +255,12 @@
 						<option value="1d">1d</option>
 					</select>
 					<span class="tf-label">Window:</span>
-					<input type="number" class="tf-btn" id="window-value-input" min="1" step="1" value="1"
+					<input type="number" class="tf-btn" id="window-value-input" min="1" step="1" value="3"
 						style="width:56px;" onchange="onWindowInputChange()"
 						onkeydown="if (event.key === 'Enter') { event.preventDefault(); onWindowInputChange(); }"/>
 					<select class="tf-btn" id="window-unit-select" onchange="onWindowInputChange()">
-						<option value="h" selected="selected">Hours</option>
-						<option value="d">Days</option>
+						<option value="h">Hours</option>
+						<option value="d" selected="selected">Days</option>
 					</select>
 					<span class="tf-label">Theme:</span>
 					<select class="tf-btn" id="theme-select" onchange="onThemeChange()">
@@ -275,7 +276,7 @@
 						Strongest
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="other-lines-toggle" onchange="onToggleOtherLines()"/>
+						<input type="checkbox" id="other-lines-toggle" checked="checked" onchange="onToggleOtherLines()"/>
 						Other Expiries
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
@@ -340,8 +341,8 @@
 					// "Window" control — a free-form number + Hours/Days unit
 					// picker (replaced the former fixed dropdown of discrete
 					// choices, which wasn't flexible enough), fed as a plain
-					// trailing-hours count into /api/ll-gamma/<asset>. 1 Hour
-					// default, matching the former dropdown's own 1h default.
+					// trailing-hours count into /api/ll-gamma/<asset>. 3 Days
+					// default (72h).
 					// This is the LL page's ONLY trade-domain control — there
 					// is no "Expiry" dropdown: every active expiry is always
 					// considered, and each one that has usable trades in the
@@ -354,9 +355,9 @@
 					// "all"/"midnight" ?hours= sentinels (not offered here)
 					// reachable by a direct API call.
 					const WINDOW_MAX_HOURS = 8760; // 1 year — mirrors LL_MAX_WINDOW_HOURS
-					let WINDOW_VALUE = 1;
-					let WINDOW_UNIT  = 'h'; // 'h' or 'd'
-					let WINDOW_HOURS = 1;
+					let WINDOW_VALUE = 3;
+					let WINDOW_UNIT  = 'd'; // 'h' or 'd'
+					let WINDOW_HOURS = 72; // 3 days default
 					const llGammaUrl = (hoursOverride) =>
 						'/api/ll-gamma/' + ASSET + '?hours=' + (hoursOverride || WINDOW_HOURS);
 
@@ -485,10 +486,12 @@
 						renderLlLines();
 					}
 
-					// This checkbox — unchecked by default — controls every
+					// This checkbox — checked by default — controls every
 					// OTHER expiry's line; unchecked hides all of them,
-					// checked shows them all.
-					let SHOW_OTHER_LINES = false;
+					// checked shows only those whose |dominant gamma value|
+					// is above OTHER_LINES_MIN_ABS_GAMMA (1000M).
+					let SHOW_OTHER_LINES = true;
+					const OTHER_LINES_MIN_ABS_GAMMA = 1e9;
 					function onToggleOtherLines() {
 						SHOW_OTHER_LINES = document.getElementById('other-lines-toggle').checked;
 						renderLlLines();
@@ -501,7 +504,8 @@
 						clearLlLines();
 						lastExpiries.forEach((e, i) => {
 							if (i === 0 && !SHOW_STRONGEST_LINE) return;
-							if (i > 0 && !SHOW_OTHER_LINES) return;
+							if (i > 0 && (!SHOW_OTHER_LINES
+								|| Math.abs(e.dominant_value) <= OTHER_LINES_MIN_ABS_GAMMA)) return;
 							if (!e.dominant_price) return;
 							const color = i === 0 ? chartColors.avg1 : chartColors.avg2;
 							const label = e.dominant_leg + ' | ' + formatAbbreviated(e.dominant_value)
@@ -529,8 +533,13 @@
 					}
 
 					let SHOW_WINDOW123 = false;
+					// Bumped on every toggle and every fetch, so a slower,
+					// superseded response (e.g. one that lands after the
+					// checkbox was unchecked) never draws its lines.
+					let window123RequestSeq = 0;
 					function onToggleWindow123() {
 						SHOW_WINDOW123 = document.getElementById('window123-toggle').checked;
+						window123RequestSeq++; // drop any fetch still in flight
 						if (SHOW_WINDOW123) refreshWindow123Lines();
 						else clearWindow123Lines();
 					}
@@ -544,10 +553,12 @@
 					// the checkbox is unchecked.
 					async function refreshWindow123Lines() {
 						if (!SHOW_WINDOW123) return;
+						const seq = ++window123RequestSeq;
 						try {
 							const results = await Promise.all([1, 2, 3].map(days =>
 								fetch(llGammaUrl(days * 24)).then(r => r.json())
 							));
+							if (seq !== window123RequestSeq || !SHOW_WINDOW123) return;
 							clearWindow123Lines();
 							results.forEach((data, idx) => {
 								const days = idx + 1;

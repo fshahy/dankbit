@@ -536,8 +536,10 @@ class DankbitChat(http.Controller):
                             # Marked per row — the prompt sentence alone was ignored and
                             # all 10 expiries were listed as "the lines on the chart".
                             for row in result["ranked_by_gamma"]:
+                                # /ll draws other expiries only above 1000M |gamma|.
                                 row["shown_on_chart"] = bool(flags.get("strongest") if row["rank"] == 1
-                                                             else flags.get("other_expiries"))
+                                                             else flags.get("other_expiries")
+                                                             and row.get("gamma_millions", 0) > 1000)
                             result = {"chart_note": "shown_on_chart says whether that expiry's line is visible "
                                                     "on the user's chart right now (the rest are hidden by "
                                                     "checkboxes)", **result}
