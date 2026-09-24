@@ -142,6 +142,18 @@ def trade_summary(env, asset, hours=24, instrument=None, as_of=None):
     n, buys, sells, cb, cs, pb, ps, prem, blocks = env.cr.fetchone()
     cb, cs, pb, ps = (round(float(x), 1) for x in (cb, cs, pb, ps))
     calls, puts = round(cb + cs, 1), round(pb + ps, 1)
+    by_expiry = None
+    if not instrument:
+        # Ranked per-expiry split — asked "which expiry had the most
+        # trades?", the model invented every per-expiry count from the
+        # totals alone (2026-09-24).
+        env.cr.execute(f"""
+            SELECT SUBSTRING(name FROM '^[^-]+-[^-]+') AS inst, COUNT(*), COALESCE(SUM(amount), 0)
+              FROM dankbit_trade WHERE {where}
+             GROUP BY inst ORDER BY COUNT(*) DESC LIMIT 8
+        """, params)
+        by_expiry = [{"rank": i + 1, "expiry": inst, "trades": cnt, "contracts": round(float(amt), 1)}
+                     for i, (inst, cnt, amt) in enumerate(env.cr.fetchall())]
     return {
         "asset": asset, "instrument": instrument or "all expiries", "window_hours": hours or "all",
         "trade_count": n, "buy_trades": buys, "sell_trades": sells,
@@ -154,7 +166,10 @@ def trade_summary(env, asset, hours=24, instrument=None, as_of=None):
         "more_contracts_bought_in": _more(cb, pb),
         "more_contracts_sold_in": _more(cs, ps),
         "calls_overall": _net_label(cb - cs, calls), "puts_overall": _net_label(pb - ps, puts),
+        "positioning_lean": _lean(_net_label(cb - cs, calls), _net_label(pb - ps, puts)),
         "premium_usd": round(float(prem)), "block_trades": blocks,
+        **({"expiries_ranked_by_trades": by_expiry,
+            "expiries_note": "top 8 expiries by trade count; others are not listed"} if by_expiry else {}),
     }
 
 
@@ -270,8 +285,18 @@ def strike_activity(env, asset, instrument, hours=24, as_of=None):
         "asset": asset, "instrument": instrument, "window_hours": hours or "all",
         "index_price": _index_price(env, instrument) if live else None,
         "strikes_traded": len(rows),
-        "note": "each list below shows at most the top 5; puts_net_sold strikes were SOLD on net, not bought",
-        "most_active_strikes": top(rows, lambda r: r["total"]),
+        "note": "each list shows at most the top 5, ranked. *_most_sold / *_most_bought = GROSS contracts sold / "
+                "bought at that strike; *_net_sold / *_net_bought = sold minus bought (net). For 'sold the most' "
+                "use the gross list unless the user asks for net. puts_net_sold strikes were SOLD on net, not bought",
+        # Gross rankings — asked "which call strikes were sold the most?",
+        # the model quoted gross sold amounts in the net list's order
+        # (2026-09-24).
+        "calls_most_sold": _ranked(calls, "sold"), "calls_most_bought": _ranked(calls, "bought"),
+        "puts_most_sold": _ranked(puts, "sold"), "puts_most_bought": _ranked(puts, "bought"),
+        # Per strike, calls + puts combined and ranked — with separate
+        # call/put rows the model summed them itself and got the order
+        # wrong ("70000: 538 first, 80000: 734.6 second", 2026-09-24).
+        "most_traded_strikes_by_volume": _ranked_strikes(rows),
         # Net lists are pre-split so the model never has to decide itself
         # whether "bought 166.5 / sold 189.9" counts as buying.
         "puts_net_bought": top([r for r in puts if r["net"] > 0], lambda r: r["net"]),
@@ -279,6 +304,21 @@ def strike_activity(env, asset, instrument, hours=24, as_of=None):
         "calls_net_bought": top([r for r in calls if r["net"] > 0], lambda r: r["net"]),
         "calls_net_sold": top([r for r in calls if r["net"] < 0], lambda r: r["net"], reverse=False),
     }
+
+
+def _ranked(rows, field, k=5):
+    top = sorted((r for r in rows if r[field] > 0), key=lambda r: r[field], reverse=True)[:k]
+    return [{"rank": i + 1, "strike": r["strike"], field: r[field]} for i, r in enumerate(top)]
+
+
+def _ranked_strikes(rows, k=5):
+    by_strike = {}
+    for r in rows:
+        agg = by_strike.setdefault(r["strike"], {"strike": r["strike"], "calls": 0.0, "puts": 0.0})
+        agg["calls" if r["type"] == "call" else "puts"] += r["total"]
+    ranked = sorted(by_strike.values(), key=lambda a: a["calls"] + a["puts"], reverse=True)[:k]
+    return [{"rank": i + 1, "strike": a["strike"], "contracts_traded": round(a["calls"] + a["puts"], 1),
+             "calls": round(a["calls"], 1), "puts": round(a["puts"], 1)} for i, a in enumerate(ranked)]
 
 
 def _gamma_snapshot(env, asset, instrument, hours, as_of):
@@ -338,7 +378,13 @@ def gamma_legs(env, asset, instrument, hours=24, as_of=None):
             "as_of_utc": as_of.strftime("%Y-%m-%d %H:%M"),
             "legend": "LC/LP/SC/SP = price where the gamma of long call / long put / short call / short put "
                       "trades peaks; dominant_leg = leg with the largest gamma; gamma is taker-signed "
-                      "(option buyers' side)."}
+                      "(option buyers' side).",
+            # Stated in the result, not only the glossary — it kept calling
+            # the dominant leg "the most active" (2026-09-24).
+            "not_in_this_data": "trade counts or activity per leg — the dominant leg has the largest gamma, which "
+                                "does NOT mean it was traded the most; do not claim which leg was most active. It also says where "
+                                "gamma is concentrated, not whether positioning is bullish or bearish (that comes from net "
+                                "buying/selling in the trade summary)"}
     if not snap:
         return {**base, "trade_count": 0, "note": "No trades in this expiry/window."}
     index_price = _index_price(env, instrument) if live else None
@@ -447,6 +493,19 @@ def _net_flow(env, asset, instrument, hours, as_of):
             "call_total": cb + cs, "put_total": pb + ps}
 
 
+def _lean(call_label, put_label):
+    """Taker positioning lean from the call/put net labels. Pre-stated:
+    asked "do traders expect a fall?", the model answered that net put
+    buying means traders expect a RISE (2026-09-24)."""
+    votes = {"net bought": 1, "net sold": -1}
+    score = votes.get(call_label, 0) - votes.get(put_label, 0)  # calls bought / puts sold = bullish
+    if score > 0:
+        return "bullish-leaning (calls net bought and/or puts net sold)"
+    if score < 0:
+        return "bearish-leaning (puts net bought and/or calls net sold) — net put buying can also be hedging"
+    return "mixed or balanced (no clear lean)"
+
+
 def _net_label(net, total):
     # Under 5% of that side's own volume counts as balanced, not a direction.
     if not total or abs(net) < 0.05 * total:
@@ -502,6 +561,9 @@ def recent_vs_total(env, asset, instrument, hours=4, as_of=None):
     return {
         **base,
         "verdict": verdict,
+        "recent_positioning_lean": _lean(sides["calls"]["recent"]["direction"], sides["puts"]["recent"]["direction"]),
+        "whole_history_positioning_lean": _lean(sides["calls"]["whole_history"]["direction"],
+                                                sides["puts"]["whole_history"]["direction"]),
         "recent_share_of_all_contracts_pct": share,
         "trade_count": {"recent": recent["trades"], "whole_history": total["trades"]},
         **sides,
@@ -521,7 +583,8 @@ def max_pain(env, asset, instrument):
     call_oi, put_oi = options.split_open_interest(oi_map, instrument)
     price, _ = options.max_pain_price(call_oi, put_oi)
     base = {"asset": asset, "instrument": instrument,
-            "basis": "current open interest (not trades), same as the Max Pain line on the chart; "
+            "basis": "current open interest = contracts still open (NOT traded volume — for traded volume per "
+                     "strike use the strike activity data), same as the Max Pain line on the chart; "
                      "open-interest history is not stored, so this is always the live value"}
     if price is None:
         return {**base, "note": "No open interest found for this expiry."}
@@ -691,23 +754,14 @@ def signal_bot(env, asset):
     }
 
 
-def next_candle_forecast(env, asset, timeframe="4h"):
-    """The Thales Next Candle Forecast engine's latest stored revision for
-    the next `timeframe` candle of the nearest expiry (the "EA1" anchor
-    the Delta Chart's Thales Forecast series is built around) — read from
-    dankbit.forecast.next_candle, never computed here."""
-    timeframe = timeframe if timeframe in ("1h", "4h", "1d") else "4h"
+def _next_candle(env, asset, timeframe):
     row = env["dankbit.forecast.next_candle"].sudo().latest_for_dashboard(asset, timeframe)
-    base = {"asset": asset, "timeframe": timeframe,
-            "basis": "the Thales Forecast engine's own stored output for the next candle — report it as the "
-                     "engine's forecast, not as your own prediction; it is revised during the current candle"}
     if not row:
-        return {**base, "note": "The engine has not produced a forecast for the next candle yet."}
+        return {"timeframe": timeframe, "note": "The engine has not produced this forecast yet."}
     span = {"1h": 1, "4h": 4, "1d": 24}[timeframe]
     o, c = row.forecast_open, row.forecast_close
     return {
-        **base,
-        "expiry": row.expiry_instrument,
+        "timeframe": timeframe,
         "candle_utc": f"{row.target_time:%Y-%m-%d %H:%M} to {row.target_time + timedelta(hours=span):%Y-%m-%d %H:%M}",
         "open": round(o), "close": round(c), "high": round(row.forecast_high), "low": round(row.forecast_low),
         "direction": "up (close above open)" if c > o else "down (close below open)" if c < o else "flat",
@@ -716,6 +770,26 @@ def next_candle_forecast(env, asset, timeframe="4h"):
         "revision": f"{row.revision} of {row.max_revisions}" + (" (final)" if row.is_final else ""),
         "computed_at_utc": f"{row.generated_at:%Y-%m-%d %H:%M}" if row.generated_at else None,
         "freshness": _forecast_freshness(row, span),
+    }
+
+
+def next_candle_forecast(env, asset):
+    """The Thales Next Candle Forecast engine's latest stored revision for
+    the NEXT 1h, 4h and 1d candle of the nearest expiry (the "EA1" anchor
+    the Delta Chart's Thales Forecast series is built around) — read from
+    dankbit.forecast.next_candle, never computed here. All three are
+    returned so a question about any horizon ("next 8 hours") gets real
+    data — asked for 8h with a 1h/4h/1d-only argument, the model refused
+    instead of answering (2026-09-24)."""
+    return {
+        "asset": asset,
+        "expiry": env["dankbit.bands"].sudo().nearest_expiry(asset),
+        "basis": "the Thales Forecast engine's own stored output — one forecast per timeframe, each for the "
+                 "NEXT candle only (the candle after the current one), revised during the current candle. "
+                 "Report it as the engine's forecast, not your own prediction. There are no forecasts for "
+                 "other horizons: for a different period, give the candles below that overlap it and state "
+                 "their exact times.",
+        "next_candles": [_next_candle(env, asset, tf) for tf in ("1h", "4h", "1d")],
     }
 
 
@@ -730,6 +804,44 @@ def _forecast_freshness(row, span):
         return "current"
     return (f"STALE: computed {age_h:.1f} hours ago; newer revisions are missing (forecast updates may be "
             "paused) — tell the user")
+
+
+def dominant_legs_by_expiry(env, asset, hours=24, as_of=None):
+    """Every active expiry's dominant gamma leg in one call, ranked by
+    gamma size — exactly the lines the /ll chart draws (same
+    main.ll_dominant_legs() the chart's /api/ll-gamma uses). Before this,
+    "which expiry has the strongest gamma?" could only check the 2 expiries
+    MAX_TOOL_CALLS allows and presented the bigger as the strongest overall
+    (2026-09-24)."""
+    from . import main as dankbit_main  # controller module; imported lazily
+    live = as_of is None
+    as_of = as_of or _now()
+    hours = _hours(hours)
+    expiries = dankbit_main.ll_dominant_legs(env, asset, _price_grid(env, asset), as_of, _window(hours, as_of),
+                                             historical=not live)
+    base = {"asset": asset, "window_hours": hours or "all", "expiries_considered": len(expiries),
+            "legend": "each expiry's dominant leg = its leg with the largest gamma (LC/LP/SC/SP = long call / "
+                      "long put / short call / short put); ranked by that gamma, largest first — the same "
+                      "lines the LL chart draws. A dominant leg shows where gamma is concentrated, not whether "
+                      "positioning is bullish or bearish, and not which leg was traded most"}
+    if not expiries:
+        return {**base, "note": "No expiry has trades in this window."}
+    index_price = _index_price(env, asset) if live else None
+    ranked = [{"rank": i + 1, "expiry": e["instrument"], "dominant_leg": e["dominant_leg"],
+               "gamma_peak_price": round(e["dominant_price"]),
+               "gamma_millions": round(e["abs_value"] / 1e6, 1),
+               "vs_index": (_relative(e["dominant_price"], index_price) or {}).get("text"),
+               # All of this expiry's trades in the window, every leg — named
+               # so it isn't read as the dominant leg's own count (it was).
+               "trades_in_this_expiry_all_legs": e["trade_count"],
+               # Pre-computed so the model never divides: "2.7 times smaller"
+               # was its own arithmetic (2026-09-24).
+               "vs_strongest": ("the strongest" if i == 0 else
+                                f"{expiries[0]['abs_value'] / e['abs_value']:.1f} times smaller than the strongest"
+                                if e["abs_value"] else None)}
+              for i, e in enumerate(expiries[:12])]
+    return {**base, "index_price": index_price, "strongest": ranked[0], "ranked_by_gamma": ranked,
+            **({"note": f"showing the top 12 of {len(expiries)}"} if len(expiries) > 12 else {})}
 
 
 # ------------------------------------------------------- tool registry
@@ -767,11 +879,15 @@ TOOL_SPECS = [
           "short put trades, the dominant leg, delta-zero prices and gamma-flip prices.",
           {"asset": _ASSET, "instrument": _INSTR, "hours": _HOURS, "at_time": _AT, "timezone": _TZ},
           ["asset", "instrument", "hours"]),
-    _spec("strike_activity", "Per-strike buying and selling for one expiry: most active strikes and which "
-          "strikes are net bought or net sold, for calls and puts.",
+    _spec("dominant_legs_by_expiry", "Every active expiry's dominant gamma leg, ranked by gamma size: which "
+          "expiry has the strongest/weakest gamma, and each expiry's dominant leg and its price (the LL chart's "
+          "lines). Use for comparing expiries or for 'all expiries'.",
+          {"asset": _ASSET, "hours": _HOURS, "at_time": _AT, "timezone": _TZ}, ["asset", "hours"]),
+    _spec("strike_activity", "Traded VOLUME per strike for one expiry: the most traded strikes (ranked) and "
+          "which strikes are net bought or net sold, for calls and puts. (Persian: حجم معاملات)",
           {"asset": _ASSET, "instrument": _INSTR, "hours": _HOURS, "at_time": _AT, "timezone": _TZ},
           ["asset", "instrument", "hours"]),
-    _spec("max_pain", "Open interest of one expiry: max pain (the strike where option buyers lose the most "
+    _spec("max_pain", "Open interest (OI, open contracts — not traded volume) of one expiry: max pain (the strike where option buyers lose the most "
           "at expiry), call/put open interest totals, and the strikes with the most open interest (OI).",
           {"asset": _ASSET, "instrument": _INSTR, "at_time": _AT, "timezone": _TZ}, ["asset", "instrument"]),
     _spec("recent_vs_total", "Is recent flow changing the book / existing positioning of one expiry? Compares "
@@ -786,9 +902,9 @@ TOOL_SPECS = [
           "اسمارت لیکوییدیتی)", {"asset": _ASSET}, ["asset"]),
     _spec("signal_bot", "The Signal Bot's latest decision: official/shadow/no trade, direction, entry, stop loss, "
           "target, risk/reward, trends and its reasons. (Persian: سیگنال بات, سیگنال)", {"asset": _ASSET}, ["asset"]),
-    _spec("next_candle_forecast", "The Thales Forecast engine's forecast for the next 1h, 4h or 1d candle: "
-          "open, close, high, low, direction and confidence. (Persian: پیش‌بینی, فورکست)",
-          {"asset": _ASSET, "timeframe": {"type": "string", "enum": ["1h", "4h", "1d"]}}, ["asset"]),
+    _spec("next_candle_forecast", "The Thales Forecast engine's forecast (use for ANY forecast question, any "
+          "horizon): the next 1h, 4h and 1d candle with open, close, high, low, direction and confidence. "
+          "(Persian: پیش‌بینی, فورکست)", {"asset": _ASSET}, ["asset"]),
     _spec("compare_windows", "How the gamma structure of one expiry changed between now and N hours ago.",
           {"asset": _ASSET, "instrument": _INSTR, "hours": _HOURS,
            "hours_ago": {"type": "integer", "description": "How many hours back to compare against"}},
@@ -800,6 +916,7 @@ TOOLS = {
     "largest_trades": largest_trades,
     "block_trades": block_trades,
     "gamma_legs": gamma_legs,
+    "dominant_legs_by_expiry": dominant_legs_by_expiry,
     "strike_activity": strike_activity,
     "compare_windows": compare_windows,
     "recent_vs_total": recent_vs_total,
@@ -810,10 +927,11 @@ TOOLS = {
 }
 # Tools whose numbers must match the chart's own lines: an unrequested
 # hours=0 ("all") from the model is replaced by the page's Window.
-CHART_WINDOW_TOOLS = {"gamma_legs", "strike_activity", "compare_windows"}
+CHART_WINDOW_TOOLS = {"gamma_legs", "strike_activity", "compare_windows", "dominant_legs_by_expiry"}
 NEEDS_INSTRUMENT = {"recent_vs_total", "gamma_legs", "strike_activity", "compare_windows", "max_pain"}
 # Tools that accept a historical `as_of` (from the model's at_time/timezone).
 AS_OF_TOOLS = {"trade_summary", "largest_trades", "block_trades", "gamma_legs", "strike_activity",
+               "dominant_legs_by_expiry",
                "recent_vs_total"}
 # `hours` is the RECENT window here, compared against all history by the
 # tool itself — never forced to "all" (that would compare history with itself).
@@ -823,11 +941,12 @@ ALLOWED_ARGS = {
     "largest_trades": {"asset", "hours", "instrument", "n", "block_only"},
     "block_trades": {"asset", "hours", "instrument", "n"},
     "gamma_legs": {"asset", "instrument", "hours"},
+    "dominant_legs_by_expiry": {"asset", "hours"},
     "strike_activity": {"asset", "instrument", "hours"},
     "compare_windows": {"asset", "instrument", "hours", "hours_ago"},
     "recent_vs_total": {"asset", "instrument", "hours"},
     "max_pain": {"asset", "instrument"},
     "zones_and_bands": {"asset"},
     "signal_bot": {"asset"},
-    "next_candle_forecast": {"asset", "timeframe"},
+    "next_candle_forecast": {"asset"},
 }

@@ -67,6 +67,63 @@ LL_MAX_EXPIRIES = 24
 LL_MAX_WINDOW_HOURS = 8760
 
 
+_LL_LEG_CODES = {"long_call": "LC", "long_put": "LP", "short_call": "SC", "short_put": "SP"}
+
+
+def ll_dominant_legs(env, asset, STs, as_of, window_start, historical=False):
+    """Each of the soonest LL_MAX_EXPIRIES expiries' own dominant leg (the
+    present leg with the largest |gamma value|, via options.per_leg_gamma())
+    over that expiry's trades in [window_start, as_of], sorted by
+    |gamma value| descending — what /ll/<asset> and /tm2/<asset> draw
+    (ll_avg_gamma_json). Also called by the chat panel (chat_tools.
+    dominant_legs_by_expiry) so its answers can't disagree with the chart.
+    `historical` switches the active-expiry lookup to
+    _distinct_expirations_asof() (expiries that had already traded as of
+    that moment)."""
+    bands_model = env["dankbit.bands"]
+    if historical:
+        expirations = bands_model._distinct_expirations_asof(asset, as_of, LL_MAX_EXPIRIES)
+    else:
+        expirations = bands_model._distinct_expirations(asset, as_of, LL_MAX_EXPIRIES)
+
+    trade_model = env["dankbit.trade"].with_context(active_test=False)
+    expiries = []
+    for exp in expirations:
+        instrument = bands_model._format_instrument(asset, exp)
+        domain = [
+            ("name", "=ilike", f"{instrument}-%"),
+            ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
+        ]
+        if window_start is not None:
+            domain.append(("deribit_ts", ">=", window_start))
+        trades = trade_model.search(domain)
+        if not trades:
+            continue
+
+        legs = options.per_leg_gamma(STs, trades)
+        present = [
+            (_LL_LEG_CODES[name], leg["gamma_price"], leg["gamma_value"])
+            for name, leg in legs.items()
+            if leg["gamma_price"] is not None
+        ]
+        if not present:
+            continue
+
+        dominant_code, dominant_price, dominant_value = max(present, key=lambda t: abs(t[2]))
+        expiries.append({
+            "instrument": instrument,
+            "expiration": int(exp.replace(tzinfo=timezone.utc).timestamp() * 1000),
+            "dominant_price": dominant_price,
+            "dominant_value": dominant_value,
+            "abs_value": abs(dominant_value),
+            "dominant_leg": dominant_code,
+            "trade_count": len(trades),
+        })
+
+    expiries.sort(key=lambda e: e["abs_value"], reverse=True)
+    return expiries
+
+
 def _auto_window_hours(dte_hours):
     """`?hours=auto` on /api/four-leg-gamma resolves to this — the
     smallest FOUR_LEG_WINDOW_HOURS_CHOICES bucket that still covers
@@ -3087,49 +3144,8 @@ class ChartController(http.Controller):
         else:
             window_start = as_of - timedelta(hours=hours)
 
-        _LEG_CODES = {"long_call": "LC", "long_put": "LP", "short_call": "SC", "short_put": "SP"}
-
-        bands_model = request.env["dankbit.bands"]
-        if as_of_override is not None:
-            expirations = bands_model._distinct_expirations_asof(asset, as_of, LL_MAX_EXPIRIES)
-        else:
-            expirations = bands_model._distinct_expirations(asset, as_of, LL_MAX_EXPIRIES)
-
-        trade_model = request.env["dankbit.trade"].with_context(active_test=False)
-        expiries = []
-        for exp in expirations:
-            instrument = bands_model._format_instrument(asset, exp)
-            domain = [
-                ("name", "=ilike", f"{instrument}-%"),
-                ("iv", "!=", 0), ("deribit_ts", "<=", as_of),
-            ]
-            if window_start is not None:
-                domain.append(("deribit_ts", ">=", window_start))
-            trades = trade_model.search(domain)
-            if not trades:
-                continue
-
-            legs = options.per_leg_gamma(STs, trades)
-            present = [
-                (_LEG_CODES[name], leg["gamma_price"], leg["gamma_value"])
-                for name, leg in legs.items()
-                if leg["gamma_price"] is not None
-            ]
-            if not present:
-                continue
-
-            dominant_code, dominant_price, dominant_value = max(present, key=lambda t: abs(t[2]))
-            expiries.append({
-                "instrument": instrument,
-                "expiration": int(exp.replace(tzinfo=timezone.utc).timestamp() * 1000),
-                "dominant_price": dominant_price,
-                "dominant_value": dominant_value,
-                "abs_value": abs(dominant_value),
-                "dominant_leg": dominant_code,
-                "trade_count": len(trades),
-            })
-
-        expiries.sort(key=lambda e: e["abs_value"], reverse=True)
+        expiries = ll_dominant_legs(request.env, asset, STs, as_of, window_start,
+                                    historical=as_of_override is not None)
 
         payload = {
             "asset": asset,

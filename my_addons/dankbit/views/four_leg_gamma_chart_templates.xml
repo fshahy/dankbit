@@ -1588,7 +1588,7 @@
 							}
 							chatSub(msg, 'chat-meta', data.model + ' · ' + data.elapsed + 's' + (data.retried ? ' · rewritten' : ''));
 							// An answer with flagged numbers never enters the follow-up history —
-							// the server treats history numbers as known, so this keeps invented
+							// a translation request treats the previous answer as its source, so this keeps invented
 							// figures from being laundered by "say that in Persian".
 							if (!(data.unverified_numbers && data.unverified_numbers.length) && !data.warning) {
 								chatHistory.push({ question: question, answer: data.answer });

@@ -27,11 +27,14 @@ Configurable via ir.config_parameter:
 import json
 import logging
 import math
+from datetime import timedelta
 import re
 import time
 from collections import Counter
 import urllib.error
 import urllib.request
+
+import pytz
 
 from odoo import http
 from odoo.http import request
@@ -69,6 +72,17 @@ _ALL_HISTORY_RE = re.compile(
     r"ignore\s+(the\s+)?(time\s+)?window|\bno\s+(time\s+)?window|without\s+(a\s+|the\s+|any\s+)?(time\s+)?window"
     r"|(whole|entire|full|all)\s+(trade\s+)?history|\ball[\s-]time\b|کل\s+تاریخچه|بدون\s+(بازه|پنجره)",
     re.IGNORECASE)
+_TOOL_CALL_TEXT_RE = re.compile(r'"arguments"\s*:|</?tool_call>|^\s*\{\s*"name"\s*:')
+
+_TIME_RANGE_RE = re.compile(
+    r"\b(?:between|from)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:and|to|until|till|-|–)\s*"
+    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b"
+    r"|از\s+(?:ساعت\s+)?(\d{1,2})(?::(\d{2}))?\s+تا\s+(?:ساعت\s+)?(\d{1,2})(?::(\d{2}))?",
+    re.IGNORECASE)
+
+_AT_MOMENT_RE = re.compile(r"\bat\s+\d{1,2}(?::\d{2}|\s*(?:am|pm|utc|berlin|tehran|o'?clock))"
+                           r"|(?:در\s+)?ساعت\s+\d{1,2}(?::\d{2})?(?!\s*تا)", re.IGNORECASE)
+
 # "since midnight" / "today" — the model turned it into hours=24.
 _SINCE_MIDNIGHT_RE = re.compile(
     r"since\s+(00:00|0:00|midnight)|\btoday\b|\bthis\s+day\b|از\s+نیمه\s*شب|امروز",
@@ -78,7 +92,7 @@ _SINCE_MIDNIGHT_RE = re.compile(
 # check to catch, so it gets the same forced re-pick.
 _NO_DATA_CLAIM_RE = re.compile(
     r"\bno\s+(\w+\s+){0,2}(trades?|data|information|records?)\b|\b(don'?t|do\s+not)\s+have\s+(any\s+)?"
-    r"(information|data|access)|\bnot\s+(found|available)\b|\bfunction\b|هیچ\s+معامله|اطلاعاتی\s+ندارم|داده‌ای\s+ندارم",
+    r"(information|data|access)|\bnot\s+(found|available|supported|provided)\b|\bfunctions?\b|\btools?\b|هیچ\s+معامله|اطلاعاتی\s+ندارم|داده‌ای\s+ندارم",
     re.IGNORECASE)
 
 # "give previous answer in Persian" / "say that in English" / "ترجمه کن" —
@@ -100,9 +114,12 @@ _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 GLOSSARY = (
     "Glossary: LC = long call (calls bought), LP = long put (puts bought), SC = short call (calls sold), "
     "SP = short put (puts sold). A leg's gamma peak price is where that leg's gamma is largest. "
-    "Dominant leg = the leg with the largest gamma. Delta zero = price where combined delta crosses zero. "
+    "Dominant leg = the leg with the largest gamma (not the leg with the most trades or activity). Delta zero = price where combined delta crosses zero. "
     "Gamma flip = price where combined taker gamma changes sign. Max pain = strike where option buyers lose the "
-    "most at expiry, from current open interest. Contracts are counted in the underlying (BTC/ETH)."
+    "most at expiry, from current open interest. Contracts are counted in the underlying (BTC/ETH). "
+    "Volume = contracts traded; open interest = contracts still open (not the same thing). "
+    "Buying puts or selling calls is bearish positioning (betting on or protecting against a fall); buying "
+    "calls or selling puts is bullish positioning. Net put buying leans bearish, though it can also be hedging."
 )
 # Only sent for Persian questions — including it on English questions made
 # qwen3:14b answer English questions in Persian (2026-09-23).
@@ -110,20 +127,41 @@ PERSIAN_TERMS = (
     "Persian terms (use exactly these): call = کال, put = پوت, buy/bought = خرید, sell/sold = فروش, "
     "long = لانگ, short = شورت, strike = استرایک, expiry = سررسید, gamma = گاما, delta = دلتا, "
     "block trade = معامله بلاک, premium = پریمیوم, trade = معامله, "
-    "contracts = قرارداد (contract amounts are قرارداد, never معامله), leg = لگ, dominant = غالب, net = خالص, zone = زون, "
-    "resistance = مقاومت, support = حمایت, gamma band = باند گاما."
+    "contracts = قرارداد (contract amounts are قرارداد, never معامله), "
+    "volume = حجم معاملات, open interest = اوپن اینترست (never call open interest حجم), leg = لگ, dominant = غالب, net = خالص, zone = زون, "
+    "resistance = مقاومت, support = حمایت, gamma band = باند گاما, gamma peak price = قیمت اوج گاما "
+    "(a price level, not a premium), long put = لانگ پوت, long call = لانگ کال, short put = شورت پوت, "
+    "short call = شورت کال."
 )
 
 
 # What the user is looking at, per page (body "page"); /4l sends none.
 PAGE_NOTES = {
     "ll": "The user is on the LL chart: one line per active expiry, at that expiry's dominant gamma leg — there "
-          "is no selected expiry; for a question needing one expiry, use the nearest unless the user names one. ",
+          "is no selected expiry. For anything comparing expiries or about 'the lines' / 'all expiries' / the "
+          "strongest expiry, use dominant_legs_by_expiry; for a question needing one expiry, use the nearest "
+          "unless the user names one. ",
     "chart": "The user is on the Delta Chart: candles plus the nearest expiry's Zones (High Zone, Low Zone, "
              "Middle Zone with SMP/BML), Bands (High/Resistance, Low/Support, Gamma Band), Smart Liquidity, the "
              "Signal Bot and the Thales Forecast candles. For those, use zones_and_bands, signal_bot or "
-             "next_candle_forecast (the forecast is the engine's output — say so). ",
+             "next_candle_forecast (for any forecast question, whatever the horizon; the forecast is the "
+             "engine's output — say so). ",
 }
+
+
+def _visible_lines(flags):
+    """/ll's checkbox states -> one prompt sentence. By default only the
+    strongest expiry's line is shown; listing all 10 expiries as "the
+    lines on the chart" didn't match what the user saw (2026-09-24)."""
+    if not isinstance(flags, dict):
+        return ""
+    shown = [label for key, label in (("strongest", "the strongest expiry's line"),
+                                      ("other_expiries", "the other expiries' lines"),
+                                      ("window_1d_2d_3d", "the 1D/2D/3D lines (the strongest reading over fixed "
+                                                          "24h/48h/72h windows)")) if flags.get(key)]
+    return ("Currently visible on the chart: " + (", ".join(shown) if shown else "no gamma lines") +
+            ". Lines not listed are hidden by the user's checkboxes — if asked about 'the lines on the chart', "
+            "describe the visible ones and say the others are hidden. ")
 
 
 def _ollama(payload):
@@ -156,7 +194,53 @@ def _unverified(answer, known_text):
     return sorted({n for n in _numbers(answer) if not ok(n)})
 
 
-def _clean_args(name, raw, ctx, instruments_for, all_history, since_midnight=False):
+def _parse_time_range(question, now=None):
+    """"between 08:00 and 10:00 UTC today" / "from 14 to 16 Berlin" /
+    "از ساعت ۸ تا ۱۰" -> (start, end) as naive UTC, end capped at now, or
+    None. Parsed here, not by the model: asked for 08:00-10:00 UTC it sent
+    at_time=08:00, hours=8 and presented 00:00-08:00 data as 08:00-10:00
+    (2026-09-24). Timezone from the question (Berlin/Tehran, else UTC);
+    date from an explicit YYYY-MM-DD, "yesterday"/"دیروز", else today in
+    that timezone. A range ending before it starts crosses midnight."""
+    text = question.translate(_DIGITS)
+    m = _TIME_RANGE_RE.search(text)
+    if not m:
+        return None
+    h1, m1, ap1, h2, m2, ap2 = (m.group(i) for i in range(1, 7))
+    if h1 is None:  # the Persian alternative
+        h1, m1, h2, m2 = m.group(7), m.group(8), m.group(9), m.group(10)
+    # Only a clear time range — not "between 5 and 10 trades".
+    if not (m1 or m2 or ap1 or ap2 or re.search(r"utc|gmt|berlin|tehran|o'?clock|ساعت|برلین|تهران", text, re.I)):
+        return None
+
+    def hm(h, mi, ap):
+        h, mi = int(h), int(mi or 0)
+        if ap:
+            h = h % 12 + (12 if ap.lower() == "pm" else 0)
+        return (h, mi) if h < 24 and mi < 60 else None
+
+    t1, t2 = hm(h1, m1, ap1 or ap2), hm(h2, m2, ap2)
+    if not t1 or not t2:
+        return None
+    tz = ("Berlin" if re.search(r"berlin|برلین", text, re.I)
+          else "Tehran" if re.search(r"tehran|تهران", text, re.I) else "UTC")
+    now = now or chat_tools._now()
+    local_now = pytz.utc.localize(now).astimezone(pytz.timezone(chat_tools.TIMEZONES[tz]))
+    date_m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+    day = (date_m.group(1) if date_m else
+           (local_now - timedelta(days=1)).strftime("%Y-%m-%d") if re.search(r"yesterday|دیروز", text, re.I)
+           else local_now.strftime("%Y-%m-%d"))
+    start = chat_tools.parse_at(f"{day} {t1[0]:02d}:{t1[1]:02d}", tz)
+    end = chat_tools.parse_at(f"{day} {t2[0]:02d}:{t2[1]:02d}", tz)
+    if not start or not end:
+        return None
+    if end <= start:
+        start -= timedelta(days=1)
+    end = min(end, now)
+    return (start, end) if start < end else None
+
+
+def _clean_args(name, raw, ctx, instruments_for, all_history, since_midnight=False, time_range=None):
     """Returns (args, time_note). time_note is set when the model asked for
     a past moment this tool can't serve, so the result says so."""
     raw = raw or {}
@@ -177,16 +261,30 @@ def _clean_args(name, raw, ctx, instruments_for, all_history, since_midnight=Fal
         elif as_of >= chat_tools._now():
             as_of = None  # "now" or the future — just live data
 
+    if time_range and name in chat_tools.AS_OF_TOOLS and "hours" in allowed:
+        # The range ends at as_of (None = up to now, i.e. live data).
+        start, end = time_range
+        as_of, time_note = (end if end < chat_tools._now() - timedelta(minutes=1) else None), None
+
     instruments = instruments_for(asset, as_of)
     inst = str(args.get("instrument") or "").upper()
     if inst and inst not in instruments:
-        inst = ""  # invented/expired/other-asset instrument — fall back below
+        # Invented/expired/other-asset instrument — fall back below, and
+        # say so: asked about BTC-31DEC27, it silently answered for the
+        # nearest expiry (2026-09-24).
+        time_note = ((time_note + " ") if time_note else "") + (
+            f"The user asked about {inst}, which is not an active {asset} expiry. Say that clearly first, "
+            "then give the data below, naming the expiry it is actually for.")
+        inst = ""
     if name in chat_tools.NEEDS_INSTRUMENT:
         page = ctx["instrument"] if ctx["instrument"] in instruments else None
         inst = inst or page or (instruments[0] if instruments else "")
     if "instrument" in allowed:  # zones_and_bands / signal_bot take none
         args["instrument"] = inst or None
-    if since_midnight and "hours" in allowed and not all_history:
+    if time_range and name in chat_tools.AS_OF_TOOLS and "hours" in allowed:
+        start, end = time_range
+        args["hours"] = max(1, math.ceil((end - start).total_seconds() / 3600))
+    elif since_midnight and "hours" in allowed and not all_history:
         # "since midnight" / "today": hours since 00:00 UTC of the moment
         # asked about — the model sent 24 at 11:00 UTC (2026-09-24).
         moment = as_of or chat_tools._now()
@@ -218,7 +316,8 @@ def _system_prompt(ctx, instruments, persian):
         "You are Dankbit's assistant for Deribit options trade data. "
         "Use the tools to fetch data; never guess data. When you answer, use ONLY numbers that appear in the "
         "tool results. Do not calculate new numbers. Do not give trading advice or make your own predictions; describe the data (a forecast engine's stored output is data — report it as that engine's forecast). "
-        "Do not add conclusions the results do not state. Say which expiry the data covers (or all expiries). "
+        "Do not add conclusions the results do not state. If the data does not match the exact period or item "
+        "asked, give the closest data you have and say exactly what it covers — do not just refuse. Say which expiry the data covers (or all expiries). "
         "Be concise: at most 6 short sentences or bullets. Times are UTC. "
         "Never mention tool or function names to the user. "
         f"{GLOSSARY} {PERSIAN_TERMS if persian else ''} "
@@ -232,6 +331,7 @@ def _system_prompt(ctx, instruments, persian):
         f"now={ctx['now']} UTC = {ctx['now_berlin']} Berlin. "
         + "".join(f"Active {a} expiries, soonest first: {', '.join(lst[:12])}. " for a, lst in instruments.items())
         + PAGE_NOTES.get(ctx.get("page"), "")
+        + (ctx.get("visible_lines") or "")
         + 
         f"{_language_rule(persian)}"
     )
@@ -277,6 +377,19 @@ NO_DATA_EN = ("I couldn't fetch data for that question, so I won't guess numbers
 NO_DATA_FA = "نتوانستم داده‌ای برای این سؤال دریافت کنم و عدد حدسی نمی‌دهم. لطفاً سؤال را دقیق‌تر بپرسید (مثلاً سررسید یا بازه زمانی)."
 
 
+# "should I buy puts?" / "is it a good time to short?" / "بخرم؟"
+_ADVICE_RE = re.compile(
+    r"\bshould\s+i\s+(buy|sell|long|short|enter|exit|close|hold|open|trade)\b"
+    r"|\b(is\s+it|good)\s+(a\s+)?(good\s+)?time\s+to\s+(buy|sell|long|short)\b"
+    r"|\bwhat\s+should\s+i\s+(buy|sell|trade|do)\b|\b(do|would)\s+you\s+recommend\b"
+    r"|بخرم|بفروشم|لانگ\s+بگیرم|شورت\s+بگیرم|توصیه\s+(می\s*کنی|میکنی)|پیشنهاد\s+(می\s*دهی|میدی)",
+    re.IGNORECASE)
+ADVICE_EN = ("I don't give trading advice. I can show the data behind a decision — for example put buying and "
+             "selling, the dominant gamma leg, max pain, the zones, or the Signal Bot's recorded decision.")
+ADVICE_FA = ("من توصیه معاملاتی نمی‌دهم. می‌توانم داده‌های پشت یک تصمیم را نشان دهم — مثلاً خرید و فروش پوت، "
+             "لگ غالب گاما، ماکس پین، زون‌ها، یا تصمیم ثبت‌شده سیگنال بات.")
+
+
 class DankbitChat(http.Controller):
 
     @http.route("/api/chat/<string:asset>", type="http", auth="user", methods=["POST"], website=False, csrf=False)
@@ -319,21 +432,26 @@ class DankbitChat(http.Controller):
             # A page-supplied label for the window, e.g. "since 00:00 UTC"
             # on the Delta Chart, where `hours` is only its current length.
             "window_label": str(body.get("window_label") or "")[:40],
+            "visible_lines": _visible_lines(body.get("visible_lines")) if page == "ll" else None,
+            "visible_flags": body.get("visible_lines") if page == "ll" and isinstance(body.get("visible_lines"), dict)
+                             else None,
             "now": stamp["data_as_of_utc"],
             "now_berlin": stamp["data_as_of_berlin"],
         }
         persian = _wants_persian(question)
         all_history = bool(_ALL_HISTORY_RE.search(question))
-        since_midnight = bool(_SINCE_MIDNIGHT_RE.search(question))
+        # "at 10:00 UTC today" names a moment — "today" is only its date, so
+        # the window stays the page's (it had become since-midnight = 10h).
+        since_midnight = bool(_SINCE_MIDNIGHT_RE.search(question)) and not _AT_MOMENT_RE.search(
+            question.translate(_DIGITS))
+        time_range = _parse_time_range(question)
         all_instruments = {a: instruments_for(a) for a in chat_tools.ASSETS}
 
         messages = [{"role": "system", "content": _system_prompt(ctx, all_instruments, persian)}]
-        history_text = ""  # prior answers' numbers count as known (e.g. "say that in Persian")
         for turn in (body.get("history") or [])[-MAX_HISTORY_TURNS:]:
             q, a = str(turn.get("question") or "")[:MAX_QUESTION_CHARS], str(turn.get("answer") or "")[:2000]
             if q and a:
                 messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
-                history_text += " " + a
         messages.append({"role": "user", "content": question})
 
         log = {"asset": asset, "instrument": ctx["instrument"], "window_hours": str(ctx["hours"]),
@@ -345,7 +463,12 @@ class DankbitChat(http.Controller):
             _ASK_PERSIAN_RE.search(question) or _ASK_ENGLISH_RE.search(question)
             or _TRANSLATE_WORD_RE.search(question)))
         try:
-            if translate:
+            if _ADVICE_RE.search(question):
+                # Answered without the model: asked "should I buy puts now?" it
+                # fetched the Signal Bot, called its decision a "recommendation",
+                # and took 234 s (2026-09-24).
+                answer, model = (ADVICE_FA if persian else ADVICE_EN), "fixed reply"
+            elif translate:
                 answer, model, problems, retried = _translate(last_answer, persian)
                 if problems:
                     discarded = "translation check: " + "; ".join(problems)
@@ -365,7 +488,11 @@ class DankbitChat(http.Controller):
                     # question and inventing every figure (2026-09-23), so an unbacked answer
                     # gets one forced re-pick and is never shown as-is.
                     answer = (msg.get("content") or "").strip()
-                    unverified = _unverified(answer, json.dumps(ctx) + question + " ".join(instruments) + history_text)
+                    # Earlier answers' numbers don't count here: "where is smart
+                    # liquidity?" was answered tool-less with the previous answer's
+                    # Gamma Band value (2026-09-24). A genuine rephrase is handled by
+                    # the translation path; any other follow-up re-fetches its data.
+                    unverified = _unverified(answer, json.dumps(ctx) + question + " ".join(instruments))
                     no_data_claim = bool(_NO_DATA_CLAIM_RE.search(answer))
                     if unverified or no_data_claim or all_history:
                         retried = True
@@ -394,7 +521,7 @@ class DankbitChat(http.Controller):
                                 raw = json.loads(raw)
                             except ValueError:
                                 raw = {}
-                        args, time_note = _clean_args(name, raw, ctx, instruments_for, all_history, since_midnight)
+                        args, time_note = _clean_args(name, raw, ctx, instruments_for, all_history, since_midnight, time_range)
                         try:
                             result = chat_tools.TOOLS[name](env, **args)
                         except Exception as e:
@@ -404,7 +531,22 @@ class DankbitChat(http.Controller):
                             result = {**chat_tools.as_of_stamp(args.get("as_of")), **result}
                         if time_note:
                             result = {"time_note": time_note, **result}
-                        if since_midnight and "hours" in args and not all_history:
+                        flags = ctx.get("visible_flags")
+                        if flags and name == "dominant_legs_by_expiry" and result.get("ranked_by_gamma"):
+                            # Marked per row — the prompt sentence alone was ignored and
+                            # all 10 expiries were listed as "the lines on the chart".
+                            for row in result["ranked_by_gamma"]:
+                                row["shown_on_chart"] = bool(flags.get("strongest") if row["rank"] == 1
+                                                             else flags.get("other_expiries"))
+                            result = {"chart_note": "shown_on_chart says whether that expiry's line is visible "
+                                                    "on the user's chart right now (the rest are hidden by "
+                                                    "checkboxes)", **result}
+                        if time_range and name in chat_tools.AS_OF_TOOLS and "hours" in args:
+                            start, end = time_range
+                            result = {"window": f"{start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M} UTC "
+                                                "(the time range asked, counted in whole hours ending at the "
+                                                "end time)", **result}
+                        elif since_midnight and "hours" in args and not all_history:
                             # Else it reports "the past 11 hours" for "today".
                             result = {"window": "since 00:00 UTC today", **result}
                         args = {k: (v.strftime("%Y-%m-%d %H:%M") if k == "as_of" else v) for k, v in args.items()}
@@ -419,6 +561,19 @@ class DankbitChat(http.Controller):
                     messages.append({"role": "system", "content": _language_rule(persian)})
                     resp, model = _ollama({"messages": messages})
                     answer = ((resp.get("message") or {}).get("content") or "").strip()
+
+                    # The model sometimes writes a tool call as plain text instead of
+                    # an answer (seen when a tool returned an error, 2026-09-24).
+                    if _TOOL_CALL_TEXT_RE.search(answer):
+                        retried = True
+                        resp, model = _ollama({"messages": messages + [
+                            {"role": "assistant", "content": answer},
+                            {"role": "user", "content": "Do not call tools. Write the answer in plain text from the "
+                                                        "results above. " + _language_rule(persian)}]})
+                        answer = ((resp.get("message") or {}).get("content") or "").strip()
+                        if not answer or _TOOL_CALL_TEXT_RE.search(answer):
+                            discarded = "answer was tool-call text"
+                            answer = NO_DATA_FA if persian else NO_DATA_EN
 
                     # 5. number check (+ one rewrite)
                     known = json.dumps([c["result"] for c in calls_made], default=str) + json.dumps(ctx) + question
