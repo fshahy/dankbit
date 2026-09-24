@@ -471,6 +471,34 @@ def per_leg_gamma(STs, trades, r=0.0):
     return result
 
 
+def split_open_interest(oi_map, instrument):
+    """Splits dankbit.trade.get_open_interest_by_currency()'s
+    {full_instrument_name: open_interest} map down to one expiry's own
+    ({strike: call_oi}, {strike: put_oi}) — the input max_pain_price()
+    expects. Same anchored left-prefix match every other instrument
+    lookup in this addon uses (f"{instrument}-" — oi_map's keys span every
+    expiry for the asset, so this can't pull in another expiry's
+    strikes). Shared by four_leg_gamma_json (main.py) and the chat
+    panel's max_pain tool (chat_tools.py) so the two can't disagree."""
+    prefix = f"{instrument}-"
+    call_oi, put_oi = {}, {}
+    for oi_instrument, oi in (oi_map or {}).items():
+        if not oi or not oi_instrument.startswith(prefix):
+            continue
+        parts = oi_instrument.split("-")
+        if len(parts) != 4:
+            continue
+        try:
+            strike = int(parts[2])
+        except ValueError:
+            continue
+        if parts[3] == "C":
+            call_oi[strike] = call_oi.get(strike, 0.0) + oi
+        elif parts[3] == "P":
+            put_oi[strike] = put_oi.get(strike, 0.0) + oi
+    return call_oi, put_oi
+
+
 def max_pain_price(call_oi, put_oi):
     """Standard "Max Pain" computation for a single expiry: the strike at
     which the aggregate intrinsic-value payout option WRITERS would owe

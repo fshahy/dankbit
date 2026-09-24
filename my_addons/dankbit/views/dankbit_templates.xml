@@ -448,6 +448,44 @@
 					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
+					/* Chat panel — asks the local Ollama model about trades
+					   via POST /api/chat/ASSET (controllers/chat.py). */
+					#chat-panel {
+						position: fixed; right: 12px; bottom: 40px; z-index: 30;
+						width: 400px; max-width: calc(100vw - 24px); height: 60vh;
+						display: none; flex-direction: column;
+						font-family: monospace; font-size: 10.5pt; color: #333;
+						background: rgba(255,255,255,0.97); border: 1px solid #ccc;
+						border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+					}
+					#chat-panel.open { display: flex; }
+					#chat-header {
+						display: flex; justify-content: space-between; align-items: center;
+						padding: 6px 10px; border-bottom: 1px solid #ddd; font-weight: bold;
+						cursor: move; user-select: none; touch-action: none;
+					}
+					#chat-header .chat-sub { font-weight: normal; color: #888; font-size: 9pt; }
+					#chat-close { cursor: pointer; color: #888; }
+					#chat-close:hover { color: #c00; }
+					#chat-messages { flex: 1; overflow-y: auto; padding: 8px 10px; }
+					.chat-msg { margin-bottom: 10px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.4; }
+					.chat-msg.user { color: #1565c0; }
+					.chat-msg.user::before { content: "› "; }
+					.chat-msg.error { color: #c62828; }
+					.chat-meta { font-size: 8.5pt; color: #999; margin-top: 2px; }
+					.chat-warn { font-size: 9pt; color: #e65100; margin-top: 2px; }
+					.chat-msg details { font-size: 8.5pt; color: #777; margin-top: 2px; white-space: normal; }
+					.chat-msg details pre { white-space: pre-wrap; max-height: 200px; overflow: auto; margin: 4px 0; }
+					#chat-status { padding: 0 10px; font-size: 9pt; color: #888; min-height: 16px; }
+					#chat-form { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid #ddd; }
+					#chat-input {
+						flex: 1; resize: none; height: 44px; font-family: monospace; font-size: 10.5pt;
+						border: 1px solid #ccc; border-radius: 4px; padding: 4px 6px;
+					}
+					body.dark #chat-panel { background: rgba(20,20,20,0.97); color: #ddd; border-color: #555; }
+					body.dark #chat-header, body.dark #chat-form { border-color: #444; }
+					body.dark .chat-msg.user { color: #64b5f6; }
+					body.dark #chat-input { background: #111; color: #ddd; border-color: #555; }
 				</style>
 			</head>
 			<body>
@@ -542,6 +580,19 @@
 					</t>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
+					<button class="tf-btn" id="chat-btn" onclick="toggleChat()" title="Ask questions about trades (local AI model)">Dankbit AI</button>
+				</div>
+				<div id="chat-panel">
+					<div id="chat-header">
+						<span>Ask Dankbit AI <span class="chat-sub">local model · nearest expiry · uses Option Flow window</span></span>
+						<span id="chat-close" onclick="toggleChat()">&#10005;</span>
+					</div>
+					<div id="chat-messages"/>
+					<div id="chat-status"/>
+					<div id="chat-form">
+						<textarea id="chat-input" dir="auto" placeholder="e.g. What were the biggest trades in the last 4 hours?"/>
+						<button class="tf-btn" id="chat-send" onclick="sendChat()">Send</button>
+					</div>
 				</div>
 				<div id="ruler-info"/>
 				<div id="context-menu">
@@ -3081,6 +3132,184 @@
 					setInterval(() => safeRefresh('Zones', refreshZonesBoxes), ZONES_BOX_REFRESH);
 					setInterval(() => safeRefresh('Forecast', refreshForecast), REFRESH);
 					setInterval(() => safeRefresh('Signal Bot', refreshSignalBot), REFRESH);
+				//]]></script>
+				<script>//<![CDATA[
+					// ---- Chat panel (POST /api/chat/<asset>, controllers/chat.py) ----
+					// Same panel as /4l/<asset>'s and /ll/<asset>'s. Sends the nearest
+					// expiry (the one the Zones boxes use) and the Option Flow window
+					// (chatWindowHours()) as context plus the
+					// last 2 Q/A turns for follow-ups. One request at a time —
+					// answers take ~30-60 s on the local model, so an elapsed-time
+					// counter shows while waiting. Answers are rendered with
+					// textContent (never innerHTML).
+					const chatHistory = [];
+					let chatBusy = false;
+
+					// Option Flow window as whole hours for the chat context:
+					// "00:00 UTC" -> hours since UTC midnight (rounded up, min 1),
+					// "Auto" -> what the server resolved for the zones boxes
+					// (zonesBoxAutoHours, 24 until it's known), else the
+					// selected trailing window.
+					function chatWindowHours() {
+						if (ZONES_BOX_WINDOW_MODE === 'midnight') {
+							const now = new Date();
+							const since = now.getTime() - Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+							return Math.max(1, Math.ceil(since / 3600000));
+						}
+						if (ZONES_BOX_WINDOW_MODE === 'auto') return zonesBoxAutoHours || 24;
+						return selectedOptionFlowHours() || 24;
+					}
+
+					function toggleChat() {
+						const panel = document.getElementById('chat-panel');
+						panel.classList.toggle('open');
+						if (panel.classList.contains('open')) {
+							clampChatPanel();
+							document.getElementById('chat-input').focus();
+						}
+					}
+
+					// Draggable by its header. Once moved, the panel is
+					// positioned by left/top (instead of the default right/
+					// bottom corner), kept fully on screen, and the position is
+					// remembered per-browser (dankbit_chart_chat_pos).
+					const CHAT_POS_KEY = 'dankbit_chart_chat_pos';
+					function placeChatPanel(left, top) {
+						const panel = document.getElementById('chat-panel');
+						const maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth);
+						const maxTop = Math.max(0, window.innerHeight - panel.offsetHeight);
+						panel.style.left = Math.min(Math.max(0, left), maxLeft) + 'px';
+						panel.style.top = Math.min(Math.max(0, top), maxTop) + 'px';
+						panel.style.right = 'auto';
+						panel.style.bottom = 'auto';
+					}
+					function clampChatPanel() {
+						const panel = document.getElementById('chat-panel');
+						if (panel.style.left) placeChatPanel(parseFloat(panel.style.left), parseFloat(panel.style.top));
+					}
+					(function initChatDrag() {
+						const panel = document.getElementById('chat-panel');
+						const header = document.getElementById('chat-header');
+						try {
+							const saved = JSON.parse(localStorage.getItem(CHAT_POS_KEY) || 'null');
+							if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+								panel.style.left = saved.left + 'px';
+								panel.style.top = saved.top + 'px';
+								panel.style.right = 'auto';
+								panel.style.bottom = 'auto';
+							}
+						} catch (e) { /* storage unavailable — keep default corner */ }
+						let drag = null;
+						header.addEventListener('pointerdown', (e) => {
+							if (e.target.id === 'chat-close' || e.button !== 0) return;
+							const rect = panel.getBoundingClientRect();
+							drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+							header.setPointerCapture(e.pointerId);
+							e.preventDefault();
+						});
+						header.addEventListener('pointermove', (e) => {
+							if (drag) placeChatPanel(e.clientX - drag.dx, e.clientY - drag.dy);
+						});
+						const endDrag = () => {
+							if (!drag) return;
+							drag = null;
+							try {
+								localStorage.setItem(CHAT_POS_KEY, JSON.stringify({
+									left: parseFloat(panel.style.left), top: parseFloat(panel.style.top),
+								}));
+							} catch (e) { /* ignore */ }
+						};
+						header.addEventListener('pointerup', endDrag);
+						header.addEventListener('pointercancel', endDrag);
+						window.addEventListener('resize', clampChatPanel);
+					})();
+
+					function chatAppend(cls, text) {
+						const box = document.getElementById('chat-messages');
+						const div = document.createElement('div');
+						div.className = 'chat-msg ' + cls;
+						div.dir = 'auto';
+						div.textContent = text;
+						box.appendChild(div);
+						box.scrollTop = box.scrollHeight;
+						return div;
+					}
+
+					function chatSub(parent, cls, text) {
+						const d = document.createElement('div');
+						d.className = cls;
+						d.textContent = text;
+						parent.appendChild(d);
+						return d;
+					}
+
+					async function sendChat() {
+						const input = document.getElementById('chat-input');
+						const question = input.value.trim();
+						if (!question || chatBusy) return;
+						chatBusy = true;
+						input.value = '';
+						document.getElementById('chat-send').disabled = true;
+						chatAppend('user', question);
+						const status = document.getElementById('chat-status');
+						const started = Date.now();
+						const tick = setInterval(() => {
+							status.textContent = 'Thinking… ' + Math.round((Date.now() - started) / 1000) + 's';
+						}, 1000);
+						status.textContent = 'Thinking… 0s';
+						try {
+							const resp = await fetch('/api/chat/' + ASSET, {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({
+									question: question,
+									page: 'chart',
+									instrument: nearestExpiryStr,
+									hours: chatWindowHours(),
+									window_label: ZONES_BOX_WINDOW_MODE === 'midnight' ? 'since 00:00 UTC' : '',
+									history: chatHistory.slice(-2),
+								}),
+							});
+							const data = await resp.json().catch(() => ({ error: 'HTTP ' + resp.status }));
+							if (!resp.ok || data.error) throw new Error(data.error || ('HTTP ' + resp.status));
+							const msg = chatAppend('bot', data.answer);
+							if (data.unverified_numbers && data.unverified_numbers.length) {
+								chatSub(msg, 'chat-warn', '⚠ Not found in the data: ' + data.unverified_numbers.join(', ') + ' — double-check these.');
+							}
+							if (data.warning) {
+								chatSub(msg, 'chat-warn', '⚠ ' + data.warning);
+							}
+							if (data.tools && data.tools.length) {
+								const det = document.createElement('details');
+								const sum = document.createElement('summary');
+								sum.textContent = 'Data used: ' + data.tools.map(t => t.name).join(', ');
+								const pre = document.createElement('pre');
+								pre.textContent = JSON.stringify(data.tools, null, 1);
+								det.appendChild(sum);
+								det.appendChild(pre);
+								msg.appendChild(det);
+							}
+							chatSub(msg, 'chat-meta', data.model + ' · ' + data.elapsed + 's' + (data.retried ? ' · rewritten' : ''));
+							// An answer with flagged numbers never enters the follow-up history —
+							// the server treats history numbers as known, so this keeps invented
+							// figures from being laundered by "say that in Persian".
+							if (!(data.unverified_numbers && data.unverified_numbers.length) && !data.warning) {
+								chatHistory.push({ question: question, answer: data.answer });
+							}
+						} catch (e) {
+							chatAppend('error', 'Error: ' + e.message);
+						} finally {
+							clearInterval(tick);
+							status.textContent = '';
+							chatBusy = false;
+							document.getElementById('chat-send').disabled = false;
+							document.getElementById('chat-messages').scrollTop = 1e9;
+						}
+					}
+
+					document.getElementById('chat-input').addEventListener('keydown', (e) => {
+						if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+					});
 				//]]></script>
 			</body>
 		</html>

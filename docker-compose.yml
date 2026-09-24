@@ -8,6 +8,10 @@ services:
       - db
     ports:
       - "8069:8069"
+    # Lets the /4l chat panel (controllers/chat.py) reach the host's Ollama
+    # at http://host.docker.internal:11434 (dankbit.chat_ollama_url).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Persist the full Odoo Odoo data directory (includes filestore and meta)
       # Use a named volume for durability across restarts and rebuilds.

@@ -6,25 +6,32 @@
 	     page for a while, then moved
 	     back onto /4l per a later request and re-synced to /4l's current
 	     state): same Coinbase-spot candle source, same 4-gamma-leg
-	     (BCG/BPG/SCG/SPG) + dashed AVG line rendering (AVG color
-	     user-recolorable via chartColors.avg / the color-avg picker, default
-	     violet #8e24aa — was dominant-leg-derived until product decision
-	     (2026-09-07) restored a picker, matching /4l; AVG label keeps its
-	     $<price>, unlike /4l; no combined SC/SP magnitude suffix), a
-	     light-violet dotted "N+1 AVG" line (Nearest+1 expiry's own present-leg
-	     gamma-price average, over the page's selected Window/As-Of — ported
-	     from /4l per product decision (2026-09-07); user-recolorable via
-	     chartColors.n1avg / color-n1avg, default #ce93d8, same as /4l), same
-	     Timeframe/Expiry/Window/Theme/Window Line/Gamma Legs/AVG/N+1 AVG/
-	     Ruler/Settings controls ("Gamma Legs" unchecked, "AVG"/"N+1 AVG"
-	     checked by default — all three ported from /4l per the same
-	     product decision), same
+	     (BCG/BPG/SCG/SPG) line rendering (no combined SC/SP magnitude
+	     suffix), a solid violet "Dominant Leg" line at the price of the
+	     present leg with the largest |gamma value| (label "DOM <leg> |
+	     <value>", color-dominant picker — ported from /4l per product
+	     decision (2026-09-23), which also removed this page's former AVG
+	     line/checkbox/picker, matching /4l), dotted
+	     green "Δ0" lines at every price where the combined portfolio delta
+	     of the selected Expiry/Window's trades crosses zero (the endpoint's
+	     own delta_zero_prices, measured as of AS_OF_ISO — ported from /4l
+	     per product decision (2026-09-23), "Delta 0" checkbox checked by
+	     default, color-deltazero picker; plus a small sign box when it never
+	     crosses zero), dotted violet "γ flip" lines at every price where
+	     the combined portfolio gamma crosses zero, each labeled with which
+	     side is +/− gamma (latest.gamma_flips, "Gamma Flip" checkbox checked
+	     by default, color-gammaflip picker — ported from /4l 2026-09-23), same
+	     Timeframe/Expiry/Window/Theme/Window Line/Gamma Legs/Dominant Leg/
+	     Delta 0/Gamma Flip/Ruler/Settings controls ("Gamma Legs" unchecked,
+	     "Dominant Leg"/"Delta 0"/"Gamma Flip" checked by default). A light-violet dotted "N+1 AVG" line (Nearest+1
+	     expiry's own AVG, ported from /4l 2026-09-07) was removed along
+	     with /4l's own per product decision (2026-09-23). Same
 	     per-instrument-ISOLATED 4-leg
 	     computation, and the same single vertical Window reference line +
 	     label. Like /4l it has an "Expiry" dropdown (dynamically loaded from
 	     /api/expiries/<asset>); its "Window"
-	     dropdown mirrors /4l's own (1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/All,
-	     4h default — 12h/16h added per product decision (2026-09-07)). NOT carried over from
+	     dropdown mirrors /4l's own (1h/4h/8h/24h/48h/72h/All, 24h default —
+	     synced per product decision (2026-09-23)). NOT carried over from
 	     /4l: the "Refresh Lines" button and
 	     the "Last trade:" footer — a frozen As-Of view has nothing to force
 	     a re-fetch of (changing As Of / Timeframe / Expiry / Window is
@@ -115,6 +122,17 @@
 						font-family: monospace; font-size: 11pt;
 						color: #555; padding: 0 2px;
 					}
+					/* "Delta 0" sign box — same as /4l's own: shown only
+					   when the combined delta curve never crosses zero (no Δ0
+					   line to draw), stating which side of zero it stays on.
+					   Bottom-left, just above #status. Text color set inline. */
+					#delta-sign-box {
+						position: fixed; bottom: 60px; left: 12px;
+						font-family: monospace; font-size: 11pt; font-weight: bold;
+						background: rgba(255,255,255,0.92);
+						padding: 3px 10px; border-radius: 4px; border: 1px solid #ccc;
+						z-index: 10; pointer-events: none; display: none;
+					}
 					#ruler-info {
 						position: fixed; top: calc(var(--tf-bar-bottom, 36px) + 4px); left: 12px;
 						font-family: monospace; font-size: 12pt; font-weight: bold;
@@ -190,6 +208,7 @@
 					body.dark, body.dark html { background: #000000; }
 					body.dark #status { color: #ccc; background: rgba(0,0,0,0.75); }
 					body.dark .tf-label { color: #ccc; }
+					body.dark #delta-sign-box { background: rgba(0,0,0,0.85); border-color: #555; }
 					body.dark #ruler-info { color: #eee; background: rgba(0,0,0,0.85); border-color: #555; }
 					body.dark #exchange-label { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
 					body.dark .tf-btn { color: #ccc; background: rgba(0,0,0,0.75); border-color: #555; }
@@ -284,16 +303,11 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="1">1h</option>
-						<option value="2">2h</option>
-						<option value="3">3h</option>
-						<option value="4" selected="selected">4h</option>
-						<option value="5">5h</option>
-						<option value="6">6h</option>
-						<option value="7">7h</option>
+						<option value="4">4h</option>
 						<option value="8">8h</option>
-						<option value="12">12h</option>
-						<option value="16">16h</option>
-						<option value="24">24h</option>
+						<option value="24" selected="selected">24h</option>
+						<option value="48">48h</option>
+						<option value="72">72h</option>
 						<option value="all">All</option>
 					</select>
 					<span class="tf-label">Theme:</span>
@@ -310,17 +324,22 @@
 						Gamma Legs
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="avg-toggle" checked="checked" onchange="onToggleAvg()"/>
-						AVG
+						<input type="checkbox" id="dominant-leg-toggle" checked="checked" onchange="onToggleDominantLeg()"/>
+						Dominant Leg
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="n1avg-toggle" checked="checked" onchange="onToggleN1Avg()"/>
-						N+1 AVG
+						<input type="checkbox" id="delta-zero-toggle" checked="checked" onchange="onToggleDeltaZero()"/>
+						Delta 0
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="gamma-flip-toggle" checked="checked" onchange="onToggleGammaFlip()"/>
+						Gamma Flip
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
+				<div id="delta-sign-box"/>
 				<div id="context-menu">
 					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
 				</div>
@@ -336,8 +355,9 @@
 							<label class="color-row">Long Put (LP) <input type="color" id="color-bpg"/></label>
 							<label class="color-row">Short Call (SC) <input type="color" id="color-scg"/></label>
 							<label class="color-row">Short Put (SP) <input type="color" id="color-spg"/></label>
-							<label class="color-row">Average (AVG) <input type="color" id="color-avg"/></label>
-							<label class="color-row">Nearest+1 Average (N+1 AVG) <input type="color" id="color-n1avg"/></label>
+							<label class="color-row">Dominant Leg (DOM) <input type="color" id="color-dominant"/></label>
+							<label class="color-row">Delta = 0 (Δ0) <input type="color" id="color-deltazero"/></label>
+							<label class="color-row">Gamma Flip (γ flip) <input type="color" id="color-gammaflip"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -503,34 +523,22 @@
 					// "Window" dropdown — trailing-hours trade window ending at
 					// AS_OF_ISO (not "now"), fed into the selected expiry's
 					// trades. Mirrors /4l/<asset>'s own option set
-					// (1h/2h/3h/4h/5h/6h/7h/8h/12h/16h/24h/All, 4h default —
-					// 12h/16h added per product decision (2026-09-07)).
+					// (1h/4h/8h/24h/48h/72h/All, 24h default — synced with
+					// /4l's own set and default per product decision
+					// (2026-09-23); /tm previously kept its own 4h default).
 					// 'all' skips the trailing-hours filter entirely; a number
 					// otherwise. (A "00:00 UTC" and an "Auto (Time to Expiry)"
 					// option were both offered here at various points — the
 					// server-side ?hours=midnight/?hours=auto resolutions are
 					// unchanged and still reachable by a direct API call, just
 					// no longer in this dropdown.)
-					let WINDOW_HOURS = 4;
+					let WINDOW_HOURS = 24;
 					// If ?hours=auto is ever driven in (not from this dropdown
 					// any more), this holds the numeric hours the server
 					// resolved it to; null otherwise.
 					let autoResolvedHours = null;
 					const fourLegGammaUrl = () =>
 						'/api/four-leg-gamma/' + ASSET + '?instrument=' + SELECTED_INSTRUMENT + '&hours=' + WINDOW_HOURS
-						+ '&as_of=' + encodeURIComponent(AS_OF_ISO);
-
-					// "N+1 AVG" line — same present-leg-only average of
-					// BCG/BPG/SCG/SPG the primary AVG line computes, over the
-					// same trailing Window (&hours= + WINDOW_HOURS) and the same
-					// As-Of moment (&as_of=), but against the Nearest+1 expiry
-					// (?expiry=nearest_plus_1) rather than the page's own
-					// selected Expiry. Ported from /4l/<asset>'s own N+1 AVG
-					// line per product decision (2026-09-07). Dotted light
-					// violet, user-recolorable via chartColors.n1avg (see the
-					// "Chart Appearance" modal) — same as /4l/<asset>.
-					const nearestPlus1AvgUrl = () =>
-						'/api/four-leg-gamma/' + ASSET + '?expiry=nearest_plus_1&hours=' + WINDOW_HOURS
 						+ '&as_of=' + encodeURIComponent(AS_OF_ISO);
 
 					// Trade count for the currently selected Window/Expiry —
@@ -561,22 +569,18 @@
 					function rulerColor() { return DARK_MODE ? '#aaaaaa' : '#555555'; }
 
 					// "Settings" button/dialog — user-pickable colors for this
-					// page's own 4 gamma-leg lines plus the AVG and N+1 AVG
-					// lines, persisted per-browser under a key completely
-					// independent of /4l/<asset>'s own 'dankbit_4l_chart_colors'
-					// and every other page's own color settings, since Time
-					// Machine is its own page. The AVG line's color was
-					// dominant-leg-derived (light green for LC/SC, light red for
-					// LP/SP) from product decision (2026-08-31) until a further
-					// product decision (2026-09-07) restored a dedicated picker
-					// with a fixed violet default, matching /4l/<asset>. No
-					// line-style picker (the 4 gamma legs are solid, AVG dashed,
-					// N+1 AVG dotted — never user-restylable). Defaults match
-					// /4l's own (LC/LP black, SC/SP orange, AVG violet, N+1 AVG
-					// light violet).
+					// page's own 4 gamma-leg lines plus the Dominant Leg, Δ0
+					// and γ flip lines, persisted per-browser under a key
+					// completely independent of /4l/<asset>'s own
+					// 'dankbit_4l_chart_colors' and every other page's own
+					// color settings, since Time Machine is its own page. No
+					// line-style picker (the 4 gamma legs and Dominant Leg are
+					// solid, Δ0/γ flip dotted — never user-restylable).
+					// Defaults match /4l's own (LC/LP black, SC/SP orange,
+					// Dominant Leg violet, Δ0 green, γ flip violet).
 					const COLOR_STORAGE_KEY = 'dankbit_tm_chart_colors';
 					const DEFAULT_COLORS = {
-						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', avg: '#8e24aa', n1avg: '#ce93d8',
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', dominant: '#8e24aa', deltazero: '#2e7d32', gammaflip: '#7e57c2',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -663,12 +667,47 @@
 					// resolved As-Of/Window reading — same createPriceLine()
 					// pattern /4l/<asset> uses — redrawn fresh whenever As
 					// Of/Timeframe/Expiry/Window changes.
-					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null, avgGammaPriceLine = null;
-					// "N+1 AVG" line (light violet dotted) — Nearest+1 expiry,
-					// page's own selected Window/As-Of. Its own fetch
-					// (refreshNearestPlus1Avg() below), gated by the "N+1 AVG"
-					// checkbox.
-					let n1AvgPriceLine = null;
+					let bcgPriceLine = null, bpgPriceLine = null, scgPriceLine = null, spgPriceLine = null;
+					// Dominant Leg line — at the price of whichever present leg
+					// (price != 0) has the largest |gamma value| for this
+					// Expiry/Window/As-Of. Same as /4l/<asset>'s own.
+					let dominantLegPriceLine = null;
+					// Delta = 0 lines (green, dotted) — one per entry in the
+					// response's own `latest.delta_zero_prices` (0..N lines, see
+					// four_leg_gamma_json), same as /4l/<asset>'s own. Gated by
+					// the "Delta 0" checkbox.
+					let deltaZeroPriceLines = [];
+					// Gamma flip lines (violet, dotted) — one per entry in the
+					// response's own `latest.gamma_flips` (prices where the
+					// combined taker-signed portfolio gamma of the same
+					// Expiry/Window trades, as of AS_OF_ISO, crosses zero —
+					// see four_leg_gamma_json), same as /4l/<asset>'s own.
+					// Gated by the "Gamma Flip" checkbox.
+					let gammaFlipPriceLines = [];
+					function clearGammaFlipLines() {
+						gammaFlipPriceLines.forEach(l => series.removePriceLine(l));
+						gammaFlipPriceLines = [];
+					}
+					function clearDeltaZeroLines() {
+						deltaZeroPriceLines.forEach(l => series.removePriceLine(l));
+						deltaZeroPriceLines = [];
+						showDeltaSignBox(null);
+					}
+					// When the combined delta never crosses zero (as of
+					// AS_OF_ISO) there's no Δ0 line to draw — the small
+					// #delta-sign-box states which side of zero it stays on
+					// instead (`latest.delta_zero_sign`: "positive"/"negative"/
+					// "zero", null whenever a crossing exists). null hides it.
+					// Ported from /4l/<asset> per product decision (2026-09-23).
+					function showDeltaSignBox(sign) {
+						const box = document.getElementById('delta-sign-box');
+						if (!sign) { box.style.display = 'none'; return; }
+						const text = { positive: 'Δ > 0 everywhere (no Δ0)', negative: 'Δ < 0 everywhere (no Δ0)', zero: 'Δ = 0 everywhere' };
+						const color = { positive: '#2e7d32', negative: '#c62828', zero: '#555' };
+						box.textContent = text[sign] || ('Δ ' + sign);
+						box.style.color = color[sign] || '#555';
+						box.style.display = 'block';
+					}
 
 					function setStatus(text) { document.getElementById('status').textContent = text; }
 
@@ -779,12 +818,10 @@
 					}
 
 					// "Gamma Legs" checkbox (right after "Window Line",
-					// UNCHECKED by default) — plain client-side show/hide flag
-					// for the 4 gamma-leg lines (LC/LP/SC/SP) only. The two AVG
-					// lines are gated by their own checkboxes ("AVG"/"N+1 AVG"),
-					// not this one — their gammaLegs/avg computation reads
-					// straight off `latest.*`, not the 4 drawn price-line
-					// objects. Unchecking removes the 4 lines immediately
+					// UNCHECKED by default, matching /4l) — plain client-side
+					// show/hide flag for the 4 gamma-leg lines (LC/LP/SC/SP)
+					// only; the Dominant Leg line has its own checkbox.
+					// Unchecking removes the 4 lines immediately
 					// without a fetch; checking re-fetches via
 					// refreshFourLegGamma() since `latest` isn't cached. Ported
 					// from /4l/<asset> per product decision (2026-09-07).
@@ -801,36 +838,45 @@
 						}
 					}
 
-					// "AVG" checkbox (right after "Gamma Legs", CHECKED by
-					// default) — plain client-side show/hide flag for the
-					// primary AVG line (this page's own selected Expiry/Window/
-					// As-Of). Unchecking removes the line immediately without a
-					// fetch; checking re-fetches via refreshFourLegGamma().
-					// Ported from /4l/<asset> per product decision (2026-09-07).
-					let SHOW_AVG = true;
-					function onToggleAvg() {
-						SHOW_AVG = document.getElementById('avg-toggle').checked;
-						if (!SHOW_AVG) {
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+					// "Dominant Leg" checkbox (right after "Gamma Legs",
+					// CHECKED by default) — same plain client-side toggle
+					// pattern. Ported from /4l/<asset> per product decision
+					// (2026-09-23), replacing this page's former AVG checkbox.
+					let SHOW_DOMINANT_LEG = true;
+					function onToggleDominantLeg() {
+						SHOW_DOMINANT_LEG = document.getElementById('dominant-leg-toggle').checked;
+						if (!SHOW_DOMINANT_LEG) {
+							if (dominantLegPriceLine) { series.removePriceLine(dominantLegPriceLine); dominantLegPriceLine = null; }
 						} else {
 							refreshFourLegGamma();
 						}
 					}
 
-					// "N+1 AVG" checkbox (right after "AVG", CHECKED by default)
-					// — plain client-side show/hide flag for the N+1 AVG line
-					// (Nearest+1 expiry, page's own selected Window/As-Of, its
-					// own fetch). Unchecking removes the line immediately
-					// without a fetch; checking re-fetches via
-					// refreshNearestPlus1Avg(). Ported from /4l/<asset> per
-					// product decision (2026-09-07).
-					let SHOW_N1_AVG = true;
-					function onToggleN1Avg() {
-						SHOW_N1_AVG = document.getElementById('n1avg-toggle').checked;
-						if (!SHOW_N1_AVG) {
-							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
+					// "Delta 0" checkbox (right after "Dominant Leg", CHECKED by
+					// default) — plain client-side show/hide flag for the Δ0
+					// lines. Unchecking clears them without a fetch; checking
+					// re-fetches via refreshFourLegGamma(). Ported from
+					// /4l/<asset> per product decision (2026-09-23).
+					// "Gamma Flip" checkbox (right after "Delta 0", CHECKED by
+					// default) — same plain client-side toggle pattern. Ported
+					// from /4l/<asset> per product decision (2026-09-23).
+					let SHOW_GAMMA_FLIP = true;
+					function onToggleGammaFlip() {
+						SHOW_GAMMA_FLIP = document.getElementById('gamma-flip-toggle').checked;
+						if (!SHOW_GAMMA_FLIP) {
+							clearGammaFlipLines();
 						} else {
-							refreshNearestPlus1Avg();
+							refreshFourLegGamma();
+						}
+					}
+
+					let SHOW_DELTA_ZERO = true;
+					function onToggleDeltaZero() {
+						SHOW_DELTA_ZERO = document.getElementById('delta-zero-toggle').checked;
+						if (!SHOW_DELTA_ZERO) {
+							clearDeltaZeroLines();
+						} else {
+							refreshFourLegGamma();
 						}
 					}
 
@@ -1015,55 +1061,13 @@
 						return sign + Math.round(abs).toLocaleString('en-US');
 					}
 
-					// N+1 AVG line — Nearest+1 expiry's own present-leg-only
-					// gamma-price average, over the page's own selected Window/
-					// As-Of. Own try/catch — a failed fetch leaves the
-					// previously drawn line in place rather than clearing it,
-					// same as /4l/<asset>'s own. Gated by the "N+1 AVG"
-					// checkbox: returns early (removing the line) when off.
-					async function refreshNearestPlus1Avg() {
-						if (!SHOW_N1_AVG) {
-							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
-							return;
-						}
-						try {
-							const data = await (await fetch(nearestPlus1AvgUrl())).json();
-							const points = data.points || [];
-							const latest = points.length ? points[points.length - 1] : null;
-							if (n1AvgPriceLine) { series.removePriceLine(n1AvgPriceLine); n1AvgPriceLine = null; }
-							if (!latest) return;
-							const legs = [
-								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
-								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
-								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
-								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
-							].filter(leg => leg.price);
-							if (!legs.length) return;
-							const avgPrice = legs.reduce((a, leg) => a + leg.price, 0) / legs.length;
-							const avgValue = legs.reduce((a, leg) => a + leg.value, 0) / legs.length;
-							const dominantLeg = legs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
-							const n1Color = chartColors.n1avg;
-							n1AvgPriceLine = series.createPriceLine({
-								price: avgPrice, color: n1Color, lineWidth: 2,
-								lineStyle: LightweightCharts.LineStyle.Dotted,
-								axisLabelVisible: true, axisLabelColor: n1Color,
-								title: 'N+1 | ' + dominantLeg.name + ' | ' + formatAbbreviated(avgValue),
-							});
-						} catch (e) { /* leave the previously drawn line in place */ }
-					}
-
-					// Fetches and redraws the 4 gamma-leg lines (+ AVG) for the
-					// current Expiry/Window as of AS_OF_ISO — same
-					// shape as /4l/<asset>'s own refreshFourLegGamma() (SC/SP
-					// labels with no combined magnitude suffix, AVG label
-					// "<dom leg> $<dom leg price> | <avg gamma value>"), minus
+					// Fetches and redraws the 4 gamma-leg lines (+ Dominant Leg,
+					// Δ0, γ flip) for the current Expiry/Window as of AS_OF_ISO —
+					// same shape as /4l/<asset>'s own refreshFourLegGamma(), minus
 					// the periodic re-poll (this only ever runs in direct
-					// response to a control change on this page). Also
-					// fire-and-forgets refreshNearestPlus1Avg() so the N+1 AVG
-					// line rides the same control-change cadence.
+					// response to a control change on this page).
 					async function refreshFourLegGamma() {
 						showSpinner();
-						refreshNearestPlus1Avg();
 						try {
 							const data = await (await fetch(fourLegGammaUrl())).json();
 							const points = data.points || [];
@@ -1089,9 +1093,43 @@
 							if (bpgPriceLine) { series.removePriceLine(bpgPriceLine); bpgPriceLine = null; }
 							if (scgPriceLine) { series.removePriceLine(scgPriceLine); scgPriceLine = null; }
 							if (spgPriceLine) { series.removePriceLine(spgPriceLine); spgPriceLine = null; }
-							if (avgGammaPriceLine) { series.removePriceLine(avgGammaPriceLine); avgGammaPriceLine = null; }
+							if (dominantLegPriceLine) { series.removePriceLine(dominantLegPriceLine); dominantLegPriceLine = null; }
+							clearDeltaZeroLines();
+							clearGammaFlipLines();
 							if (!latest) {
 								return;
+							}
+
+							// Delta = 0 — every price where the combined
+							// portfolio delta of this Expiry/Window's trades
+							// (as of AS_OF_ISO) crosses zero.
+							if (SHOW_DELTA_ZERO) {
+								const dzColor = chartColors.deltazero;
+								(latest.delta_zero_prices || []).forEach(price => {
+									deltaZeroPriceLines.push(series.createPriceLine({
+										price: price, color: dzColor, lineWidth: 2,
+										lineStyle: LightweightCharts.LineStyle.Dotted,
+										axisLabelVisible: true, axisLabelColor: dzColor,
+										title: 'Δ0',
+									}));
+								});
+								showDeltaSignBox(latest.delta_zero_sign);
+							}
+
+							// Gamma flip — label says which side is positive/
+							// negative gamma, e.g. "γ flip (taker): − below / + above"
+							// (each entry's own `below`/`above` sign).
+							if (SHOW_GAMMA_FLIP) {
+								const gfColor = chartColors.gammaflip;
+								const sym = sign => sign === 'positive' ? '+' : '−';
+								(latest.gamma_flips || []).forEach(flip => {
+									gammaFlipPriceLines.push(series.createPriceLine({
+										price: flip.price, color: gfColor, lineWidth: 2,
+										lineStyle: LightweightCharts.LineStyle.Dotted,
+										axisLabelVisible: true, axisLabelColor: gfColor,
+										title: 'γ flip (taker): ' + sym(flip.below) + ' below / ' + sym(flip.above) + ' above',
+									}));
+								});
 							}
 
 							// 0.0 means absent (same convention every gamma_band/
@@ -1102,8 +1140,8 @@
 							// with 4 lines on one chart. Colors come from
 							// chartColors (user-configurable via the "Settings"
 							// button/dankbit_tm_chart_colors). Also gated on the
-							// "Gamma Legs" checkbox (SHOW_GAMMA_LEGS) — the AVG /
-							// N+1 AVG lines have their own checkboxes.
+							// "Gamma Legs" checkbox (SHOW_GAMMA_LEGS) — the
+							// Dominant Leg line has its own checkbox.
 							if (SHOW_GAMMA_LEGS && latest.bcg_price) {
 								bcgPriceLine = series.createPriceLine({
 									price: latest.bcg_price, color: chartColors.bcg, lineWidth: 2,
@@ -1136,36 +1174,27 @@
 									title: 'SP ' + formatAbbreviated(latest.spg_value),
 								});
 							}
-							// Average of the legs' own gamma PRICE levels (not their
-							// gamma value) — over whichever legs are actually present
-							// (0.0 means absent, same convention as the 4 lines
-							// above), not a fixed /4. Color is user-recolorable via
-							// chartColors.avg (the "Chart Appearance" modal), default
-							// violet #8e24aa — same as /4l/<asset> (was
-							// dominant-leg-derived here until product decision
-							// 2026-09-07). The label shows the dominant leg (largest
-							// |gamma value| among present legs) + its own $-prefixed
-							// price, then the average of those legs' gamma VALUES:
-							// "<dom leg> $<dom leg price> | <avg gamma value>", e.g.
-							// "LC $81,200 | 71M" — this page keeps the $-price in the
-							// label, unlike /4l/<asset> which dropped it.
-							const gammaLegs = [
-								{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
-								{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
-								{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
-								{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
-							].filter(leg => leg.price);
-							if (SHOW_AVG && gammaLegs.length) {
-								const avgGammaPrice = gammaLegs.reduce((a, leg) => a + leg.price, 0) / gammaLegs.length;
-								const avgGammaValue = gammaLegs.reduce((a, leg) => a + leg.value, 0) / gammaLegs.length;
-								const dominantLeg = gammaLegs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
-								const avgColor = chartColors.avg;
-								avgGammaPriceLine = series.createPriceLine({
-									price: avgGammaPrice, color: avgColor, lineWidth: 2,
-									lineStyle: LightweightCharts.LineStyle.Dashed,
-									axisLabelVisible: true, axisLabelColor: avgColor,
-									title: dominantLeg.name + ' $' + Math.round(dominantLeg.price).toLocaleString('en-US') + ' | ' + formatAbbreviated(avgGammaValue),
-								});
+							// Dominant Leg — the present leg (price != 0) with the
+							// largest |gamma value| in this Expiry/Window/As-Of;
+							// the line sits at that leg's own gamma price. Label
+							// e.g. "DOM LC | 71M". Skipped when no leg is present.
+							if (SHOW_DOMINANT_LEG) {
+								const legs = [
+									{ name: 'LC', price: latest.bcg_price, value: latest.bcg_value },
+									{ name: 'LP', price: latest.bpg_price, value: latest.bpg_value },
+									{ name: 'SC', price: latest.scg_price, value: latest.scg_value },
+									{ name: 'SP', price: latest.spg_price, value: latest.spg_value },
+								].filter(leg => leg.price);
+								if (legs.length) {
+									const dom = legs.reduce((a, b) => Math.abs(b.value) > Math.abs(a.value) ? b : a);
+									const domColor = chartColors.dominant;
+									dominantLegPriceLine = series.createPriceLine({
+										price: dom.price, color: domColor, lineWidth: 2,
+										lineStyle: LightweightCharts.LineStyle.Solid,
+										axisLabelVisible: true, axisLabelColor: domColor,
+										title: 'DOM ' + dom.name + ' | ' + formatAbbreviated(dom.value),
+									});
+								}
 							}
 						} finally {
 							hideSpinner();

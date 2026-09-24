@@ -44,7 +44,6 @@ FOUR_LEG_WINDOW_HOURS_CHOICES = tuple(range(1, 73)) + (96, 120, 144, 168, 192, 2
 # still later product decision, then back to 24 (24h) once more per a
 # still later product decision.
 FOUR_LEG_DEFAULT_WINDOW_HOURS = 24
-
 # /ll/<asset> (the LL chart — ll_avg_gamma_json) computes each active
 # expiry's own dominant leg (the present leg with the biggest |gamma
 # value|) and draws one line per expiry that has usable trades. It has no
@@ -2909,6 +2908,52 @@ class ChartController(http.Controller):
                 "scg_price": legs["short_call"]["gamma_price"] or 0.0, "scg_value": legs["short_call"]["gamma_value"],
                 "spg_price": legs["short_put"]["gamma_price"] or 0.0, "spg_value": legs["short_put"]["gamma_value"],
             }
+            # Every price where the COMBINED portfolio delta of these
+            # same trades (all 4 legs together, not per-leg) crosses
+            # zero — drawn as /4l's and /tm's dotted green "Δ0" lines.
+            # r=0.05, same as every other delta=0 finder in this file
+            # (delta_zero_json etc.). Empty list if it never crosses.
+            d_arr = np.asarray(delta.portfolio_delta(STs, trades, 0.05), dtype=float)
+            point["delta_zero_prices"] = options.find_zero_crossings(STs, d_arr)
+            # When there's no crossing at all, which side of zero the
+            # curve stays on across the whole configured price range —
+            # "positive"/"negative" (by the sign of its largest-|delta|
+            # finite point, since with no sign change every nonzero
+            # point shares one sign), or "zero" if it's flat/non-finite
+            # throughout. None whenever at least one crossing exists.
+            # /4l shows this in a small on-chart box instead of lines.
+            point["delta_zero_sign"] = None
+            if not point["delta_zero_prices"]:
+                finite = d_arr[np.isfinite(d_arr)]
+                extreme = finite[np.argmax(np.abs(finite))] if finite.size else 0.0
+                point["delta_zero_sign"] = (
+                    "positive" if extreme > 0 else "negative" if extreme < 0 else "zero"
+                )
+            # Gamma flip — every price where the COMBINED taker-signed
+            # portfolio dollar-gamma of these same trades (long legs +,
+            # short legs -, all 4 together) crosses zero. Drawn as /4l's
+            # dotted violet "γ flip" lines. Same r=0.05 as the delta
+            # curve above. The dealer-signed curve (the negation) crosses
+            # zero at the same prices, just with each side's sign
+            # flipped. Each entry also says which sign gamma has just
+            # below/above that price ("positive"/"negative" — opposite
+            # by definition, since it's a sign change), so the chart can
+            # label which side of the flip is long- vs short-gamma.
+            # Same interpolation as options.find_zero_crossings(), kept
+            # inline because that helper returns bare prices only.
+            # Empty list if it never crosses.
+            g_arr = np.asarray(gamma.portfolio_gamma(STs, trades, 0.05), dtype=float)
+            gamma_flips = []
+            for i in range(len(g_arr) - 1):
+                ga, gb = g_arr[i], g_arr[i + 1]
+                if not (np.isfinite(ga) and np.isfinite(gb)) or ga * gb >= 0:
+                    continue
+                gamma_flips.append({
+                    "price": float(STs[i] - ga * (STs[i + 1] - STs[i]) / (gb - ga)),
+                    "below": "positive" if ga > 0 else "negative",
+                    "above": "positive" if gb > 0 else "negative",
+                })
+            point["gamma_flips"] = gamma_flips
             points.append(point)
 
         # Max Pain — independent of `hours`/the trades Window above (see
@@ -2922,27 +2967,8 @@ class ChartController(http.Controller):
         max_pain_total_oi = 0.0
         if instrument:
             oi_map = request.env["dankbit.trade"].get_open_interest_by_currency(asset)
-            # Same anchored left-prefix match every other instrument
-            # lookup in this addon uses (`f"{instrument}-%"` via =ilike
-            # elsewhere) — oi_map's own keys are full instrument names
-            # (e.g. "BTC-25JUL26-98000-C") across every expiry for
-            # `asset`, so this can't pull in another expiry's strikes.
-            prefix = f"{instrument}-"
-            call_oi, put_oi = {}, {}
-            for oi_instrument, oi in oi_map.items():
-                if not oi or not oi_instrument.startswith(prefix):
-                    continue
-                parts = oi_instrument.split("-")
-                if len(parts) != 4:
-                    continue
-                try:
-                    strike = int(parts[2])
-                except ValueError:
-                    continue
-                if parts[3] == "C":
-                    call_oi[strike] = call_oi.get(strike, 0.0) + oi
-                elif parts[3] == "P":
-                    put_oi[strike] = put_oi.get(strike, 0.0) + oi
+            # Shared with the chat panel's max_pain tool (chat_tools.py).
+            call_oi, put_oi = options.split_open_interest(oi_map, instrument)
             resolved_max_pain, _ = options.max_pain_price(call_oi, put_oi)
             if resolved_max_pain is not None:
                 mp_price = resolved_max_pain

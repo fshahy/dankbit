@@ -10,3 +10,4 @@ from . import signal_bot
 from . import res_config_settings
 from . import http_log
 from . import ir_http
+from . import chat_log
