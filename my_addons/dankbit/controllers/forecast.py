@@ -1602,6 +1602,16 @@ FOMO_MEAN_REVERSION_RELEASE = 0.45
 FOMO_CONFIDENCE_FLOOR_BOOST = 0.18
 FOMO_MAX_ALIGNED_BODY_ATR = 1.50
 
+# Early, still-forming-candle warning. Unlike confirmed FOMO, this is limited
+# to the first four forecast steps and remains subject to every weekend cap.
+INTRABAR_FOMO_MIN_BODY_ATR = 1.20
+INTRABAR_FOMO_ACTIVATION_SCORE = 0.60
+INTRABAR_FOMO_MAX_IMPULSE = 0.055
+INTRABAR_FOMO_DECAY = 0.62
+INTRABAR_FOMO_MAX_STEPS = 4
+INTRABAR_FOMO_MEAN_REVERSION_RELEASE = 0.28
+INTRABAR_FOMO_MAX_ALIGNED_BODY_ATR = 1.20
+
 
 # ============================================================
 # FlowImbalance damping, Zone Brake, and the Breakout Gate — added per
@@ -1796,6 +1806,57 @@ def _fomo_price_regime(candles, atr, step_hours=4, min_move_atr=FOMO_MIN_MOVE_AT
             "move_atr": move_atr, "exhaustion": exhaustion, "bars": len(rows)}
 
 
+def _intrabar_fomo_watch(candles, atr, top, low, gamma_ref,
+                         min_body_atr=INTRABAR_FOMO_MIN_BODY_ATR,
+                         activation=INTRABAR_FOMO_ACTIVATION_SCORE):
+    """Detect a provisional expansion in the still-forming last candle.
+
+    It needs a large body, a close near the advancing edge and a break of
+    either recent price structure or an option level. It cannot confirm FOMO;
+    the normal closed-candle regime above remains authoritative.
+    """
+    empty = {"active": False, "direction": 0, "score": 0.0,
+             "body_atr": 0.0, "edge": 0.0, "breakouts": 0}
+    if len(candles or []) < 7 or atr <= 0:
+        return empty
+    live = candles[-1]
+    body = float(live["c"]) - float(live["o"])
+    direction = 1 if body > 0 else -1 if body < 0 else 0
+    if not direction:
+        return empty
+    body_atr = abs(body) / max(atr, 1e-9)
+    high, low_price = float(live["h"]), float(live["l"])
+    location = (float(live["c"]) - low_price) / max(high-low_price, 1e-9)
+    edge = location if direction > 0 else 1.0-location
+    prior = candles[-7:-1]
+    price_break = (
+        float(live["c"]) > max(float(row["h"]) for row in prior)
+        if direction > 0 else
+        float(live["c"]) < min(float(row["l"]) for row in prior)
+    )
+    option_levels = (
+        [float(value) for value in (top, gamma_ref) if value]
+        if direction > 0
+        else [float(value) for value in (low, gamma_ref) if value]
+    )
+    option_breaks = sum(
+        float(live["c"]) > level and float(live["o"]) <= level
+        if direction > 0 else
+        float(live["c"]) < level and float(live["o"]) >= level
+        for level in option_levels
+    )
+    breakouts = int(price_break) + option_breaks
+    body_score = max(min((body_atr-min_body_atr)/1.30, 1.0), 0.0)
+    edge_score = max(min((edge-.65)/.30, 1.0), 0.0)
+    breakout_score = min(breakouts/2.0, 1.0)
+    follow = max(min(direction*(float(live["c"])-float(candles[-2]["c"]))/
+                     max(atr,1e-9), 1.0), 0.0)
+    score = .45*body_score + .25*edge_score + .20*breakout_score + .10*follow
+    active = body_atr >= min_body_atr and edge >= .72 and breakouts >= 1 and score >= activation
+    return {"active": bool(active), "direction": direction, "score": score,
+            "body_atr": body_atr, "edge": edge, "breakouts": breakouts}
+
+
 def _atr14(candles):
     """Classic ATR over the last 14 real candles (true range = max of
     high-low, |high-prevclose|, |low-prevclose|) — Thales's chartAtr14,
@@ -1952,6 +2013,13 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     FOMO_MEAN_REVERSION_RELEASE = _cfg(cfg, "FOMO_MEAN_REVERSION_RELEASE")
     FOMO_CONFIDENCE_FLOOR_BOOST = _cfg(cfg, "FOMO_CONFIDENCE_FLOOR_BOOST")
     FOMO_MAX_ALIGNED_BODY_ATR = _cfg(cfg, "FOMO_MAX_ALIGNED_BODY_ATR")
+    INTRABAR_FOMO_MIN_BODY_ATR = _cfg(cfg, "INTRABAR_FOMO_MIN_BODY_ATR")
+    INTRABAR_FOMO_ACTIVATION_SCORE = _cfg(cfg, "INTRABAR_FOMO_ACTIVATION_SCORE")
+    INTRABAR_FOMO_MAX_IMPULSE = _cfg(cfg, "INTRABAR_FOMO_MAX_IMPULSE")
+    INTRABAR_FOMO_DECAY = _cfg(cfg, "INTRABAR_FOMO_DECAY")
+    INTRABAR_FOMO_MAX_STEPS = int(_cfg(cfg, "INTRABAR_FOMO_MAX_STEPS"))
+    INTRABAR_FOMO_MEAN_REVERSION_RELEASE = _cfg(cfg, "INTRABAR_FOMO_MEAN_REVERSION_RELEASE")
+    INTRABAR_FOMO_MAX_ALIGNED_BODY_ATR = _cfg(cfg, "INTRABAR_FOMO_MAX_ALIGNED_BODY_ATR")
 
     levels = derive_levels(current, cfg)
     band_width = levels["band_width"]
@@ -1960,6 +2028,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
 
     now_utc = candles[-1]["t"] / 1000.0 if candles else None
     atr = _atr14(candles) or (index_price * sigma_annual * math.sqrt(4.0 / (24.0 * 365.0)))
+    closed_atr = _atr14(candles[:-1]) or atr
 
     # Gamma-Band Consensus needs 2 real historical points besides "now".
     consensus = None
@@ -2071,6 +2140,11 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
     term_direction, term_strength, _term_slope_norm = gamma_band_term_slope(gamma_band_term_structure, band_width)
     fomo_price = _fomo_price_regime(
         candles, atr, step_hours=step_hours, min_move_atr=FOMO_MIN_MOVE_ATR,
+    )
+    intrabar_watch = _intrabar_fomo_watch(
+        candles, closed_atr, top, low, gamma_ref,
+        min_body_atr=INTRABAR_FOMO_MIN_BODY_ATR,
+        activation=INTRABAR_FOMO_ACTIVATION_SCORE,
     )
     fomo_leg_fields = (
         "bcg_abs", "bpg_abs", "scg_abs", "spg_abs",
@@ -2230,6 +2304,30 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             * (FOMO_CARRY_DECAY ** step) * combined_body_mult
             if fomo_active else 0.0
         )
+        intrabar_direction = int(intrabar_watch["direction"])
+        intrabar_aligned = sum(v == intrabar_direction for v in fomo_votes)
+        intrabar_opposed = sum(v == -intrabar_direction for v in fomo_votes)
+        intrabar_active = bool(
+            intrabar_watch["active"] and not fomo_active
+            and not gb_counter_trend_locked and step < INTRABAR_FOMO_MAX_STEPS
+            and intrabar_opposed <= 2
+            and (intrabar_aligned >= 1 or intrabar_watch["breakouts"] >= 2)
+        )
+        intrabar_strength = 0.0
+        if intrabar_active:
+            price_strength = max(min(
+                (intrabar_watch["score"]-INTRABAR_FOMO_ACTIVATION_SCORE) /
+                max(1.0-INTRABAR_FOMO_ACTIVATION_SCORE, 1e-9), 1.0), 0.0)
+            evidence = min(intrabar_aligned/2.0, 1.0)
+            # Even complete-but-stale options cannot create a large boost:
+            # price contributes first, option evidence only permits a modest lift.
+            intrabar_strength = price_strength * (
+                .25 + .30*fomo_option_quality + .20*evidence)
+        intrabar_impulse = (
+            intrabar_direction * INTRABAR_FOMO_MAX_IMPULSE * intrabar_strength
+            * (INTRABAR_FOMO_DECAY ** step) * combined_body_mult
+            if intrabar_active else 0.0
+        )
 
         # Release only mean-reversion components that oppose an independently
         # confirmed price regime. Aligned structural terms are not boosted.
@@ -2238,6 +2336,13 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             if base_pull_impulse * fomo_direction < 0:
                 base_pull_impulse *= release_mult
             if curve_extreme_impulse * fomo_direction < 0:
+                curve_extreme_impulse *= release_mult
+        elif intrabar_active:
+            release_mult = max(
+                1.0-INTRABAR_FOMO_MEAN_REVERSION_RELEASE*intrabar_strength, .78)
+            if base_pull_impulse * intrabar_direction < 0:
+                base_pull_impulse *= release_mult
+            if curve_extreme_impulse * intrabar_direction < 0:
                 curve_extreme_impulse *= release_mult
 
         term_slope_impulse = 0.0
@@ -2311,12 +2416,18 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             + gb_impulse + reclaim_impulse + vega_impulse + delta_impulse + gamma_shock_impulse + mm_impulse
             + liquidity["impulse"] + flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT + term_slope_impulse
             + fomo_carry_impulse
+            + intrabar_impulse
         )
 
         if fomo_active and raw_impulse_sum * fomo_direction > 0:
             body_confidence = max(
                 body_confidence,
                 min(MOMENTUM_BODY_CONFIDENCE_FLOOR + FOMO_CONFIDENCE_FLOOR_BOOST * fomo_strength, 0.88),
+            )
+        elif intrabar_active and raw_impulse_sum * intrabar_direction > 0:
+            body_confidence = max(
+                body_confidence,
+                min(MOMENTUM_BODY_CONFIDENCE_FLOOR + .08*intrabar_strength, .72),
             )
 
         # Zone Brake — as the pre-confidence impulse points toward `top`
@@ -2343,6 +2454,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             0.45 + 0.10 * fomo_strength
             if fomo_active and forecast_impulse * fomo_direction > 0 else 0.45
         )
+        if intrabar_active and forecast_impulse * intrabar_direction > 0:
+            impulse_limit = max(impulse_limit, .45 + .05*intrabar_strength)
         forecast_impulse = max(min(forecast_impulse, impulse_limit), -impulse_limit)
 
         step_move = band_width * forecast_impulse
@@ -2359,6 +2472,10 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
         if fomo_active and step_move * fomo_direction > 0:
             aligned_atr_mult = min(1.0 + 0.50 * fomo_strength, FOMO_MAX_ALIGNED_BODY_ATR)
             aligned_cap = effective_atr * aligned_atr_mult
+            step_move = max(min(step_move, aligned_cap), -aligned_cap)
+        elif intrabar_active and step_move * intrabar_direction > 0:
+            aligned_cap = effective_atr * min(
+                1.0 + .20*intrabar_strength, INTRABAR_FOMO_MAX_ALIGNED_BODY_ATR)
             step_move = max(min(step_move, aligned_cap), -aligned_cap)
 
         # Weekend move cap — the rest of the cascade above (combined_body_mult,
@@ -2521,6 +2638,8 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
                 mode.append("FOMO Confirmed")
             else:
                 mode.append("Momentum Watch")
+        elif intrabar_active:
+            mode.append("Intrabar FOMO Watch")
         if is_weekend:
             mode.append("Weekend")
         mode.append(sess)
@@ -2551,6 +2670,7 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             "impulse_greek_flow": float(flow["impulse"] * GREEK_FLOW_IMPULSE_WEIGHT),
             "impulse_term_slope": float(term_slope_impulse),
             "impulse_fomo_carry": float(fomo_carry_impulse),
+            "impulse_intrabar_fomo": float(intrabar_impulse),
             # Regime/context flags active for this candle — same signals
             # `mode` summarizes as free text, broken out here so they can be
             # filtered/grouped on directly instead of string-parsed.
@@ -2575,6 +2695,12 @@ def simulate_forecast(index_price, sigma_annual, current, history, candles,
             "fomo_option_alignment": float(fomo_option_alignment),
             "fomo_option_quality": float(fomo_option_quality),
             "fomo_strength": float(fomo_strength),
+            "intrabar_fomo_watch": bool(intrabar_active),
+            "intrabar_fomo_direction": int(intrabar_direction),
+            "intrabar_fomo_score": float(intrabar_watch["score"]),
+            "intrabar_fomo_body_atr": float(intrabar_watch["body_atr"]),
+            "intrabar_fomo_breakouts": int(intrabar_watch["breakouts"]),
+            "intrabar_fomo_strength": float(intrabar_strength),
         })
         projected_open = projected_close
 

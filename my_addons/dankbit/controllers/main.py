@@ -1556,6 +1556,220 @@ class ChartController(http.Controller):
             return None, 0.0
         return float(STs[idx]), strength
 
+    @staticmethod
+    def _gamma_horizon_group_rows(rows, now, half_life_hours, permanent_share=0.40):
+        """Aggregate hourly trade rows with an explicit freshness policy.
+
+        ``permanent_share`` preserves the original structural calculation when
+        set to 0.40.  Recent Gamma uses zero permanent share so that it measures
+        current repricing rather than duplicating the lifetime structure.
+        """
+        grouped = {}
+        first_seen = None
+        trade_count = 0
+        raw_amount = 0.0
+        for row in rows:
+            _, strike, option_type, direction, trade_hour, amount, avg_iv, count = row
+            age_hours = max(0.0, (now - trade_hour).total_seconds() / 3600.0)
+            decay = math.pow(2.0, -age_hours / max(float(half_life_hours), 1.0))
+            freshness = permanent_share + (1.0 - permanent_share) * decay
+            weighted_amount = float(amount or 0.0) * freshness
+            if weighted_amount <= 0:
+                continue
+            key = (int(strike), option_type, direction)
+            bucket = grouped.setdefault(key, {"amount": 0.0, "iv_amount": 0.0})
+            bucket["amount"] += weighted_amount
+            bucket["iv_amount"] += float(avg_iv or 0.0) * weighted_amount
+            trade_count += int(count or 0)
+            raw_amount += float(amount or 0.0)
+            first_seen = trade_hour if first_seen is None else min(first_seen, trade_hour)
+        return grouped, first_seen, trade_count, raw_amount
+
+    def _gamma_horizon_level(self, STs, grouped, expiry):
+        buyer_trades, seller_trades = [], []
+        for (strike, option_type, direction), bucket in grouped.items():
+            amount = bucket["amount"]
+            trd = _AggTrade(
+                strike=strike, option_type=option_type, direction=direction,
+                expiration=expiry, amount=amount,
+                iv=bucket["iv_amount"] / amount if amount else 0.0,
+            )
+            (buyer_trades if direction == "buy" else seller_trades).append(trd)
+        buyer_price, buyer_strength = self._gamma_horizon_peak(STs, buyer_trades)
+        seller_price, seller_strength = self._gamma_horizon_peak(STs, seller_trades)
+        prices = [p for p in (buyer_price, seller_price) if p is not None]
+        return {
+            "price": float(sum(prices) / len(prices)) if prices else None,
+            "buyer_price": buyer_price, "seller_price": seller_price,
+            "buyer_strength": buyer_strength, "seller_strength": seller_strength,
+            "strength": buyer_strength + seller_strength,
+        }
+
+    @staticmethod
+    def _greeks_horizon_theta_vega(spot, strike, iv_percent, expiry, now):
+        """Black–Scholes theta/day and vega/one-IV-point at r=q=0.
+
+        Direction is applied by the caller.  These values annotate a Gamma
+        Horizon level only; they never alter the price returned for the line.
+        """
+        seconds = max(60.0, (expiry - now).total_seconds())
+        years = seconds / (365.0 * 86400.0)
+        sigma = float(iv_percent or 0.0) / 100.0
+        if min(float(spot or 0.0), float(strike or 0.0), sigma, years) <= 0:
+            return 0.0, 0.0
+        root_t = math.sqrt(years)
+        d1 = (math.log(spot / strike) + 0.5 * sigma * sigma * years) / (sigma * root_t)
+        density = math.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi)
+        theta_day = -(spot * density * sigma) / (2.0 * root_t * 365.0)
+        vega_point = spot * density * root_t * 0.01
+        return theta_day, vega_point
+
+    @staticmethod
+    def _greeks_horizon_clamp(value, low=0.0, high=100.0):
+        return max(low, min(high, float(value)))
+
+    def _greeks_horizon_analysis(self, kind, level, grouped, relevant, expiry, now,
+                                 index_price, candles, gamma_strength, trade_count):
+        """Describe attraction/hold/pin/break without moving ``level``."""
+        clamp = self._greeks_horizon_clamp
+        buyer_theta = seller_theta = buyer_vega = seller_vega = 0.0
+        for (strike, option_type, direction), bucket in grouped.items():
+            amount = float(bucket.get("amount") or 0.0)
+            iv = bucket.get("iv_amount", 0.0) / amount if amount else 0.0
+            theta_day, vega_point = self._greeks_horizon_theta_vega(
+                max(index_price, 1e-9), float(strike), iv, expiry, now,
+            )
+            if direction == "buy":
+                buyer_theta += abs(theta_day) * amount
+                buyer_vega += abs(vega_point) * amount
+            else:
+                seller_theta += abs(theta_day) * amount
+                seller_vega += abs(vega_point) * amount
+
+        theta_total = buyer_theta + seller_theta
+        theta_control = 100.0 * (seller_theta - buyer_theta) / theta_total if theta_total else 0.0
+        net_vega = buyer_vega - seller_vega
+        vega_total = buyer_vega + seller_vega
+        iv_breakeven = theta_total / vega_total if vega_total else None
+
+        recent_cut = now - timedelta(hours=6)
+        base_cut = now - timedelta(hours=30)
+        recent_iv_num = recent_iv_den = base_iv_num = base_iv_den = 0.0
+        for row in relevant:
+            trade_hour, amount, avg_iv = row[4], float(row[5] or 0.0), float(row[6] or 0.0)
+            if trade_hour >= recent_cut:
+                recent_iv_num += avg_iv * amount
+                recent_iv_den += amount
+            elif trade_hour >= base_cut:
+                base_iv_num += avg_iv * amount
+                base_iv_den += amount
+        recent_iv = recent_iv_num / recent_iv_den if recent_iv_den else None
+        base_iv = base_iv_num / base_iv_den if base_iv_den else None
+        iv_delta = recent_iv - base_iv if recent_iv is not None and base_iv is not None else 0.0
+
+        ordered = sorted((c for c in (candles or []) if all(k in c for k in ("o", "h", "l", "c"))), key=lambda c: int(c.get("t", 0)))
+        recent = ordered[-16:]
+        closes = [float(c["c"]) for c in recent]
+        ranges = [max(0.0, float(c["h"]) - float(c["l"])) for c in recent]
+        atr = sum(ranges[-14:]) / max(1, len(ranges[-14:])) if ranges else max(index_price * 0.01, 1.0)
+        atr = max(atr, index_price * 0.001, 1e-9)
+        distance_atr = (level - index_price) / atr
+        momentum_atr = (closes[-1] - closes[-5]) / atr if len(closes) >= 5 else 0.0
+        crossings = 0
+        for left, right in zip(closes[-9:-1], closes[-8:]):
+            if (left - level) * (right - level) <= 0 and left != right:
+                crossings += 1
+        recent_range = sum(ranges[-4:]) / max(1, len(ranges[-4:])) if ranges else atr
+        prior_range = sum(ranges[-12:-4]) / max(1, len(ranges[-12:-4])) if len(ranges) > 4 else atr
+        compression = clamp(100.0 * (1.0 - recent_range / max(prior_range, 1e-9)) + 50.0)
+
+        beyond = 0
+        crossed_recent = False
+        false_break = False
+        if len(closes) >= 3:
+            side = 1 if index_price > level else -1
+            beyond = sum(1 for close in closes[-3:] if (close - level) * side > 0)
+            crossed_recent = any(
+                (left - level) * (right - level) < 0
+                for left, right in zip(closes[-6:-1], closes[-5:])
+            )
+            if crossings >= 2 and abs(distance_atr) <= 0.35:
+                before_side = 1 if closes[-6] > level else -1
+                current_side = 1 if closes[-1] > level else -1
+                false_break = before_side == current_side
+        if false_break:
+            stage = "FALSE_BREAK"
+        elif abs(distance_atr) <= 0.22 and crossings >= 2:
+            stage = "PINNING"
+        elif abs(distance_atr) <= 0.35:
+            stage = "TESTING_FROM_BELOW" if index_price < level else "TESTING_FROM_ABOVE"
+        elif crossed_recent and beyond >= 2 and abs(distance_atr) <= 0.85:
+            stage = "BREAK_CONFIRMED"
+        elif crossed_recent and beyond >= 1 and abs(distance_atr) <= 0.65:
+            stage = "BREAK_PENDING"
+        elif level > index_price and momentum_atr > 0.10:
+            stage = "APPROACHING_UP"
+        elif level < index_price and momentum_atr < -0.10:
+            stage = "APPROACHING_DOWN"
+        else:
+            stage = "DISTANT"
+
+        gamma_score = clamp(38.0 + 8.0 * math.log1p(max(gamma_strength, 0.0)))
+        quality = clamp(20.0 + min(55.0, math.sqrt(max(trade_count, 0)) * 6.0) + (15.0 if recent_iv_den else 0.0))
+        distance_score = clamp(100.0 - abs(distance_atr) * 32.0)
+        theta_support = clamp(50.0 + theta_control * 0.5)
+        iv_stability = clamp(100.0 - abs(iv_delta) * 22.0)
+        iv_shock = clamp(abs(iv_delta) * 28.0)
+        toward = clamp(50.0 + (1 if level > index_price else -1) * momentum_atr * 24.0)
+        momentum_strength = clamp(abs(momentum_atr) * 42.0)
+        crossing_score = clamp(crossings * 27.0)
+
+        weights = {
+            "D1": (0.45, 0.25, 0.10, 0.20),
+            "W": (0.35, 0.25, 0.20, 0.20),
+            "M": (0.25, 0.25, 0.35, 0.15),
+            "YE": (0.20, 0.15, 0.50, 0.15),
+        }.get(kind, (0.35, 0.25, 0.20, 0.20))
+        wg, wt, wv, wp = weights
+        attraction = clamp(wg * gamma_score + wt * 50.0 + wv * iv_stability + wp * (0.6 * distance_score + 0.4 * toward))
+        hold = clamp(wg * gamma_score + wt * theta_support + wv * iv_stability + wp * (100.0 - momentum_strength))
+        pin = clamp(wg * gamma_score + wt * theta_support + wv * iv_stability + wp * (0.45 * crossing_score + 0.35 * compression + 0.20 * distance_score))
+        break_score = clamp(wg * (100.0 - gamma_score) + wt * (100.0 - theta_support) + wv * iv_shock + wp * (0.65 * momentum_strength + 0.35 * toward))
+
+        direction = "UP" if momentum_atr >= 0 else "DOWN"
+        if quality < 35:
+            regime = "LOW DATA"
+        elif stage == "FALSE_BREAK":
+            regime = "FALSE BREAK / RE-PIN"
+        elif stage == "BREAK_CONFIRMED" and break_score >= 52:
+            regime = "BREAK CONFIRMED " + direction
+        elif stage == "BREAK_PENDING" and break_score >= 45:
+            regime = "BREAK PENDING " + direction
+        elif stage == "PINNING" and pin >= 60:
+            regime = "FRAGILE PIN" if break_score >= 48 else "STABLE PIN"
+        elif stage.startswith("TESTING") and hold >= 55:
+            regime = "HOLD / REJECTION" if stage.endswith("BELOW") else "HOLD / SUPPORT"
+        elif break_score >= 58:
+            regime = "BREAK RISK " + direction
+        elif attraction >= 58:
+            regime = "MAGNET " + ("UP" if level > index_price else "DOWN")
+        else:
+            regime = "MIXED"
+
+        primary = max(attraction, hold, pin, break_score)
+        confidence = round(clamp(0.55 * quality + 0.45 * primary))
+        return {
+            "regime": regime, "stage": stage, "confidence": confidence,
+            "scores": {"attraction": round(attraction), "hold": round(hold), "pin": round(pin), "break": round(break_score)},
+            "theta": {"buyer_cost": buyer_theta, "seller_advantage": seller_theta, "control": round(theta_control, 2)},
+            "vega": {"buyer": buyer_vega, "seller": seller_vega, "net": net_vega, "iv_breakeven_points": iv_breakeven},
+            "iv": {"recent": recent_iv, "baseline": base_iv, "change_points": iv_delta,
+                   "trend": "RISING" if iv_delta > 0.35 else "FALLING" if iv_delta < -0.35 else "STABLE"},
+            "price_context": {"distance_atr": round(distance_atr, 3), "momentum_atr": round(momentum_atr, 3),
+                              "crossings": crossings, "compression": round(compression)},
+            "data_quality": round(quality), "analysis_version": "GH-1",
+        }
+
     @http.route("/api/gamma-horizon/<string:asset>", type="http", auth="user", website=False, csrf=False)
     def gamma_horizon_json(self, asset):
         """Display-only term Gamma levels for tomorrow/week/month/year-end.
@@ -1605,11 +1819,12 @@ class ChartController(http.Controller):
         ][:1]
 
         specs = []
-        specs += [("D1", exp, 24.0, 72.0) for exp in daily_targets]
-        specs += [("W", exp, 6.0 * 24.0, None) for exp in weekly_targets]
-        specs += [("M", exp, 15.0 * 24.0, None) for exp in monthly_targets]
-        specs += [("YE", exp, 75.0 * 24.0, None) for exp in year_end_targets]
-        selected = sorted(set(exp for _, exp, _, _ in specs))
+        # kind, expiry, structural half-life, structural max age, recent window.
+        specs += [("D1", exp, 24.0, 72.0, 24.0) for exp in daily_targets]
+        specs += [("W", exp, 6.0 * 24.0, None, 7.0 * 24.0) for exp in weekly_targets]
+        specs += [("M", exp, 15.0 * 24.0, None, 14.0 * 24.0) for exp in monthly_targets]
+        specs += [("YE", exp, 75.0 * 24.0, None, 30.0 * 24.0) for exp in year_end_targets]
+        selected = sorted(set(exp for _, exp, _, _, _ in specs))
 
         if not selected:
             payload = {"asset": asset, "levels": [], "trade_count": 0,
@@ -1649,10 +1864,13 @@ class ChartController(http.Controller):
             base_to = float(icp.get_param("dankbit.eth_to_price", default=5000))
             base_step = max(5.0, float(icp.get_param("dankbit.eth_steps", default=50)))
         index_price = float(request.env["dankbit.trade"].get_index_price(asset) or 0.0)
+        # Read-only price context for Greeks Horizon labels.  The Gamma price
+        # calculation below is unchanged and no result is written to another engine.
+        gh_candles = request.env["dankbit.trade"].get_candles(asset, interval="1h", limit=24) or []
 
         levels = []
         total_trade_count = 0
-        for kind, expiry, half_life_hours, max_age_hours in specs:
+        for kind, expiry, half_life_hours, max_age_hours, recent_window_hours in specs:
             relevant = [row for row in rows if row[0] == expiry]
             if max_age_hours is not None:
                 relevant = [
@@ -1662,23 +1880,11 @@ class ChartController(http.Controller):
             if not relevant:
                 continue
 
-            # Combine hourly rows into Gamma inputs after applying freshness.
-            grouped = {}
-            first_seen = None
-            trade_count = 0
-            for row in relevant:
-                _, strike, option_type, direction, trade_hour, amount, avg_iv, count = row
-                age_hours = max(0.0, (now - trade_hour).total_seconds() / 3600.0)
-                freshness = 0.40 + 0.60 * math.pow(2.0, -age_hours / half_life_hours)
-                weighted_amount = float(amount or 0.0) * freshness
-                if weighted_amount <= 0:
-                    continue
-                key = (int(strike), option_type, direction)
-                bucket = grouped.setdefault(key, {"amount": 0.0, "iv_amount": 0.0})
-                bucket["amount"] += weighted_amount
-                bucket["iv_amount"] += float(avg_iv or 0.0) * weighted_amount
-                trade_count += int(count or 0)
-                first_seen = trade_hour if first_seen is None else min(first_seen, trade_hour)
+            # Existing calculation is retained byte-for-byte in policy terms:
+            # 40% permanent plus 60% exponentially decayed amount.
+            grouped, first_seen, trade_count, structural_raw_amount = self._gamma_horizon_group_rows(
+                relevant, now, half_life_hours, permanent_share=0.40,
+            )
 
             if not grouped:
                 continue
@@ -1691,36 +1897,78 @@ class ChartController(http.Controller):
             step = max(base_step, (grid_to - grid_from) / 1800.0)
             STs = np.arange(grid_from, grid_to + step, step)
 
-            buyer_trades, seller_trades = [], []
-            for (strike, option_type, direction), bucket in grouped.items():
-                amount = bucket["amount"]
-                trd = _AggTrade(
-                    strike=strike, option_type=option_type, direction=direction,
-                    expiration=expiry, amount=amount,
-                    iv=bucket["iv_amount"] / amount if amount else 0.0,
-                )
-                (buyer_trades if direction == "buy" else seller_trades).append(trd)
-
-            buyer_price, buyer_strength = self._gamma_horizon_peak(STs, buyer_trades)
-            seller_price, seller_strength = self._gamma_horizon_peak(STs, seller_trades)
-            prices = [p for p in (buyer_price, seller_price) if p is not None]
-            if not prices:
+            structural = self._gamma_horizon_level(STs, grouped, expiry)
+            if structural["price"] is None:
                 continue
             # Same semantic as Thales's existing mean Gamma: midpoint of the
             # strongest buyer/seller Gamma prices, never injected back into it.
-            mean_price = float(sum(prices) / len(prices))
+            mean_price = structural["price"]
+            greeks_analysis = self._greeks_horizon_analysis(
+                kind, mean_price, grouped, relevant, expiry, now, index_price,
+                gh_candles, structural["strength"], trade_count,
+            )
+
+            recent_cut = now - timedelta(hours=recent_window_hours)
+            recent_rows = [row for row in relevant if row[4] >= recent_cut]
+            recent_grouped, recent_first_seen, recent_trade_count, recent_raw_amount = self._gamma_horizon_group_rows(
+                recent_rows, now, max(6.0, recent_window_hours / 2.0), permanent_share=0.0,
+            )
+            recent = self._gamma_horizon_level(STs, recent_grouped, expiry) if recent_grouped else {
+                "price": None, "buyer_price": None, "seller_price": None,
+                "buyer_strength": 0.0, "seller_strength": 0.0, "strength": 0.0,
+            }
+            shift = recent["price"] - mean_price if recent["price"] is not None else None
+            shift_pct = 100.0 * shift / mean_price if shift is not None and mean_price else None
+            recent_share = 100.0 * recent_raw_amount / structural_raw_amount if structural_raw_amount else 0.0
+            candle_ranges = [max(0.0, float(c["h"]) - float(c["l"])) for c in gh_candles if all(k in c for k in ("h", "l"))]
+            atr = sum(candle_ranges[-14:]) / max(1, len(candle_ranges[-14:])) if candle_ranges else max(index_price * 0.01, 1.0)
+            shift_atr = abs(float(shift or 0.0)) / max(atr, 1.0)
+            count_score = min(100.0, math.sqrt(max(recent_trade_count, 0)) * 7.0)
+            share_score = min(100.0, recent_share * 2.0)
+            shift_score = min(100.0, shift_atr * 70.0)
+            repricing_confidence = round(self._greeks_horizon_clamp(
+                0.40 * count_score + 0.35 * share_score + 0.25 * shift_score
+            )) if recent["price"] is not None else 0
+            if recent["price"] is None or repricing_confidence < 30:
+                repricing_signal = "LOW DATA"
+            elif abs(float(shift_pct or 0.0)) < 0.20:
+                repricing_signal = "STRUCTURE CONFIRMED"
+            elif shift > 0:
+                repricing_signal = "BULLISH REPRICING"
+            else:
+                repricing_signal = "BEARISH REPRICING"
             total_trade_count += trade_count
             levels.append({
                 "kind": kind,
                 "expiry": expiry.replace(tzinfo=timezone.utc).isoformat(),
                 "price": mean_price,
-                "buyer_price": buyer_price,
-                "seller_price": seller_price,
-                "buyer_strength": buyer_strength,
-                "seller_strength": seller_strength,
+                "buyer_price": structural["buyer_price"],
+                "seller_price": structural["seller_price"],
+                "buyer_strength": structural["buyer_strength"],
+                "seller_strength": structural["seller_strength"],
                 "trade_count": trade_count,
                 "first_seen": first_seen.replace(tzinfo=timezone.utc).isoformat() if first_seen else None,
                 "half_life_hours": half_life_hours,
+                "greeks": greeks_analysis,
+                "recent": {
+                    "price": recent["price"],
+                    "buyer_price": recent["buyer_price"],
+                    "seller_price": recent["seller_price"],
+                    "buyer_strength": recent["buyer_strength"],
+                    "seller_strength": recent["seller_strength"],
+                    "trade_count": recent_trade_count,
+                    "first_seen": recent_first_seen.replace(tzinfo=timezone.utc).isoformat() if recent_first_seen else None,
+                    "window_hours": recent_window_hours,
+                    "half_life_hours": max(6.0, recent_window_hours / 2.0),
+                    "raw_amount": recent_raw_amount,
+                },
+                "repricing": {
+                    "shift": shift, "shift_pct": shift_pct,
+                    "shift_atr": round(shift_atr, 3),
+                    "recent_share_pct": round(recent_share, 2),
+                    "confidence": repricing_confidence,
+                    "signal": repricing_signal,
+                },
             })
 
         payload = {
@@ -1730,6 +1978,7 @@ class ChartController(http.Controller):
             "index_price": index_price,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "display_only": True,
+            "greeks_display_only": True,
         }
         return request.make_response(
             json.dumps(payload),
