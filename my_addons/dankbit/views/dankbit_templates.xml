@@ -284,7 +284,7 @@
 						position:fixed; top:calc(var(--tf-bar-bottom, 36px) + 8px); right:72px;
 						width:min(560px, calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom, 36px) - 28px);
 						display:none; flex-direction:column; overflow:hidden; z-index:20;
-						font:10.5pt/1.35 monospace; color:#333; background:rgba(255,255,255,0.97);
+						font:12pt/1.42 monospace; color:#333; background:rgba(255,255,255,0.97);
 						border:1px solid #aaa; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,0.24);
 					}
 					.strategy-radar-head { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid #ddd; font-weight:bold; }
@@ -305,6 +305,38 @@
 					.strategy-leg { padding:4px 0; border-bottom:1px dotted #ccc; }
 					.strategy-note { color:#777; font-size:9pt; margin-top:6px; }
 					@media (max-width:760px) { .strategy-radar-body { grid-template-columns:1fr; overflow-y:auto; } #strategy-radar-list { max-height:150px; border-right:0; border-bottom:1px solid #ddd; } }
+					#expiry-pricing-panel {
+						position:fixed; top:calc(var(--tf-bar-bottom, 36px) + 8px); right:72px;
+						width:min(920px, calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom, 36px) - 28px);
+						display:none; flex-direction:column; overflow:auto; z-index:21;
+						font:12pt/1.45 "Segoe UI",Tahoma,Arial,sans-serif; color:#333; background:rgba(255,255,255,0.98);
+						border:1px solid #aaa; border-radius:7px; box-shadow:0 4px 18px rgba(0,0,0,0.24); padding-bottom:9px;
+					}
+					.expiry-pricing-head { display:flex; align-items:center; padding:11px 14px; border-bottom:1px solid #ddd; font-weight:700; font-size:15pt; }
+					.expiry-pricing-head button { margin-left:auto; border:0; background:transparent; color:inherit; font-size:15pt; cursor:pointer; }
+					.expiry-trace-controls { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:6px; padding:8px 10px; border-bottom:1px solid #ddd; }
+					.expiry-trace-controls label { color:#777; font-size:9pt; }
+					.expiry-trace-controls select, .expiry-trace-controls input, .expiry-trace-controls button { width:100%; min-height:30px; margin-top:2px; color:inherit; background:transparent; border:1px solid #aaa; border-radius:4px; font:10pt monospace; }
+					.expiry-trace-actions { display:flex; gap:5px; align-items:end; }
+					#expiry-pricing-summary { padding:9px 14px; color:#666; border-bottom:1px solid #ddd; font-size:12pt; font-weight:600; }
+					#expiry-trace-verdict { margin:10px 12px 2px; padding:12px 15px; border:2px solid #888; border-radius:7px; font-size:14pt; font-weight:700; letter-spacing:.2px; }
+					#expiry-trace-verdict small { display:block; margin-top:4px; font-size:10.5pt; font-weight:500; opacity:.78; }
+					.expiry-pricing-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; padding:8px 10px; }
+					.expiry-flow-card { border:1px solid #ddd; border-radius:5px; padding:9px; background:#fafafa; font-size:11.5pt; }
+					.expiry-flow-card b { display:block; font-size:13pt; margin-bottom:3px; }
+					#expiry-pricing-svg { width:calc(100% - 24px); height:370px; margin:0 12px; display:block; border:1px solid #ddd; background:#fff; }
+					.expiry-pricing-note { color:#777; font-size:10.5pt; padding:7px 10px 0; }
+					@media (max-width:760px) { .expiry-pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .expiry-trace-controls { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+					#mm-hedge-panel { position:fixed; top:calc(var(--tf-bar-bottom,36px) + 8px); right:72px; width:min(520px,calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom,36px) - 28px); display:none; flex-direction:column; overflow:auto; z-index:22; color:#292929; background:rgba(255,255,255,.98); border:1px solid #999; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,.25); font:12pt/1.45 "Segoe UI",Tahoma,Arial,sans-serif; }
+					.mm-hedge-head { display:flex; align-items:center; padding:11px 14px; border-bottom:1px solid #ddd; font-size:15pt; font-weight:700; }
+					.mm-hedge-head button { margin-left:auto; border:0; background:transparent; color:inherit; font-size:15pt; cursor:pointer; }
+					.mm-hedge-expiries { display:flex; flex-wrap:wrap; gap:6px 12px; padding:9px 13px; border-bottom:1px solid #ddd; font-size:10.5pt; }
+					.mm-hedge-expiries label { cursor:pointer; white-space:nowrap; }
+					#mm-hedge-summary { padding:9px 13px; color:#666; font-size:10.5pt; border-bottom:1px solid #ddd; }
+					.mm-target-card { margin:10px 12px 0; padding:12px 14px; border:2px solid #777; border-radius:7px; }
+					.mm-target-card b { display:block; font-size:14pt; margin-bottom:3px; }
+					.mm-target-card small { display:block; margin-top:4px; color:#777; font-size:10pt; }
+					.mm-hedge-note { padding:8px 13px 11px; color:#777; font-size:9.5pt; }
 					.signal-bot-control { position:relative; display:flex; align-items:stretch; }
 					.signal-bot-control .toggle-label { border-radius:4px 0 0 4px; border-right:0; }
 					.signal-bot-summary { max-width:165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#777; font-size:9.5pt; }
@@ -388,12 +420,33 @@
 					.line-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
 					.line-row select { width: 92px; padding: 3px 4px; }
 					.gamma-horizon-row {
-						display: grid; grid-template-columns: minmax(105px, 1fr) 26px 44px 92px 58px;
+						display: grid; grid-template-columns: minmax(105px, 1fr) 44px 92px 58px;
 						align-items: center; gap: 8px; padding: 3px 0;
 					}
 					.gamma-horizon-row input[type="color"] { width: 40px; height: 24px; border: none; padding: 0; cursor: pointer; }
 					.gamma-horizon-row select { width: 92px; padding: 3px 4px; }
 					.gamma-horizon-row input[type="number"] { width: 52px; padding: 3px; }
+					#gh-expiry-appearance { margin-top:7px; padding-top:7px; border-top:1px dotted #bbb; }
+					#gh-expiry-appearance .gamma-horizon-row { grid-template-columns:minmax(145px,1fr) 44px 92px 58px; }
+					.gamma-horizon-control { position:relative; display:flex; align-items:stretch; }
+					.gamma-horizon-control .toggle-label { border-radius:4px 0 0 4px; border-right:0; }
+					.gamma-horizon-menu-button { border-radius:0 4px 4px 0; min-width:25px; padding:2px 6px; }
+					.gamma-horizon-menu { position:absolute; top:calc(100% + 4px); left:0; min-width:330px; max-height:410px; overflow:auto; display:none; padding:7px; background:rgba(255,255,255,.98); border:1px solid #bbb; border-radius:5px; box-shadow:0 3px 12px rgba(0,0,0,.22); z-index:32; }
+					.gamma-horizon-menu.open { display:block; }
+					.gamma-horizon-menu-head { display:flex; justify-content:space-between; align-items:center; font:700 10.5pt monospace; padding:2px 3px 6px; border-bottom:1px solid #ddd; }
+					.gamma-horizon-menu-actions { display:flex; gap:4px; margin:6px 0; }
+					.gamma-horizon-menu-actions button { flex:1; padding:4px; border:1px solid #bbb; border-radius:3px; background:#f5f5f5; cursor:pointer; font:9.5pt monospace; }
+					.gh-menu-expiry { display:grid; grid-template-columns:18px minmax(145px,1fr) 94px; align-items:center; gap:7px; padding:5px 4px; border-bottom:1px dotted #ddd; cursor:pointer; font:10pt monospace; }
+					.gh-menu-expiry span { white-space:nowrap; }
+					.gh-menu-expiry select { width:94px; padding:3px; font:9pt monospace; }
+					.gh-menu-empty { color:#777; padding:8px 4px; font:9.5pt monospace; }
+					#greeks-horizon-tooltip { position:fixed; display:none; z-index:26; min-width:310px; max-width:430px; padding:9px 11px; border:1px solid #777; border-radius:6px; background:rgba(255,255,255,.97); color:#333; font:11pt/1.45 monospace; box-shadow:0 4px 16px rgba(0,0,0,.28); pointer-events:auto; }
+					#greeks-horizon-tooltip .gh-tip-title { font-size:12pt; font-weight:700; margin-bottom:5px; }
+					#greeks-horizon-tooltip .gh-tip-regime { font-weight:700; margin-bottom:6px; }
+					#greeks-horizon-tooltip .gh-tip-grid { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; }
+					#greeks-horizon-tooltip .gh-tip-scores { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin:7px 0; }
+					#greeks-horizon-tooltip .gh-tip-score { border:1px solid #ccc; border-radius:4px; padding:4px; text-align:center; }
+					#greeks-horizon-tooltip .gh-tip-note { color:#777; font-size:9pt; margin-top:6px; }
 					.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 					/* "Light"/"Dark" theme dropdown (see DARK_MODE/onThemeChange in the
@@ -413,6 +466,12 @@
 					body.dark .strategy-card { color:#ddd; background:#1b1b1b; border-color:#555; }
 					body.dark .strategy-card.active { background:#30233a; border-color:#a778c4; }
 					body.dark .strategy-payoff-svg { background:#111; border-color:#444; }
+					body.dark #expiry-pricing-panel { color:#ddd; background:rgba(12,12,12,0.97); border-color:#555; }
+					body.dark .expiry-pricing-head, body.dark #expiry-pricing-summary { border-color:#444; }
+					body.dark .expiry-flow-card { background:#1b1b1b; border-color:#555; }
+					body.dark #expiry-pricing-svg { background:#111; border-color:#444; }
+					body.dark #mm-hedge-panel { color:#ddd; background:rgba(12,12,12,.98); border-color:#555; }
+					body.dark .mm-hedge-head, body.dark .mm-hedge-expiries, body.dark #mm-hedge-summary { border-color:#444; }
 					body.dark .signal-bot-menu { background:rgba(20,20,20,0.98); border-color:#555; }
 					body.dark .signal-bot-menu button, body.dark .signal-bot-menu a { color:#ddd; }
 					body.dark .signal-bot-menu button:hover, body.dark .signal-bot-menu a:hover { background:#333; }
@@ -428,6 +487,12 @@
 					body.dark .modal-box { background: #1a1a1a; color: #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
 					body.dark .modal-section-title { color: #aaa; }
 					body.dark .modal-close:hover { color: #f66; }
+					body.dark #greeks-horizon-tooltip { color:#ddd; background:rgba(18,18,18,.98); border-color:#666; }
+					body.dark #greeks-horizon-tooltip .gh-tip-score { border-color:#555; }
+					body.dark #greeks-horizon-tooltip .gh-tip-note { color:#aaa; }
+					body.dark .gamma-horizon-menu { background:rgba(20,20,20,.98); border-color:#555; }
+					body.dark .gamma-horizon-menu-head, body.dark .gh-menu-expiry { border-color:#444; }
+					body.dark .gamma-horizon-menu-actions button { color:#ddd; background:#292929; border-color:#555; }
 				</style>
 			</head>
 			<body>
@@ -447,6 +512,29 @@
 					<div id="strategy-radar-summary">Loading…</div>
 					<div class="strategy-radar-body"><div id="strategy-radar-list"/><div id="strategy-radar-detail"/></div>
 				</div>
+				<div id="expiry-pricing-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+					<div class="expiry-pricing-head"><span>Expiry Trace · Traced Price Path</span><button type="button" onclick="closeExpiryPricing()">&#10005;</button></div>
+					<div class="expiry-trace-controls">
+						<label>Mode<select id="expiry-trace-mode" onchange="onExpiryTraceMode()"><option value="live">Live</option><option value="explorer">Explorer</option></select></label>
+						<label>Expiry<select id="expiry-trace-expiry" disabled="disabled"/></label>
+						<label>Trade From<input id="expiry-trace-from" type="datetime-local" disabled="disabled"/></label>
+						<label>As Of<input id="expiry-trace-asof" type="datetime-local" disabled="disabled"/></label>
+						<label>Interval<select id="expiry-trace-interval" disabled="disabled"><option value="auto">Auto</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option></select></label>
+						<div class="expiry-trace-actions"><label>Candles<select id="expiry-trace-candles" disabled="disabled"><option value="auto">Auto</option><option>24</option><option>48</option><option>72</option><option>120</option><option>168</option></select></label><button id="expiry-trace-apply" type="button" disabled="disabled" onclick="applyExpiryTrace()">Apply</button></div>
+					</div>
+					<div id="expiry-pricing-summary">Loading…</div>
+					<div id="expiry-trace-verdict">Waiting for analysis…</div>
+					<div id="expiry-pricing-flows" class="expiry-pricing-grid"/>
+					<svg id="expiry-pricing-svg" viewBox="0 0 760 300" role="img" aria-label="Traced Price Path"/>
+					<div class="expiry-pricing-note">Solid candles are observed Coinbase Spot candles; translucent candles are the independent Traced Price Path. Live refreshes every 15 minutes. Hover a flow card for Theta/Vega details. This panel does not feed any other indicator engine.</div>
+				</div>
+				<div id="mm-hedge-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+					<div class="mm-hedge-head"><span>MM Hedge Simulator</span><button type="button" onclick="closeMMHedge()">&#10005;</button></div>
+					<div class="mm-hedge-expiries" id="mm-hedge-expiries"><label><input type="checkbox" id="mm-auto" checked="checked" onchange="onMMHedgeSelectionChange('auto')"/>Auto</label><span>Loading expiries…</span></div>
+					<div id="mm-hedge-summary">Waiting for analysis…</div>
+					<div id="mm-hedge-targets"/>
+					<div class="mm-hedge-note">One short-term and one structural target at most. Calculations are probabilistic and display-only; they do not feed Forecast or Signal Bot.</div>
+				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -460,14 +548,24 @@
 						<option value="dark">Dark</option>
 					</select>
 					<t t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
-						<label class="toggle-label">
-							<input type="checkbox" id="gamma-horizon-toggle" onchange="onToggleGammaHorizon()"/>
-							Gamma Horizon
-						</label>
+						<div class="gamma-horizon-control">
+							<label class="toggle-label"><input type="checkbox" id="gamma-horizon-toggle" onchange="onToggleGammaHorizon()"/>Gamma Horizon</label>
+							<button class="tf-btn gamma-horizon-menu-button" type="button" onclick="toggleGammaHorizonMenu(event)" title="Select Gamma Horizon expiries">▾</button>
+							<div class="gamma-horizon-menu" id="gamma-horizon-menu">
+								<div class="gamma-horizon-menu-head"><span>Expiry · View</span><span id="gh-menu-count">—</span></div>
+								<div class="gamma-horizon-menu-actions"><button type="button" onclick="setAllGammaHorizonExpiries(true)">Select All</button><button type="button" onclick="setAllGammaHorizonExpiries(false)">Clear All</button></div>
+								<div id="gh-expiry-selector"><div class="gh-menu-empty">Loading expiries…</div></div>
+							</div>
+						</div>
 						<label class="toggle-label">
 							<input type="checkbox" id="strategy-radar-toggle" onchange="onToggleStrategyRadar()"/>
 							Strategy Radar
 						</label>
+						<label class="toggle-label">
+							<input type="checkbox" id="expiry-pricing-toggle" onchange="onToggleExpiryPricing()"/>
+							Expiry Trace
+						</label>
+						<label class="toggle-label"><input type="checkbox" id="mm-hedge-toggle" onchange="onToggleMMHedge()"/>MM Hedge</label>
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
 							Zones
@@ -513,6 +611,7 @@
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
 				</div>
 				<div id="ruler-info"/>
+				<div id="greeks-horizon-tooltip"/>
 				<div id="context-menu">
 					<div class="context-menu-item" onclick="onResetChartViewClick()">Reset chart view</div>
 				</div>
@@ -541,13 +640,28 @@
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title">Gamma Horizon</div>
-							<label class="gamma-horizon-row"><span>Tomorrow (D1)</span><input type="checkbox" id="gh-visible-D1"/><input type="color" id="gh-color-D1"/><select id="gh-style-D1"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-D1" min="1" max="4" step="1" title="Line width"/></label>
-							<label class="gamma-horizon-row"><span>Weekly (W)</span><input type="checkbox" id="gh-visible-W"/><input type="color" id="gh-color-W"/><select id="gh-style-W"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-W" min="1" max="4" step="1" title="Line width"/></label>
-							<label class="gamma-horizon-row"><span>Monthly (M)</span><input type="checkbox" id="gh-visible-M"/><input type="color" id="gh-color-M"/><select id="gh-style-M"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-M" min="1" max="4" step="1" title="Line width"/></label>
-							<label class="gamma-horizon-row"><span>Year End (YE)</span><input type="checkbox" id="gh-visible-YE"/><input type="color" id="gh-color-YE"/><select id="gh-style-YE"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-YE" min="1" max="4" step="1" title="Line width"/></label>
-							<label class="color-row"><span>Weekly Line Count (0–3)</span><input type="number" id="gh-weekly-count" min="0" max="3" step="1"/></label>
-							<label class="color-row"><span>Monthly Line Count (0–3)</span><input type="number" id="gh-monthly-count" min="0" max="3" step="1"/></label>
+							<label class="gamma-horizon-row"><span>Tomorrow (D1)</span><input type="color" id="gh-color-D1"/><select id="gh-style-D1"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-D1" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Weekly (W)</span><input type="color" id="gh-color-W"/><select id="gh-style-W"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-W" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Monthly (M)</span><input type="color" id="gh-color-M"/><select id="gh-style-M"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-M" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Year End (YE)</span><input type="color" id="gh-color-YE"/><select id="gh-style-YE"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-width-YE" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Recent Gamma</span><input type="color" id="gh-recent-color"/><select id="gh-recent-style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="gh-recent-width" min="1" max="4" step="1" title="Recent line width"/></label>
 							<label class="color-row"><span>Show Expiry Date Labels</span><input type="checkbox" id="gh-show-labels"/></label>
+							<label class="color-row"><span>Show Greeks Analysis</span><input type="checkbox" id="gh-show-greeks"/></label>
+							<div class="modal-section-title" style="margin-top:8px">Individual Expiry Appearance</div>
+							<div id="gh-expiry-appearance"><span style="color:#777">Available expiries will load automatically.</span></div>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">Expiry Trace Price Lines</div>
+							<label class="gamma-horizon-row"><span>Buyer Call Gamma</span><input type="color" id="et-color-BCG"/><select id="et-style-BCG"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="et-width-BCG" min="1" max="5" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Buyer Put Gamma</span><input type="color" id="et-color-BPG"/><select id="et-style-BPG"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="et-width-BPG" min="1" max="5" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Seller Call Gamma</span><input type="color" id="et-color-SCG"/><select id="et-style-SCG"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="et-width-SCG" min="1" max="5" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Seller Put Gamma</span><input type="color" id="et-color-SPG"/><select id="et-style-SPG"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="et-width-SPG" min="1" max="5" step="1" title="Line width"/></label>
+						</div>
+						<div class="modal-section">
+							<div class="modal-section-title">MM Hedge Target Lines</div>
+							<label class="gamma-horizon-row"><span>Short-Term Target</span><input type="color" id="mm-color-short"/><select id="mm-style-short"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="mm-width-short" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="gamma-horizon-row"><span>Structural Target</span><input type="color" id="mm-color-structural"/><select id="mm-style-structural"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select><input type="number" id="mm-width-structural" min="1" max="4" step="1" title="Line width"/></label>
+							<label class="color-row"><span>Show Price Labels</span><input type="checkbox" id="mm-show-labels"/></label>
 						</div>
 						<div class="modal-section">
 							<div class="modal-section-title" id="forecast-settings-title">Forecast Candles (4H)</div>
@@ -704,6 +818,7 @@
 					const BAND_SMOOTHING_STORAGE_KEY = 'dankbit_band_adaptive_smoothing';
 					const BAND_SMOOTHING_STATE_KEY = 'dankbit_band_smoothing_state_' + ASSET;
 					const GAMMA_HORIZON_SETTINGS_KEY = 'dankbit_gamma_horizon_settings';
+					const GREEKS_HORIZON_SNAPSHOT_KEY = 'dankbit_greeks_horizon_snapshots_' + ASSET;
 					const FORECAST_MAX_COUNTS = { '1h': 72, '4h': 18, '1d': 3 };
 					const DEFAULT_COLORS = {
 						zonesBox: '#fbc02d',
@@ -733,7 +848,23 @@
 						weeklyCount:3,
 						monthlyCount:3,
 						showLabels:true,
+						showGreeks:true,
+						recent:{color:'#ffeb3b',style:'solid',width:2},
+						expiries:{},
 					};
+					const EXPIRY_TRACE_SETTINGS_KEY='dankbit_expiry_trace_line_settings';
+					const DEFAULT_EXPIRY_TRACE_LINES={
+						BCG:{color:'#2e7d32',style:'dashed',width:2},
+						BPG:{color:'#c62828',style:'dashed',width:2},
+						SCG:{color:'#7e57c2',style:'dashed',width:2},
+						SPG:{color:'#1565c0',style:'dashed',width:2},
+					};
+					let expiryTraceLines=JSON.parse(JSON.stringify(DEFAULT_EXPIRY_TRACE_LINES));
+					try{const saved=JSON.parse(localStorage.getItem(EXPIRY_TRACE_SETTINGS_KEY)||'{}');Object.keys(expiryTraceLines).forEach(k=>{const row=saved[k]||{};if(/^#[0-9a-f]{6}$/i.test(row.color||''))expiryTraceLines[k].color=row.color;if(['solid','dashed','dotted'].includes(row.style))expiryTraceLines[k].style=row.style;expiryTraceLines[k].width=Math.max(1,Math.min(5,parseInt(row.width,10)||expiryTraceLines[k].width));});}catch(e){}
+					const MM_HEDGE_SETTINGS_KEY='dankbit_mm_hedge_line_settings';
+					const DEFAULT_MM_HEDGE_LINES={short:{color:'#6a1b9a',style:'dashed',width:2},structural:{color:'#00838f',style:'solid',width:2},showLabels:true};
+					let mmHedgeLineSettings=JSON.parse(JSON.stringify(DEFAULT_MM_HEDGE_LINES));
+					try{const saved=JSON.parse(localStorage.getItem(MM_HEDGE_SETTINGS_KEY)||'{}');['short','structural'].forEach(k=>{const row=saved[k]||{};if(/^#[0-9a-f]{6}$/i.test(row.color||''))mmHedgeLineSettings[k].color=row.color;if(['solid','dashed','dotted'].includes(row.style))mmHedgeLineSettings[k].style=row.style;mmHedgeLineSettings[k].width=Math.max(1,Math.min(4,parseInt(row.width,10)||2));});if(typeof saved.showLabels==='boolean')mmHedgeLineSettings.showLabels=saved.showLabels;}catch(e){}
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					let chartLineStyles = Object.assign({}, DEFAULT_LINE_STYLES);
 					let gammaHorizonSettings = JSON.parse(JSON.stringify(DEFAULT_GAMMA_HORIZON_SETTINGS));
@@ -787,6 +918,24 @@
 						if (Number.isFinite(savedWeeklyCount)) gammaHorizonSettings.weeklyCount = Math.max(0, Math.min(3, savedWeeklyCount));
 						if (Number.isFinite(savedMonthlyCount)) gammaHorizonSettings.monthlyCount = Math.max(0, Math.min(3, savedMonthlyCount));
 						if (typeof saved.showLabels === 'boolean') gammaHorizonSettings.showLabels = saved.showLabels;
+						if (typeof saved.showGreeks === 'boolean') gammaHorizonSettings.showGreeks = saved.showGreeks;
+						if (saved.recent && typeof saved.recent === 'object') {
+							if (/^#[0-9a-f]{6}$/i.test(saved.recent.color||'')) gammaHorizonSettings.recent.color=saved.recent.color;
+							if (['solid','dashed','dotted'].includes(saved.recent.style)) gammaHorizonSettings.recent.style=saved.recent.style;
+							gammaHorizonSettings.recent.width=Math.max(1,Math.min(4,parseInt(saved.recent.width,10)||2));
+						}
+						if (saved.expiries && typeof saved.expiries === 'object') {
+							Object.keys(saved.expiries).forEach(expiry => {
+								const row=saved.expiries[expiry] || {};
+								gammaHorizonSettings.expiries[expiry]={
+									visible:row.visible !== false,
+									color:/^#[0-9a-f]{6}$/i.test(row.color||'')?row.color:null,
+									style:['solid','dashed','dotted'].includes(row.style)?row.style:null,
+									width:Math.max(1,Math.min(4,parseInt(row.width,10)||1)),
+									mode:['structural','recent','compare'].includes(row.mode)?row.mode:'structural',
+								};
+							});
+						}
 					} catch (e) { /* malformed stored value — use Gamma Horizon defaults */ }
 
 					function lineStyleFromName(name) {
@@ -805,6 +954,9 @@
 
 					const GAMMA_HORIZON_URL = '/api/gamma-horizon/' + ASSET;
 					const STRATEGY_RADAR_URL = '/api/option-strategy-radar/' + ASSET;
+					const EXPIRY_PRICING_URL = '/api/expiry-pricing/' + ASSET;
+					const EXPIRY_TRACE_EXPIRIES_URL = '/api/expiry-trace/expiries/' + ASSET;
+					const MM_HEDGE_URL = '/api/mm-hedge/' + ASSET;
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -1029,6 +1181,9 @@
 					});
 
 					let gammaHorizonLines = [];
+					let gammaHorizonLineMeta = [];
+					let gammaHorizonData = null;
+					let pinnedGreeksHorizonKey = null;
 
 					function clearLines(arr) {
 						arr.forEach(pl => series.removePriceLine(pl));
@@ -1202,28 +1357,84 @@
 						const date = expiry.toLocaleDateString('en-GB', {
 							timeZone:'UTC', day:'2-digit', month:'short', year:'2-digit',
 						}).toUpperCase().replace(/ /g, ' ');
-						return item.kind + ' · ' + date;
+						const price=Number(item.price).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+						const analysis=gammaHorizonSettings.showGreeks && item.greeks
+							? ' · '+item.greeks.regime.replace(' UP',' ↑').replace(' DOWN',' ↓')+' '+Number(item.greeks.confidence)+'%'
+							: '';
+						return item.kind+' · '+date+' · '+price+analysis;
 					}
 
-					async function refreshGammaHorizon() {
-						if (MINIMAL_CHART || !SHOW_GAMMA_HORIZON) return;
+					function gammaHorizonRecentLabel(item) {
+						if (!gammaHorizonSettings.showLabels || !Number.isFinite(Number(item.recent?.price))) return '';
+						const date=new Date(item.expiry).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',year:'2-digit'}).toUpperCase();
+						const price=Number(item.recent.price).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+						const signal=item.repricing?.signal||'RECENT';const confidence=Number(item.repricing?.confidence||0);
+						return item.kind+' · '+date+' · RECENT '+price+' · '+signal.replace('BULLISH','↑').replace('BEARISH','↓')+' '+confidence+'%';
+					}
+
+					function gammaHorizonAppearance(item) {
+						const base=gammaHorizonSettings[item.kind]||gammaHorizonSettings.W;
+						const own=gammaHorizonSettings.expiries?.[item.expiry]||{};
+						return {visible:own.visible!==false,mode:own.mode||'structural',color:own.color||base.color,style:own.style||base.style,width:own.width||base.width};
+					}
+
+					function ghFmt(value,digits) {
+						if(value==null)return '—'; const n=Number(value); const d=digits==null?0:digits;
+						return Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+					}
+
+					function greeksHorizonTooltipHtml(items) {
+						return items.map(item=>{const g=item.greeks||{},s=g.scores||{},theta=g.theta||{},vega=g.vega||{},iv=g.iv||{},pc=g.price_context||{},r=item.repricing||{},recent=item.recent||{};const date=new Date(item.expiry).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',year:'numeric'}).toUpperCase();const migration=g.level_migration==null?'—':(Number(g.level_migration)>=0?'+':'')+ghFmt(g.level_migration,2);const layer=item._hoverLayer==='recent'?'RECENT':'STRUCTURAL';const shown=item._hoverPrice==null?item.price:item._hoverPrice;const shift=Number(r.shift)>=0?'+':'−';return '<div class="gh-tip-title">'+radarEsc(item.kind)+' · '+date+' · '+layer+' '+ghFmt(shown,2)+'</div><div class="gh-tip-regime">'+radarEsc(r.signal||g.regime||'GAMMA ONLY')+' · Repricing confidence '+ghFmt(r.confidence)+'%</div><div class="gh-tip-grid"><span>Structural Gamma</span><b>'+ghFmt(item.price,2)+'</b><span>Recent Gamma</span><b>'+ghFmt(recent.price,2)+'</b><span>Recent window</span><b>'+ghFmt(Number(recent.window_hours||0)/24,1)+' days</b><span>Gamma shift</span><b>'+shift+ghFmt(Math.abs(Number(r.shift||0)),2)+' ('+(Number(r.shift_pct)>=0?'+':'')+ghFmt(r.shift_pct,2)+'%)</b><span>Shift distance</span><b>'+ghFmt(r.shift_atr,2)+' ATR</b><span>Recent share</span><b>'+ghFmt(r.recent_share_pct,1)+'%</b><span>Recent trades</span><b>'+ghFmt(recent.trade_count)+'</b></div><div class="gh-tip-scores"><div class="gh-tip-score">Attract<br/><b>'+ghFmt(s.attraction)+'</b></div><div class="gh-tip-score">Hold<br/><b>'+ghFmt(s.hold)+'</b></div><div class="gh-tip-score">Pin<br/><b>'+ghFmt(s.pin)+'</b></div><div class="gh-tip-score">Break<br/><b>'+ghFmt(s.break)+'</b></div></div><div class="gh-tip-grid"><span>Stage</span><b>'+radarEsc(g.stage||'—')+'</b><span>Distance</span><b>'+ghFmt(pc.distance_atr,2)+' ATR</b><span>Level migration</span><b>'+migration+'</b><span>Theta control</span><b>'+(Number(theta.control)>=0?'Seller +':'Buyer ')+ghFmt(Math.abs(Number(theta.control||0)),1)+'</b><span>Net Vega</span><b>'+ghFmt(vega.net,2)+'</b><span>IV trend</span><b>'+radarEsc(iv.trend||'—')+' '+(Number(iv.change_points)>=0?'+':'')+ghFmt(iv.change_points,2)+'</b><span>Structural trades</span><b>'+ghFmt(item.trade_count)+'</b><span>Data quality</span><b>'+ghFmt(g.data_quality)+'%</b></div><div class="gh-tip-note">Gamma Repricing is display-only and does not feed Forecast or any other engine.</div>';}).join('<hr style="border:0;border-top:1px solid #777;margin:8px 0"/>');
+					}
+
+					function nearbyGammaHorizonItems(point) {
+						if(!point)return[];
+						return gammaHorizonLineMeta.map(meta=>({meta,y:series.priceToCoordinate(Number(meta.price))})).filter(row=>row.y!==null&&Math.abs(row.y-point.y)<=8).sort((a,b)=>Math.abs(a.y-point.y)-Math.abs(b.y-point.y)).map(row=>Object.assign({},row.meta.item,{_hoverLayer:row.meta.layer,_hoverPrice:row.meta.price}));
+					}
+
+					function showGreeksHorizonTooltip(items,point,force) {
+						const tip=document.getElementById('greeks-horizon-tooltip');if(!tip)return;
+						if(!items.length){if(!pinnedGreeksHorizonKey||force)tip.style.display='none';return;}
+						tip.innerHTML=greeksHorizonTooltipHtml(items);tip.style.display='block';
+						const rect=document.getElementById('chart-container').getBoundingClientRect();let left=rect.left+point.x+14,top=rect.top+point.y+14;
+						if(left+tip.offsetWidth>window.innerWidth-8)left=rect.left+point.x-tip.offsetWidth-14;if(top+tip.offsetHeight>window.innerHeight-8)top=window.innerHeight-tip.offsetHeight-8;
+						tip.style.left=Math.max(8,left)+'px';tip.style.top=Math.max(8,top)+'px';
+					}
+
+					function enrichAndStoreGreeksHorizon(data) {
+						try {
+							let snapshots=JSON.parse(localStorage.getItem(GREEKS_HORIZON_SNAPSHOT_KEY)||'[]');if(!Array.isArray(snapshots))snapshots=[];
+							const previous=snapshots[snapshots.length-1];
+							(data.levels||[]).forEach(item=>{const old=(previous?.levels||[]).find(row=>row.expiry===item.expiry);if(item.greeks)item.greeks.level_migration=old?Number(item.price)-Number(old.price):null;});
+							const bucket=Math.floor(new Date(data.generated_at).getTime()/900000);
+							if(!snapshots.some(row=>row.bucket===bucket))snapshots.push({bucket,generated_at:data.generated_at,levels:(data.levels||[]).map(item=>({expiry:item.expiry,kind:item.kind,price:item.price,regime:item.greeks?.regime,confidence:item.greeks?.confidence,scores:item.greeks?.scores}))});
+							localStorage.setItem(GREEKS_HORIZON_SNAPSHOT_KEY,JSON.stringify(snapshots.slice(-512)));
+						} catch(e) { console.warn('Greeks Horizon snapshot unavailable',e); }
+					}
+
+					async function refreshGammaHorizon(settingsOnly) {
+						if (MINIMAL_CHART || (!SHOW_GAMMA_HORIZON && !settingsOnly)) return;
 						const response = await fetch(GAMMA_HORIZON_URL);
 						if (!response.ok) throw new Error('Gamma Horizon HTTP ' + response.status);
 						const data = await response.json();
-						if (!SHOW_GAMMA_HORIZON) return;
+						enrichAndStoreGreeksHorizon(data);
+						gammaHorizonData=data;
+						renderGammaHorizonExpirySettings();
+						if (!SHOW_GAMMA_HORIZON || settingsOnly) return;
 						clearLines(gammaHorizonLines);
-						const drawnCounts = { W:0, M:0 };
+						gammaHorizonLineMeta=[];
 						(data.levels || []).forEach(item => {
 							if (!Number.isFinite(Number(item.price))) return;
-							const appearance = gammaHorizonSettings[item.kind] || gammaHorizonSettings.W;
+							const appearance = gammaHorizonAppearance(item);
 							if (!appearance.visible) return;
-							if (item.kind === 'W' && drawnCounts.W++ >= gammaHorizonSettings.weeklyCount) return;
-							if (item.kind === 'M' && drawnCounts.M++ >= gammaHorizonSettings.monthlyCount) return;
-							gammaHorizonLines.push(series.createPriceLine({
-								price:Number(item.price), color:appearance.color, lineWidth:appearance.width,
-								lineStyle:lineStyleFromName(appearance.style), axisLabelVisible:true,
-								axisLabelColor:appearance.color, title:gammaHorizonLabel(item),
-							}));
+							if(appearance.mode!=='recent'){
+								const line=series.createPriceLine({price:Number(item.price),color:appearance.color,lineWidth:appearance.width,lineStyle:lineStyleFromName(appearance.style),axisLabelVisible:true,axisLabelColor:appearance.color,title:gammaHorizonLabel(item)});
+								gammaHorizonLines.push(line);gammaHorizonLineMeta.push({line,item,appearance,price:Number(item.price),layer:'structural'});
+							}
+							if(appearance.mode!=='structural'&&Number.isFinite(Number(item.recent?.price))){
+								const rcfg=gammaHorizonSettings.recent;const recentLine=series.createPriceLine({price:Number(item.recent.price),color:rcfg.color,lineWidth:rcfg.width,lineStyle:lineStyleFromName(rcfg.style),axisLabelVisible:true,axisLabelColor:rcfg.color,title:gammaHorizonRecentLabel(item)});
+								gammaHorizonLines.push(recentLine);gammaHorizonLineMeta.push({line:recentLine,item,appearance:rcfg,price:Number(item.recent.price),layer:'recent'});
+							}
 						});
 						lastTradeCount = Number(data.trade_count || 0);
 						updateStatusLine();
@@ -1232,7 +1443,7 @@
 					function onToggleGammaHorizon() {
 						SHOW_GAMMA_HORIZON = Boolean(document.getElementById('gamma-horizon-toggle')?.checked);
 						if (SHOW_GAMMA_HORIZON) safeRefresh('Gamma Horizon', refreshGammaHorizon);
-						else clearLines(gammaHorizonLines);
+						else { clearLines(gammaHorizonLines); gammaHorizonLineMeta=[]; pinnedGreeksHorizonKey=null; const tip=document.getElementById('greeks-horizon-tooltip');if(tip)tip.style.display='none'; }
 					}
 
 					let SHOW_STRATEGY_RADAR = false;
@@ -1356,6 +1567,124 @@
 						const panel=document.getElementById('strategy-radar-panel'); if (panel) panel.style.display=SHOW_STRATEGY_RADAR?'flex':'none';
 						if (SHOW_STRATEGY_RADAR) safeRefresh('Strategy Radar', refreshStrategyRadar);
 					}
+
+					let SHOW_EXPIRY_PRICING = false;
+					let expiryPricingData = null;
+					let expiryTraceExpiriesLoaded = false;
+					let SHOW_MM_HEDGE=false, mmHedgeData=null, mmHedgePriceLines=[], mmSelectedExpiries=new Set();
+					const EXPIRY_PRICING_SNAPSHOT_KEY='dankbit_expiry_pricing_snapshots_'+ASSET;
+
+					function expiryNumber(value, digits) {
+						const number=Number(value);
+						return Number.isFinite(number) ? number.toLocaleString(undefined,{maximumFractionDigits:digits == null ? 0 : digits}) : '—';
+					}
+
+					function expiryPrice(value) {
+						const number=Number(value);
+						return Number.isFinite(number) ? number.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+					}
+
+					function expiryPricingSvg(data) {
+						const candles=[...(data.actual||[]),...(data.forecast||[])];
+						if (!candles.length) return '<text x="380" y="150" text-anchor="middle" fill="#888">No candles available</text>';
+						const levels=data.targets||{};
+						const levelRows=[['BCG',Number(levels.bcg)],['BPG',Number(levels.bpg)],['SCG',Number(levels.scg)],['SPG',Number(levels.spg)]].filter(row=>Number.isFinite(row[1])).map(row=>{const s=expiryTraceLines[row[0]];return [row[0],row[1],s.color,s.style,s.width];});
+						const values=candles.flatMap(c=>[Number(c.high),Number(c.low)]).concat(levelRows.map(row=>row[1])).filter(Number.isFinite);
+						let min=Math.min(...values), max=Math.max(...values); const pad=Math.max((max-min)*0.08,Number(data.spot||1)*0.001); min-=pad; max+=pad;
+						const width=760,height=300,left=64,right=138,top=17,bottom=34,plotW=width-left-right,plotH=height-top-bottom;
+						const sy=value=>top+(max-value)/(max-min)*plotH;
+						const slot=plotW/Math.max(candles.length,1), bodyW=Math.max(1.5,Math.min(12,slot*0.56));
+						let svg='<rect width="760" height="300" fill="transparent"/>';
+						for(let i=0;i<=4;i++){const y=top+i*plotH/4;const price=max-i*(max-min)/4;svg+='<line x1="'+left+'" y1="'+y+'" x2="'+(width-right)+'" y2="'+y+'" stroke="#888" stroke-opacity=".20"/><text x="4" y="'+(y+4)+'" font-size="11" font-weight="600" fill="#999">'+expiryNumber(price)+'</text>';}
+						const labels=levelRows.map(row=>({row,lineY:sy(row[1]),labelY:sy(row[1])})).sort((a,b)=>a.labelY-b.labelY);
+						for(let i=1;i<labels.length;i++) labels[i].labelY=Math.max(labels[i].labelY,labels[i-1].labelY+18);
+						if(labels.length&&labels[labels.length-1].labelY>height-bottom){const shift=labels[labels.length-1].labelY-(height-bottom);labels.forEach(item=>item.labelY-=shift);}
+						for(let i=labels.length-2;i>=0;i--) labels[i].labelY=Math.min(labels[i].labelY,labels[i+1].labelY-18);
+						labels.forEach(item=>{const row=item.row,y=item.lineY,ly=item.labelY,dash=row[3]==='dotted'?'2 4':row[3]==='dashed'?'7 5':'';svg+='<line x1="'+left+'" y1="'+y+'" x2="'+(width-right)+'" y2="'+y+'" stroke="'+row[2]+'" stroke-width="'+row[4]+'"'+(dash?' stroke-dasharray="'+dash+'"':'')+'/><line x1="'+(width-right)+'" y1="'+y+'" x2="'+(width-right+7)+'" y2="'+ly+'" stroke="'+row[2]+'" stroke-width="'+row[4]+'"/><text x="'+(width-right+10)+'" y="'+(ly+4)+'" font-size="12.5" font-weight="700" fill="'+row[2]+'">'+row[0]+' '+expiryPrice(row[1])+'</text>';});
+						const labelEvery=Math.max(1,Math.ceil(candles.length/6));
+						candles.forEach((c,index)=>{const x=left+slot*(index+.5),open=sy(Number(c.open)),close=sy(Number(c.close)),high=sy(Number(c.high)),low=sy(Number(c.low));const up=Number(c.close)>=Number(c.open),forecast=c.kind==='forecast';const color=up?'#26a69a':'#ef5350';const opacity=forecast?Math.max(.24,.68-index*.004):.95;svg+='<line x1="'+x+'" y1="'+high+'" x2="'+x+'" y2="'+low+'" stroke="'+color+'" stroke-opacity="'+opacity+'"/><rect x="'+(x-bodyW/2)+'" y="'+Math.min(open,close)+'" width="'+bodyW+'" height="'+Math.max(1,Math.abs(close-open))+'" fill="'+color+'" fill-opacity="'+opacity+'"'+(forecast?' stroke="'+color+'" stroke-dasharray="2 2"':'')+'/>';if(index%labelEvery===0){const d=new Date(Number(c.time)*1000),day=String(d.getUTCDate()).padStart(2,'0'),hour=String(d.getUTCHours()).padStart(2,'0');svg+='<text x="'+x+'" y="'+(height-8)+'" text-anchor="middle" font-size="9.5" font-weight="600" fill="#999">'+day+' '+hour+':00</text>';}});
+						const boundary=(data.actual||[]).length;if(boundary>0&&boundary<candles.length){const x=left+slot*boundary;svg+='<line x1="'+x+'" y1="'+top+'" x2="'+x+'" y2="'+(height-bottom)+'" stroke="#ff9800" stroke-width="1.5" stroke-dasharray="3 3"/><text x="'+(x+4)+'" y="'+(top+11)+'" font-size="9" fill="#ff9800">'+(data.mode==='explorer'?'AS OF':'NOW')+'</text>';}
+						return svg;
+					}
+
+					function renderExpiryPricing() {
+						const data=expiryPricingData, summary=document.getElementById('expiry-pricing-summary'), verdict=document.getElementById('expiry-trace-verdict'), flows=document.getElementById('expiry-pricing-flows'), svg=document.getElementById('expiry-pricing-svg');
+						if (!data || !data.available) { if(summary)summary.textContent='No expiry data for this selection.'; if(flows)flows.replaceChildren(); if(svg)svg.innerHTML=''; return; }
+						const generated=new Date(data.generated_at), next=new Date(generated.getTime()+900000);
+						const liveTail=data.mode==='live'?' · next '+next.toLocaleTimeString('en-GB',{timeZone:'UTC',hour:'2-digit',minute:'2-digit'})+' UTC (<span id="expiry-pricing-countdown">—</span>)':'';
+						if(summary) summary.innerHTML=(data.mode==='explorer'?'Explorer':'Live')+' · '+radarEsc(data.regime)+' · Adjusted Score '+(Number(data.direction_score)*100).toFixed(1)+' · Confidence '+Number(data.confidence)+'% · '+Number(data.hours_to_expiry).toFixed(1)+'h to expiry · '+radarEsc(data.interval)+' / '+Number(data.candle_count)+' bars'+liveTail;
+						const u=data.unified_comment||{};if(verdict){const colors={CONTINUE:'#16833b',PIN:'#ef8c00',ROTATE:'#c62828'},color=colors[u.state]||'#777';verdict.style.borderColor=color;verdict.style.color=color;verdict.innerHTML=radarEsc((u.state||'—')+' '+(u.direction||'')+' '+(u.preposition||'near')+' '+(u.level||'')+' '+expiryPrice(u.price))+'<small>'+radarEsc('Confidence '+Number(u.confidence||0)+'% · '+(u.reason||''))+'</small>';}
+						if(flows){const flowKeys=['BC','BP','SC','SP'],totalAdjusted=flowKeys.reduce((sum,key)=>sum+Number(data.adjusted_flow?.[key]||0),0);flows.innerHTML=flowKeys.map(key=>{const labels={BC:'Buyer Call',BP:'Buyer Put',SC:'Seller Call',SP:'Seller Put'},m=data.group_metrics?.[key]||{},contracts=Number(data.contracts?.[key]||0),adjusted=Number(data.adjusted_flow?.[key]||0),remaining=Number(data.remaining_pressure?.[key]||0),impactShare=totalAdjusted>0?100*adjusted/totalAdjusted:0,remainingPct=adjusted>0?100*remaining/adjusted:0;const tip='Internal State: '+(m.state||'—')+' | Time Viability: '+expiryNumber(Number(m.time_viability)*100,1)+'% | Theta Erosion: '+expiryNumber(Number(m.theta_erosion)*100,1)+'% | IV Adjustment: '+expiryNumber(m.iv_adjustment,3)+' | Vega Exposure: '+expiryNumber(m.vega_exposure,2)+' | Already Priced: '+expiryNumber(Number(m.directional_completion)*100,1)+'%';return '<div class="expiry-flow-card" title="'+radarEsc(tip)+'"><b>'+labels[key]+'</b>'+expiryNumber(contracts,2)+' contracts<br/>Impact '+expiryNumber(impactShare,1)+'%<br/>Remaining '+expiryNumber(remainingPct,1)+'%</div>';}).join('');}
+						if(svg) svg.innerHTML=expiryPricingSvg(data);
+						updateExpiryPricingCountdown();
+					}
+
+					function storeExpiryPricingSnapshot(data){
+						try{
+							const bucket=Math.floor(new Date(data.generated_at).getTime()/900000);
+							let rows=JSON.parse(localStorage.getItem(EXPIRY_PRICING_SNAPSHOT_KEY)||'[]');
+							if(!Array.isArray(rows)) rows=[];
+							if(!rows.some(row=>row.bucket===bucket)) rows.push({bucket,generated_at:data.generated_at,expiry:data.expiry,spot:data.spot,regime:data.regime,direction_score:data.direction_score,confidence:data.confidence,targets:data.targets,forecast:data.forecast});
+							localStorage.setItem(EXPIRY_PRICING_SNAPSHOT_KEY,JSON.stringify(rows.slice(-192)));
+						}catch(e){console.warn('Expiry Trace snapshot unavailable',e);}
+					}
+
+					function updateExpiryPricingCountdown(){
+						const node=document.getElementById('expiry-pricing-countdown');if(!node||!expiryPricingData?.generated_at)return;
+						const seconds=Math.max(0,Math.ceil((new Date(expiryPricingData.generated_at).getTime()+900000-Date.now())/1000));
+						node.textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+					}
+
+					function expiryLocalValue(value){const d=new Date(value);return Number.isFinite(d.getTime())?d.toISOString().slice(0,16):'';}
+					async function loadExpiryTraceExpiries(){
+						if(expiryTraceExpiriesLoaded)return;
+						const response=await fetch(EXPIRY_TRACE_EXPIRIES_URL);if(!response.ok)throw new Error('Expiry Trace expiries HTTP '+response.status);
+						const data=await response.json(),select=document.getElementById('expiry-trace-expiry');
+						if(select){select.innerHTML=(data.expiries||[]).map(x=>'<option value="'+radarEsc(x)+'">'+radarEsc(new Date(x).toLocaleString('en-GB',{timeZone:'UTC',dateStyle:'medium',timeStyle:'short'}))+' UTC</option>').join('');if(select.options.length)select.selectedIndex=select.options.length-1;}
+						expiryTraceExpiriesLoaded=true;
+					}
+					function onExpiryTraceMode(){
+						const explorer=document.getElementById('expiry-trace-mode')?.value==='explorer';
+						['expiry-trace-expiry','expiry-trace-from','expiry-trace-asof','expiry-trace-interval','expiry-trace-candles','expiry-trace-apply'].forEach(id=>{const n=document.getElementById(id);if(n)n.disabled=!explorer;});
+						if(explorer){loadExpiryTraceExpiries().then(()=>{const now=new Date();document.getElementById('expiry-trace-asof').value=expiryLocalValue(now);document.getElementById('expiry-trace-from').value=expiryLocalValue(new Date(now.getTime()-86400000));}).catch(e=>console.warn(e));}
+						else safeRefresh('Expiry Trace',refreshExpiryPricing);
+					}
+					function expiryTraceUrl(){
+						if(document.getElementById('expiry-trace-mode')?.value!=='explorer')return EXPIRY_PRICING_URL+'?mode=live';
+						const q=new URLSearchParams({mode:'explorer',expiry:document.getElementById('expiry-trace-expiry').value,trade_from:new Date(document.getElementById('expiry-trace-from').value).toISOString(),as_of:new Date(document.getElementById('expiry-trace-asof').value).toISOString(),interval:document.getElementById('expiry-trace-interval').value,candles:document.getElementById('expiry-trace-candles').value});
+						return EXPIRY_PRICING_URL+'?'+q.toString();
+					}
+					function applyExpiryTrace(){safeRefresh('Expiry Trace',refreshExpiryPricing);}
+
+					async function refreshExpiryPricing() {
+						if (!SHOW_EXPIRY_PRICING || MINIMAL_CHART) return;
+						let url;try{url=expiryTraceUrl();}catch(e){throw new Error('Complete the Explorer date fields');}
+						const response=await fetch(url);
+						if(!response.ok){let detail='HTTP '+response.status;try{detail=(await response.json()).error||detail;}catch(e){}throw new Error('Expiry Trace: '+detail);}
+						expiryPricingData=await response.json();
+						if(expiryPricingData.available) storeExpiryPricingSnapshot(expiryPricingData);
+						if(SHOW_EXPIRY_PRICING) renderExpiryPricing();
+					}
+
+					function closeExpiryPricing(){SHOW_EXPIRY_PRICING=false;const toggle=document.getElementById('expiry-pricing-toggle');if(toggle)toggle.checked=false;const panel=document.getElementById('expiry-pricing-panel');if(panel)panel.style.display='none';}
+					function onToggleExpiryPricing(){SHOW_EXPIRY_PRICING=Boolean(document.getElementById('expiry-pricing-toggle')?.checked);const panel=document.getElementById('expiry-pricing-panel');if(panel)panel.style.display=SHOW_EXPIRY_PRICING?'flex':'none';if(SHOW_EXPIRY_PRICING){loadExpiryTraceExpiries().catch(()=>{});safeRefresh('Expiry Trace',refreshExpiryPricing);}}
+
+					function clearMMHedgeLines(){mmHedgePriceLines.forEach(line=>{try{series.removePriceLine(line);}catch(e){}});mmHedgePriceLines=[];}
+					function mmArrow(direction){return direction==='UP'?'↑':direction==='DOWN'?'↓':'↔';}
+					function renderMMHedge(){
+						const data=mmHedgeData,summary=document.getElementById('mm-hedge-summary'),targets=document.getElementById('mm-hedge-targets'),expiryRoot=document.getElementById('mm-hedge-expiries');
+						clearMMHedgeLines();if(!data)return;
+						if(expiryRoot){const auto=mmSelectedExpiries.size===0;expiryRoot.innerHTML='<label><input type="checkbox" id="mm-auto" '+(auto?'checked="checked"':'')+' onchange="onMMHedgeSelectionChange(\'auto\')"/>Auto</label>'+(data.expiries||[]).map(row=>{const label=row.kind+' '+new Date(row.expiry).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short'});return '<label><input type="checkbox" data-mm-expiry="'+radarEsc(row.expiry)+'" '+(mmSelectedExpiries.has(row.expiry)?'checked="checked"':'')+' onchange="onMMHedgeSelectionChange(\''+radarEsc(row.expiry)+'\')"/>'+radarEsc(label)+'</label>';}).join('');}
+						if(!data.available){if(summary)summary.textContent='No target is available for the selected expiries.';if(targets)targets.replaceChildren();return;}
+						if(summary)summary.textContent=expiryNumber(data.trade_count)+' trades · '+(data.oi_available?'Open Interest available':'Open Interest unavailable')+' · updated '+new Date(data.generated_at).toLocaleTimeString('en-GB',{timeZone:'UTC',hour:'2-digit',minute:'2-digit'})+' UTC';
+						const reactionColors={PIN:'#ef8c00',REVERSE:'#c62828',ACCELERATE:'#6a1b9a'};
+						if(targets)targets.innerHTML=(data.targets||[]).map(t=>{const color=reactionColors[t.reaction]||'#777',date=new Date(t.expiry).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short'});return '<div class="mm-target-card" style="border-color:'+color+'"><b style="color:'+color+'">'+radarEsc(t.horizon)+' TARGET '+expiryPrice(t.price)+'</b>'+radarEsc(t.reaction)+' '+mmArrow(t.direction)+' · Confidence '+expiryNumber(t.confidence)+'%<small>'+radarEsc(t.kind+' · '+date+' · MM Identity '+t.mm_identity+'% · Hedge Relevance '+t.hedge_relevance+'% · data from '+(t.first_seen?new Date(t.first_seen).toLocaleDateString('en-GB',{timeZone:'UTC'}):'—'))+'</small></div>';}).join('');
+						(data.targets||[]).forEach(t=>{const key=t.group==='structural'?'structural':'short',cfg=mmHedgeLineSettings[key];mmHedgePriceLines.push(series.createPriceLine({price:Number(t.price),color:cfg.color,lineWidth:cfg.width,lineStyle:lineStyleFromName(cfg.style),axisLabelVisible:mmHedgeLineSettings.showLabels,title:mmHedgeLineSettings.showLabels?('MM '+t.horizon+' '+t.reaction+' '+mmArrow(t.direction)):''}));});
+					}
+					async function refreshMMHedge(){if(!SHOW_MM_HEDGE||MINIMAL_CHART)return;const expiries=mmSelectedExpiries.size?[...mmSelectedExpiries].join(','):'auto';const response=await fetch(MM_HEDGE_URL+'?expiries='+encodeURIComponent(expiries));if(!response.ok)throw new Error('MM Hedge HTTP '+response.status);mmHedgeData=await response.json();if(SHOW_MM_HEDGE)renderMMHedge();}
+					function onMMHedgeSelectionChange(expiry){if(expiry==='auto'){mmSelectedExpiries.clear();}else{const box=document.querySelector('[data-mm-expiry="'+expiry+'"]');if(box?.checked)mmSelectedExpiries.add(expiry);else mmSelectedExpiries.delete(expiry);}safeRefresh('MM Hedge',refreshMMHedge);}
+					function closeMMHedge(){SHOW_MM_HEDGE=false;const toggle=document.getElementById('mm-hedge-toggle');if(toggle)toggle.checked=false;const panel=document.getElementById('mm-hedge-panel');if(panel)panel.style.display='none';clearMMHedgeLines();}
+					function onToggleMMHedge(){SHOW_MM_HEDGE=Boolean(document.getElementById('mm-hedge-toggle')?.checked);const panel=document.getElementById('mm-hedge-panel');if(panel)panel.style.display=SHOW_MM_HEDGE?'flex':'none';if(SHOW_MM_HEDGE)safeRefresh('MM Hedge',refreshMMHedge);else clearMMHedgeLines();}
 
 					let nearestExpiryStr = null;
 					let lastTradeCount = 0;
@@ -2781,13 +3110,36 @@
 							if (style) style.value = row.style;
 							if (width) width.value = row.width;
 						});
-						const weeklyCount = document.getElementById('gh-weekly-count');
-						const monthlyCount = document.getElementById('gh-monthly-count');
 						const showLabels = document.getElementById('gh-show-labels');
-						if (weeklyCount) weeklyCount.value = gammaHorizonSettings.weeklyCount;
-						if (monthlyCount) monthlyCount.value = gammaHorizonSettings.monthlyCount;
+						const showGreeks = document.getElementById('gh-show-greeks');
 						if (showLabels) showLabels.checked = gammaHorizonSettings.showLabels;
+						if (showGreeks) showGreeks.checked = gammaHorizonSettings.showGreeks;
+						const recentColor=document.getElementById('gh-recent-color'),recentStyle=document.getElementById('gh-recent-style'),recentWidth=document.getElementById('gh-recent-width');
+						if(recentColor)recentColor.value=gammaHorizonSettings.recent.color;if(recentStyle)recentStyle.value=gammaHorizonSettings.recent.style;if(recentWidth)recentWidth.value=gammaHorizonSettings.recent.width;
+						renderGammaHorizonExpirySettings();
 					}
+
+					function renderGammaHorizonExpirySettings() {
+						const selection=document.getElementById('gh-expiry-selector');const appearance=document.getElementById('gh-expiry-appearance');
+						const levels=gammaHorizonData?.levels||[];if(selection)selection.replaceChildren();if(appearance)appearance.replaceChildren();
+						if(!levels.length){[selection,appearance].filter(Boolean).forEach(root=>{const empty=document.createElement('div');empty.className='gh-menu-empty';empty.textContent='No active Gamma Horizon expiries available.';root.appendChild(empty);});updateGammaHorizonMenuCount();return;}
+						levels.forEach(item=>{const base=gammaHorizonSettings[item.kind]||gammaHorizonSettings.W;const own=gammaHorizonSettings.expiries[item.expiry]||{};const date=new Date(item.expiry).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',year:'2-digit'}).toUpperCase();const title=item.kind+' · '+date+' · '+Number(item.price).toLocaleString(undefined,{maximumFractionDigits:2});
+							if(selection){const menuLabel=document.createElement('label');menuLabel.className='gh-menu-expiry';const visible=document.createElement('input');visible.type='checkbox';visible.checked=own.visible!==false;visible.addEventListener('change',()=>setGammaHorizonExpiryVisible(item.expiry,visible.checked));const menuName=document.createElement('span');menuName.textContent=title;const mode=document.createElement('select');[['structural','Structural'],['recent','Recent'],['compare','Compare']].forEach(pair=>{const option=document.createElement('option');option.value=pair[0];option.textContent=pair[1];mode.appendChild(option);});mode.value=own.mode||'structural';mode.disabled=!Number.isFinite(Number(item.recent?.price));mode.addEventListener('click',event=>event.stopPropagation());mode.addEventListener('change',()=>setGammaHorizonExpiryMode(item.expiry,mode.value));menuLabel.append(visible,menuName,mode);selection.appendChild(menuLabel);}
+							if(!appearance)return;const label=document.createElement('label');label.className='gamma-horizon-row';label.dataset.ghExpiry=item.expiry;const name=document.createElement('span');name.textContent=title;
+							const color=document.createElement('input');color.type='color';color.className='gh-expiry-color';color.value=own.color||base.color;
+							const style=document.createElement('select');style.className='gh-expiry-style';['solid','dashed','dotted'].forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=value[0].toUpperCase()+value.slice(1);style.appendChild(option);});style.value=own.style||base.style;
+							const width=document.createElement('input');width.type='number';width.min='1';width.max='4';width.step='1';width.className='gh-expiry-width';width.value=own.width||base.width;
+							label.append(name,color,style,width);appearance.appendChild(label);
+						});updateGammaHorizonMenuCount();
+					}
+
+					function updateGammaHorizonMenuCount(){const levels=gammaHorizonData?.levels||[];const selected=levels.filter(item=>(gammaHorizonSettings.expiries[item.expiry]||{}).visible!==false).length;const count=document.getElementById('gh-menu-count');if(count)count.textContent=selected+'/'+levels.length;}
+					function persistGammaHorizonSettings(){localStorage.setItem(GAMMA_HORIZON_SETTINGS_KEY,JSON.stringify(gammaHorizonSettings));}
+					function setGammaHorizonExpiryVisible(expiry,visible){const old=gammaHorizonSettings.expiries[expiry]||{};gammaHorizonSettings.expiries[expiry]=Object.assign({},old,{visible:Boolean(visible)});persistGammaHorizonSettings();updateGammaHorizonMenuCount();if(SHOW_GAMMA_HORIZON)safeRefresh('Gamma Horizon',refreshGammaHorizon);}
+					function setGammaHorizonExpiryMode(expiry,mode){const old=gammaHorizonSettings.expiries[expiry]||{};gammaHorizonSettings.expiries[expiry]=Object.assign({},old,{mode:['structural','recent','compare'].includes(mode)?mode:'structural'});persistGammaHorizonSettings();if(SHOW_GAMMA_HORIZON)safeRefresh('Gamma Horizon',refreshGammaHorizon);}
+					function setAllGammaHorizonExpiries(visible){(gammaHorizonData?.levels||[]).forEach(item=>{const old=gammaHorizonSettings.expiries[item.expiry]||{};gammaHorizonSettings.expiries[item.expiry]=Object.assign({},old,{visible:Boolean(visible)});});persistGammaHorizonSettings();renderGammaHorizonExpirySettings();if(SHOW_GAMMA_HORIZON)safeRefresh('Gamma Horizon',refreshGammaHorizon);}
+					function toggleGammaHorizonMenu(event){event?.stopPropagation();const menu=document.getElementById('gamma-horizon-menu');if(!menu)return;menu.classList.toggle('open');if(menu.classList.contains('open')&&!gammaHorizonData)safeRefresh('Gamma Horizon expiries',()=>refreshGammaHorizon(true));}
+					document.addEventListener('click',event=>{const control=event.target.closest?.('.gamma-horizon-control');if(!control)document.getElementById('gamma-horizon-menu')?.classList.remove('open');});
 
 					function readGammaHorizonSettingsInputs() {
 						['D1', 'W', 'M', 'YE'].forEach(kind => {
@@ -2800,13 +3152,23 @@
 							if (style) gammaHorizonSettings[kind].style = style.value;
 							if (width) gammaHorizonSettings[kind].width = Math.max(1, Math.min(4, parseInt(width.value, 10) || 1));
 						});
-						const weeklyCount = document.getElementById('gh-weekly-count');
-						const monthlyCount = document.getElementById('gh-monthly-count');
 						const showLabels = document.getElementById('gh-show-labels');
-						if (weeklyCount) gammaHorizonSettings.weeklyCount = Math.max(0, Math.min(3, parseInt(weeklyCount.value, 10) || 0));
-						if (monthlyCount) gammaHorizonSettings.monthlyCount = Math.max(0, Math.min(3, parseInt(monthlyCount.value, 10) || 0));
+						const showGreeks = document.getElementById('gh-show-greeks');
 						if (showLabels) gammaHorizonSettings.showLabels = showLabels.checked;
+						if (showGreeks) gammaHorizonSettings.showGreeks = showGreeks.checked;
+						const recentColor=document.getElementById('gh-recent-color'),recentStyle=document.getElementById('gh-recent-style'),recentWidth=document.getElementById('gh-recent-width');
+						if(recentColor)gammaHorizonSettings.recent.color=recentColor.value;if(recentStyle)gammaHorizonSettings.recent.style=recentStyle.value;if(recentWidth)gammaHorizonSettings.recent.width=Math.max(1,Math.min(4,parseInt(recentWidth.value,10)||2));
+						document.querySelectorAll('#gh-expiry-appearance [data-gh-expiry]').forEach(row=>{const expiry=row.dataset.ghExpiry;const old=gammaHorizonSettings.expiries[expiry]||{};gammaHorizonSettings.expiries[expiry]=Object.assign({},old,{color:row.querySelector('.gh-expiry-color')?.value||null,style:row.querySelector('.gh-expiry-style')?.value||null,width:Math.max(1,Math.min(4,parseInt(row.querySelector('.gh-expiry-width')?.value,10)||1))});});
 					}
+
+					function populateExpiryTraceSettingsInputs(){
+						Object.keys(expiryTraceLines).forEach(k=>{const row=expiryTraceLines[k],color=document.getElementById('et-color-'+k),style=document.getElementById('et-style-'+k),width=document.getElementById('et-width-'+k);if(color)color.value=row.color;if(style)style.value=row.style;if(width)width.value=row.width;});
+					}
+					function readExpiryTraceSettingsInputs(){
+						Object.keys(expiryTraceLines).forEach(k=>{const color=document.getElementById('et-color-'+k),style=document.getElementById('et-style-'+k),width=document.getElementById('et-width-'+k);if(color)expiryTraceLines[k].color=color.value;if(style)expiryTraceLines[k].style=style.value;if(width)expiryTraceLines[k].width=Math.max(1,Math.min(5,parseInt(width.value,10)||2));});
+					}
+					function populateMMHedgeSettingsInputs(){['short','structural'].forEach(k=>{const row=mmHedgeLineSettings[k],color=document.getElementById('mm-color-'+k),style=document.getElementById('mm-style-'+k),width=document.getElementById('mm-width-'+k);if(color)color.value=row.color;if(style)style.value=row.style;if(width)width.value=row.width;});const labels=document.getElementById('mm-show-labels');if(labels)labels.checked=mmHedgeLineSettings.showLabels;}
+					function readMMHedgeSettingsInputs(){['short','structural'].forEach(k=>{const color=document.getElementById('mm-color-'+k),style=document.getElementById('mm-style-'+k),width=document.getElementById('mm-width-'+k);if(color)mmHedgeLineSettings[k].color=color.value;if(style)mmHedgeLineSettings[k].style=style.value;if(width)mmHedgeLineSettings[k].width=Math.max(1,Math.min(4,parseInt(width.value,10)||2));});const labels=document.getElementById('mm-show-labels');if(labels)mmHedgeLineSettings.showLabels=labels.checked;}
 
 					function openSettingsModal() {
 						Object.keys(DEFAULT_COLORS).forEach(key => {
@@ -2830,7 +3192,10 @@
 						const smoothingInput = document.getElementById('band-adaptive-smoothing');
 						if (smoothingInput) smoothingInput.checked = bandAdaptiveSmoothing;
 						populateGammaHorizonSettingsInputs();
+						populateExpiryTraceSettingsInputs();
+						populateMMHedgeSettingsInputs();
 						document.getElementById('settings-modal').style.display = 'flex';
+						if(!gammaHorizonData) safeRefresh('Gamma Horizon settings',()=>refreshGammaHorizon(true));
 					}
 
 					function closeSettingsModal() {
@@ -2859,8 +3224,14 @@
 						localStorage.setItem(FORECAST_COUNT_STORAGE_KEY, JSON.stringify(forecastCandleCounts));
 						readGammaHorizonSettingsInputs();
 						localStorage.setItem(GAMMA_HORIZON_SETTINGS_KEY, JSON.stringify(gammaHorizonSettings));
+						readExpiryTraceSettingsInputs();
+						localStorage.setItem(EXPIRY_TRACE_SETTINGS_KEY,JSON.stringify(expiryTraceLines));
+						readMMHedgeSettingsInputs();
+						localStorage.setItem(MM_HEDGE_SETTINGS_KEY,JSON.stringify(mmHedgeLineSettings));
 						applyChartColors();
 						if (SHOW_GAMMA_HORIZON) refreshGammaHorizon();
+						if (SHOW_EXPIRY_PRICING) renderExpiryPricing();
+						if (SHOW_MM_HEDGE) renderMMHedge();
 						refreshForecast();
 						closeSettingsModal();
 					}
@@ -2874,10 +3245,14 @@
 						localStorage.removeItem(BAND_SMOOTHING_STORAGE_KEY);
 						localStorage.removeItem(BAND_SMOOTHING_STATE_KEY);
 						localStorage.removeItem(GAMMA_HORIZON_SETTINGS_KEY);
+						localStorage.removeItem(EXPIRY_TRACE_SETTINGS_KEY);
+						localStorage.removeItem(MM_HEDGE_SETTINGS_KEY);
 						bandAdaptiveSmoothing = true;
 						bandSmoothingState = {};
 						forecastCandleCounts = { '1h': 72, '4h': 18, '1d': 3 };
 						gammaHorizonSettings = JSON.parse(JSON.stringify(DEFAULT_GAMMA_HORIZON_SETTINGS));
+						expiryTraceLines = JSON.parse(JSON.stringify(DEFAULT_EXPIRY_TRACE_LINES));
+						mmHedgeLineSettings = JSON.parse(JSON.stringify(DEFAULT_MM_HEDGE_LINES));
 						Object.keys(DEFAULT_COLORS).forEach(key => {
 							const input = document.getElementById('color-' + key);
 							if (input) input.value = chartColors[key];
@@ -2891,8 +3266,12 @@
 						const smoothingInput = document.getElementById('band-adaptive-smoothing');
 						if (smoothingInput) smoothingInput.checked = true;
 						populateGammaHorizonSettingsInputs();
+						populateExpiryTraceSettingsInputs();
+						populateMMHedgeSettingsInputs();
 						applyChartColors();
 						if (SHOW_GAMMA_HORIZON) refreshGammaHorizon();
+						if (SHOW_EXPIRY_PRICING) renderExpiryPricing();
+						if (SHOW_MM_HEDGE) renderMMHedge();
 						refreshForecast();
 					}
 
@@ -2910,6 +3289,18 @@
 						info.style.display = 'none';
 						info.textContent = '';
 					}
+
+					chart.subscribeCrosshairMove(param=>{
+						if(!SHOW_GAMMA_HORIZON||!gammaHorizonSettings.showGreeks||pinnedGreeksHorizonKey)return;
+						const items=nearbyGammaHorizonItems(param.point);showGreeksHorizonTooltip(items,param.point||{x:0,y:0},false);
+					});
+
+					chart.subscribeClick(param=>{
+						if(rulerActive||!SHOW_GAMMA_HORIZON||!gammaHorizonSettings.showGreeks||!param.point)return;
+						const items=nearbyGammaHorizonItems(param.point);
+						if(items.length){const key=items.map(item=>item.expiry).join('|');pinnedGreeksHorizonKey=pinnedGreeksHorizonKey===key?null:key;if(pinnedGreeksHorizonKey)showGreeksHorizonTooltip(items,param.point,true);else{const tip=document.getElementById('greeks-horizon-tooltip');if(tip)tip.style.display='none';}}
+						else if(pinnedGreeksHorizonKey){pinnedGreeksHorizonKey=null;const tip=document.getElementById('greeks-horizon-tooltip');if(tip)tip.style.display='none';}
+					});
 
 					chart.subscribeClick(param => {
 						if (!rulerActive || !param.point) return;
@@ -2949,6 +3340,8 @@
 						await Promise.allSettled([
 							safeRefresh('Gamma Horizon', refreshGammaHorizon),
 							safeRefresh('Strategy Radar', refreshStrategyRadar),
+							safeRefresh('Expiry Trace', refreshExpiryPricing),
+							safeRefresh('MM Hedge', refreshMMHedge),
 							safeRefresh('Bands', refreshBands),
 							safeRefresh('Smart Liquidity', refreshLiveBandDots),
 							safeRefresh('Zones', refreshZonesBoxes),
@@ -2964,6 +3357,9 @@
 					setInterval(refreshLastTrade, REFRESH);
 					setInterval(() => safeRefresh('Gamma Horizon', refreshGammaHorizon), REFRESH);
 					setInterval(() => safeRefresh('Strategy Radar', refreshStrategyRadar), Math.max(REFRESH, 60000));
+					setInterval(() => { if(document.getElementById('expiry-trace-mode')?.value !== 'explorer') safeRefresh('Expiry Trace', refreshExpiryPricing); }, 900000);
+					setInterval(() => safeRefresh('MM Hedge', refreshMMHedge), 900000);
+					setInterval(updateExpiryPricingCountdown, 1000);
 					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
 					// underlying dankbit.bands rows only ever change once per
 					// hourly compute_snapshot() cron tick, so polling any faster

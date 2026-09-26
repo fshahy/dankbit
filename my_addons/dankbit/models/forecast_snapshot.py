@@ -469,6 +469,13 @@ class ForecastSnapshot(models.Model):
         cfg["FOMO_MEAN_REVERSION_RELEASE"] = f("forecast_fomo_mean_reversion_release", 0.45)
         cfg["FOMO_CONFIDENCE_FLOOR_BOOST"] = f("forecast_fomo_confidence_floor_boost", 0.18)
         cfg["FOMO_MAX_ALIGNED_BODY_ATR"] = f("forecast_fomo_max_aligned_body_atr", 1.50)
+        cfg["INTRABAR_FOMO_MIN_BODY_ATR"] = f("forecast_intrabar_fomo_min_body_atr", 1.20)
+        cfg["INTRABAR_FOMO_ACTIVATION_SCORE"] = f("forecast_intrabar_fomo_activation_score", 0.60)
+        cfg["INTRABAR_FOMO_MAX_IMPULSE"] = f("forecast_intrabar_fomo_max_impulse", 0.055)
+        cfg["INTRABAR_FOMO_DECAY"] = f("forecast_intrabar_fomo_decay", 0.62)
+        cfg["INTRABAR_FOMO_MAX_STEPS"] = f("forecast_intrabar_fomo_max_steps", 4)
+        cfg["INTRABAR_FOMO_MEAN_REVERSION_RELEASE"] = f("forecast_intrabar_fomo_mean_reversion_release", 0.28)
+        cfg["INTRABAR_FOMO_MAX_ALIGNED_BODY_ATR"] = f("forecast_intrabar_fomo_max_aligned_body_atr", 1.20)
 
         # Per-asset dollar-Greek activity scale — see forecast.py's own
         # module-level comment on GAMMA_ABS_NORMALIZER/etc. for why these

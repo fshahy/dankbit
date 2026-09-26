@@ -90,6 +90,7 @@ class ForecastLog(models.Model):
     impulse_greek_flow = fields.Float(digits=(16, 6))
     impulse_term_slope = fields.Float(digits=(16, 6))
     impulse_fomo_carry = fields.Float(digits=(16, 6))
+    impulse_intrabar_fomo = fields.Float(digits=(16, 6))
 
     # Regime/context flags active when this candle was generated — the
     # same signals `mode` summarizes as free text, broken out here so they
@@ -116,6 +117,12 @@ class ForecastLog(models.Model):
     fomo_option_alignment = fields.Float(digits=(16, 4))
     fomo_option_quality = fields.Float(digits=(16, 4))
     fomo_strength = fields.Float(digits=(16, 4))
+    intrabar_fomo_watch = fields.Boolean(index=True)
+    intrabar_fomo_direction = fields.Integer()
+    intrabar_fomo_score = fields.Float(digits=(16, 4))
+    intrabar_fomo_body_atr = fields.Float(digits=(16, 4))
+    intrabar_fomo_breakouts = fields.Integer()
+    intrabar_fomo_strength = fields.Float(digits=(16, 4))
 
     # Backfilled by check_accuracy() once target_time has passed — see
     # that method's own docstring for how actual_price is sourced.
@@ -170,6 +177,7 @@ class ForecastLog(models.Model):
                 "impulse_greek_flow": p["impulse_greek_flow"],
                 "impulse_term_slope": p["impulse_term_slope"],
                 "impulse_fomo_carry": p.get("impulse_fomo_carry", 0.0),
+                "impulse_intrabar_fomo": p.get("impulse_intrabar_fomo", 0.0),
                 "is_weekend": p["is_weekend"],
                 "session_name": p["session_name"],
                 "activity_regime": p["activity_regime"],
@@ -191,6 +199,12 @@ class ForecastLog(models.Model):
                 "fomo_option_alignment": p.get("fomo_option_alignment", 0.0),
                 "fomo_option_quality": p.get("fomo_option_quality", 0.0),
                 "fomo_strength": p.get("fomo_strength", 0.0),
+                "intrabar_fomo_watch": p.get("intrabar_fomo_watch", False),
+                "intrabar_fomo_direction": p.get("intrabar_fomo_direction", 0),
+                "intrabar_fomo_score": p.get("intrabar_fomo_score", 0.0),
+                "intrabar_fomo_body_atr": p.get("intrabar_fomo_body_atr", 0.0),
+                "intrabar_fomo_breakouts": p.get("intrabar_fomo_breakouts", 0),
+                "intrabar_fomo_strength": p.get("intrabar_fomo_strength", 0.0),
             } for p in result["points"]]
             self.sudo().create(vals_list)
 
