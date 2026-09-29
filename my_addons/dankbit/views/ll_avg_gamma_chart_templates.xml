@@ -37,7 +37,8 @@
 	       (right after "Window Line", CHECKED by default); every other
 	       expiry's line is gated behind the "Other Expiries" checkbox
 	       (right after "Strongest", CHECKED by default; only
-	       expiries with |dominant gamma value| above 1000M) —
+	       expiries with |dominant gamma value| above 1000M for BTC,
+	       100M for ETH) —
 	       unchecking/checking either redraws instantly from the
 	       last-fetched lastExpiries array via renderLlLines(), no
 	       re-fetch.
@@ -489,9 +490,10 @@
 					// This checkbox — checked by default — controls every
 					// OTHER expiry's line; unchecked hides all of them,
 					// checked shows only those whose |dominant gamma value|
-					// is above OTHER_LINES_MIN_ABS_GAMMA (1000M).
+					// is above OTHER_LINES_MIN_ABS_GAMMA (1000M for BTC, 100M
+					// for ETH — ETH's gamma values run about 10x smaller).
 					let SHOW_OTHER_LINES = true;
-					const OTHER_LINES_MIN_ABS_GAMMA = 1e9;
+					const OTHER_LINES_MIN_ABS_GAMMA = ASSET === 'ETH' ? 1e8 : 1e9;
 					function onToggleOtherLines() {
 						SHOW_OTHER_LINES = document.getElementById('other-lines-toggle').checked;
 						renderLlLines();
