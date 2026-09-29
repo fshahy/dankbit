@@ -359,9 +359,11 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="1">1h</option>
-						<option value="4">4h</option>
+						<option value="2">2h</option>
+						<option value="3">3h</option>
+						<option value="4" selected="selected">4h</option>
 						<option value="8">8h</option>
-						<option value="24" selected="selected">24h</option>
+						<option value="24">24h</option>
 						<option value="48">48h</option>
 						<option value="72">72h</option>
 						<option value="all">All</option>
@@ -380,19 +382,23 @@
 						Gamma Legs
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="dominant-leg-toggle" checked="checked" onchange="onToggleDominantLeg()"/>
+						<input type="checkbox" id="dominant-leg-toggle" onchange="onToggleDominantLeg()"/>
 						Dominant Leg
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="delta-zero-toggle" checked="checked" onchange="onToggleDeltaZero()"/>
+						<input type="checkbox" id="delta-zero-toggle" onchange="onToggleDeltaZero()"/>
 						Delta 0
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="gamma-flip-toggle" checked="checked" onchange="onToggleGammaFlip()"/>
+						<input type="checkbox" id="gamma-flip-toggle" onchange="onToggleGammaFlip()"/>
 						Gamma Flip
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="maxpain-toggle" checked="checked" onchange="onToggleMaxPain()"/>
+						<input type="checkbox" id="gamma-peak-toggle" checked="checked" onchange="onToggleGammaPeak()"/>
+						Gamma Peak
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="maxpain-toggle" onchange="onToggleMaxPain()"/>
 						Max Pain
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
@@ -437,6 +443,7 @@
 							<label class="color-row">Dominant Leg (DOM) <input type="color" id="color-dominant"/></label>
 							<label class="color-row">Delta = 0 (Δ0) <input type="color" id="color-deltazero"/></label>
 							<label class="color-row">Gamma Flip (γ flip) <input type="color" id="color-gammaflip"/></label>
+							<label class="color-row">Gamma Peak (γ peak) <input type="color" id="color-gammapeak"/></label>
 							<label class="color-row">Max Pain (MP) <input type="color" id="color-maxpain"/></label>
 						</div>
 						<div class="modal-actions">
@@ -502,7 +509,7 @@
 					// offered here at various points — the server-side
 					// resolutions for both are unchanged and still reachable
 					// by a direct API call, just no longer in this dropdown.
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 4;
 					// If ?hours=auto is ever driven in (not from this
 					// dropdown any more — see above), this holds the numeric
 					// hours the server resolved it to (its `window_hours`
@@ -587,7 +594,7 @@
 					const COLOR_STORAGE_KEY = 'dankbit_4l_chart_colors';
 					const DEFAULT_COLORS = {
 						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', dominant: '#8e24aa',
-						deltazero: '#2e7d32', gammaflip: '#7e57c2', maxpain: '#00acc1',
+						deltazero: '#2e7d32', gammaflip: '#7e57c2', gammapeak: '#d81b60', maxpain: '#00acc1',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -678,15 +685,25 @@
 					// the gamma legs use crosses zero (the response's own
 					// `latest.delta_zero_prices`, see four_leg_gamma_json).
 					// Can be 0..N lines, so kept as an array. Shown/hidden via
-					// the "Delta 0" checkbox (checked by default).
+					// the "Delta 0" checkbox (unchecked by default).
 					let deltaZeroPriceLines = [];
 					// Gamma flip lines (violet, dotted) — one per price where
 					// the COMBINED taker-signed portfolio gamma of the same
 					// Expiry/Window trades crosses zero (the response's own
 					// `latest.gamma_flips`, see four_leg_gamma_json).
 					// 0..N lines. Shown/hidden via the "Gamma Flip" checkbox
-					// (checked by default).
+					// (unchecked by default).
 					let gammaFlipPriceLines = [];
+					// Gamma Peak lines (magenta, dashed) — the up-to-2 strongest
+					// peaks/bottoms of that same combined taker-signed gamma
+					// curve (`latest.gamma_peaks`, each {price, value, leg}).
+					// Shown/hidden via the "Gamma Peak" checkbox (checked by
+					// default).
+					let gammaPeakPriceLines = [];
+					function clearGammaPeakLines() {
+						gammaPeakPriceLines.forEach(l => series.removePriceLine(l));
+						gammaPeakPriceLines = [];
+					}
 					// Max Pain line (teal) — see refreshFourLegGamma() below,
 					// where it's drawn from the same /api/four-leg-gamma
 					// response's own top-level `max_pain_price`/
@@ -695,7 +712,7 @@
 					// see four_leg_gamma_json's own docstring in main.py, Max
 					// Pain is a function of currently outstanding open
 					// interest, not recent trade flow). Shown/hidden via its
-					// own "Max Pain" checkbox (checked by default).
+					// own "Max Pain" checkbox (unchecked by default).
 					let maxPainPriceLine = null;
 					function clearGammaFlipLines() {
 						gammaFlipPriceLines.forEach(l => series.removePriceLine(l));
@@ -898,7 +915,7 @@
 					// CHECKED by default) — same plain client-side toggle
 					// pattern: unchecking clears the line without a fetch,
 					// checking re-fetches via refreshFourLegGamma().
-					let SHOW_DOMINANT_LEG = true;
+					let SHOW_DOMINANT_LEG = false;
 					function onToggleDominantLeg() {
 						SHOW_DOMINANT_LEG = document.getElementById('dominant-leg-toggle').checked;
 						if (!SHOW_DOMINANT_LEG) {
@@ -908,9 +925,9 @@
 						}
 					}
 
-					// "Gamma Flip" checkbox (right after "Delta 0", CHECKED by
+					// "Gamma Flip" checkbox (right after "Delta 0", unchecked by
 					// default) — same plain client-side toggle pattern.
-					let SHOW_GAMMA_FLIP = true;
+					let SHOW_GAMMA_FLIP = false;
 					function onToggleGammaFlip() {
 						SHOW_GAMMA_FLIP = document.getElementById('gamma-flip-toggle').checked;
 						if (!SHOW_GAMMA_FLIP) {
@@ -920,7 +937,19 @@
 						}
 					}
 
-					// "Max Pain" checkbox (right after "Gamma Flip", CHECKED by
+					// "Gamma Peak" checkbox (right after "Gamma Flip", checked
+					// by default) — same plain client-side toggle pattern.
+					let SHOW_GAMMA_PEAK = true;
+					function onToggleGammaPeak() {
+						SHOW_GAMMA_PEAK = document.getElementById('gamma-peak-toggle').checked;
+						if (!SHOW_GAMMA_PEAK) {
+							clearGammaPeakLines();
+						} else {
+							refreshFourLegGamma();
+						}
+					}
+
+					// "Max Pain" checkbox (right after "Gamma Peak", unchecked by
 					// default) — plain client-side show/hide flag for the Max
 					// Pain line. Unlike every other line on this page, it's
 					// drawn from a top-level response field
@@ -929,7 +958,7 @@
 					// removes the line immediately without a fetch; checking
 					// re-fetches via refreshFourLegGamma() since the
 					// last-fetched value isn't cached client-side.
-					let SHOW_MAX_PAIN = true;
+					let SHOW_MAX_PAIN = false;
 					function onToggleMaxPain() {
 						SHOW_MAX_PAIN = document.getElementById('maxpain-toggle').checked;
 						if (!SHOW_MAX_PAIN) {
@@ -939,11 +968,11 @@
 						}
 					}
 
-					// "Delta 0" checkbox (right after "Dominant Leg", CHECKED by
+					// "Delta 0" checkbox (right after "Dominant Leg", unchecked by
 					// default) — same plain client-side toggle pattern as the
 					// others: unchecking clears the lines without a fetch,
 					// checking re-fetches via refreshFourLegGamma().
-					let SHOW_DELTA_ZERO = true;
+					let SHOW_DELTA_ZERO = false;
 					function onToggleDeltaZero() {
 						SHOW_DELTA_ZERO = document.getElementById('delta-zero-toggle').checked;
 						if (!SHOW_DELTA_ZERO) {
@@ -1150,6 +1179,7 @@
 							if (dominantLegPriceLine) { series.removePriceLine(dominantLegPriceLine); dominantLegPriceLine = null; }
 							clearDeltaZeroLines();
 							clearGammaFlipLines();
+							clearGammaPeakLines();
 
 							// Max Pain — drawn from data's own top-level
 							// max_pain_price/max_pain_total_oi fields, not
@@ -1206,6 +1236,21 @@
 										lineStyle: LightweightCharts.LineStyle.Dotted,
 										axisLabelVisible: true, axisLabelColor: gfColor,
 										title: 'γ flip (taker): ' + sym(flip.below) + ' below / ' + sym(flip.above) + ' above',
+									}));
+								});
+							}
+
+							// Gamma Peaks — up to 2 strongest extrema of the same
+							// combined gamma curve, each labeled with the leg
+							// driving it, e.g. "γ peak LC | 471M".
+							if (SHOW_GAMMA_PEAK) {
+								const gpColor = chartColors.gammapeak;
+								(latest.gamma_peaks || []).forEach(pk => {
+									gammaPeakPriceLines.push(series.createPriceLine({
+										price: pk.price, color: gpColor, lineWidth: 2,
+										lineStyle: LightweightCharts.LineStyle.Dashed,
+										axisLabelVisible: true, axisLabelColor: gpColor,
+										title: 'γ peak ' + pk.leg + ' | ' + formatAbbreviated(pk.value),
 									}));
 								});
 							}

@@ -15,22 +15,24 @@
 	     green "Δ0" lines at every price where the combined portfolio delta
 	     of the selected Expiry/Window's trades crosses zero (the endpoint's
 	     own delta_zero_prices, measured as of AS_OF_ISO — ported from /4l
-	     per product decision (2026-09-23), "Delta 0" checkbox checked by
+	     per product decision (2026-09-23), "Delta 0" checkbox unchecked by
 	     default, color-deltazero picker; plus a small sign box when it never
 	     crosses zero), dotted violet "γ flip" lines at every price where
 	     the combined portfolio gamma crosses zero, each labeled with which
-	     side is +/− gamma (latest.gamma_flips, "Gamma Flip" checkbox checked
+	     side is +/− gamma (latest.gamma_flips, "Gamma Flip" checkbox unchecked
 	     by default, color-gammaflip picker — ported from /4l 2026-09-23), same
 	     Timeframe/Expiry/Window/Theme/Window Line/Gamma Legs/Dominant Leg/
 	     Delta 0/Gamma Flip/Ruler/Settings controls ("Gamma Legs" unchecked,
-	     "Dominant Leg"/"Delta 0"/"Gamma Flip" checked by default). A light-violet dotted "N+1 AVG" line (Nearest+1
+	     "Dominant Leg"/"Delta 0"/"Gamma Flip" unchecked, "Gamma Peak" checked
+	     by default — synced with /4l 2026-09-29, which also added the
+	     "Gamma Peak" lines, the 2h/3h Window options and a 4h Window default). A light-violet dotted "N+1 AVG" line (Nearest+1
 	     expiry's own AVG, ported from /4l 2026-09-07) was removed along
 	     with /4l's own per product decision (2026-09-23). Same
 	     per-instrument-ISOLATED 4-leg
 	     computation, and the same single vertical Window reference line +
 	     label. Like /4l it has an "Expiry" dropdown (dynamically loaded from
 	     /api/expiries/<asset>); its "Window"
-	     dropdown mirrors /4l's own (1h/4h/8h/24h/48h/72h/All, 24h default —
+	     dropdown mirrors /4l's own (1h/2h/3h/4h/8h/24h/48h/72h/All, 4h default —
 	     synced per product decision (2026-09-23)). NOT carried over from
 	     /4l: the "Refresh Lines" button and
 	     the "Last trade:" footer — a frozen As-Of view has nothing to force
@@ -303,9 +305,11 @@
 					<span class="tf-label">Window:</span>
 					<select class="tf-btn" id="window-select" onchange="setWindow(this.value)">
 						<option value="1">1h</option>
-						<option value="4">4h</option>
+						<option value="2">2h</option>
+						<option value="3">3h</option>
+						<option value="4" selected="selected">4h</option>
 						<option value="8">8h</option>
-						<option value="24" selected="selected">24h</option>
+						<option value="24">24h</option>
 						<option value="48">48h</option>
 						<option value="72">72h</option>
 						<option value="all">All</option>
@@ -324,16 +328,20 @@
 						Gamma Legs
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="dominant-leg-toggle" checked="checked" onchange="onToggleDominantLeg()"/>
+						<input type="checkbox" id="dominant-leg-toggle" onchange="onToggleDominantLeg()"/>
 						Dominant Leg
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="delta-zero-toggle" checked="checked" onchange="onToggleDeltaZero()"/>
+						<input type="checkbox" id="delta-zero-toggle" onchange="onToggleDeltaZero()"/>
 						Delta 0
 					</label>
 					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
-						<input type="checkbox" id="gamma-flip-toggle" checked="checked" onchange="onToggleGammaFlip()"/>
+						<input type="checkbox" id="gamma-flip-toggle" onchange="onToggleGammaFlip()"/>
 						Gamma Flip
+					</label>
+					<label class="tf-label" style="display:flex;align-items:center;gap:4px;">
+						<input type="checkbox" id="gamma-peak-toggle" checked="checked" onchange="onToggleGammaPeak()"/>
+						Gamma Peak
 					</label>
 					<button class="tf-btn" id="ruler-btn" onclick="toggleRuler()">Ruler</button>
 					<button class="tf-btn" id="settings-btn" onclick="openSettingsModal()">Settings</button>
@@ -358,6 +366,7 @@
 							<label class="color-row">Dominant Leg (DOM) <input type="color" id="color-dominant"/></label>
 							<label class="color-row">Delta = 0 (Δ0) <input type="color" id="color-deltazero"/></label>
 							<label class="color-row">Gamma Flip (γ flip) <input type="color" id="color-gammaflip"/></label>
+							<label class="color-row">Gamma Peak (γ peak) <input type="color" id="color-gammapeak"/></label>
 						</div>
 						<div class="modal-actions">
 							<button class="tf-btn" onclick="resetChartColors()">Reset to defaults</button>
@@ -523,16 +532,16 @@
 					// "Window" dropdown — trailing-hours trade window ending at
 					// AS_OF_ISO (not "now"), fed into the selected expiry's
 					// trades. Mirrors /4l/<asset>'s own option set
-					// (1h/4h/8h/24h/48h/72h/All, 24h default — synced with
+					// (1h/2h/3h/4h/8h/24h/48h/72h/All, 4h default — synced with
 					// /4l's own set and default per product decision
-					// (2026-09-23); /tm previously kept its own 4h default).
+					// (2026-09-23, again 2026-09-29 when both moved to 4h).
 					// 'all' skips the trailing-hours filter entirely; a number
 					// otherwise. (A "00:00 UTC" and an "Auto (Time to Expiry)"
 					// option were both offered here at various points — the
 					// server-side ?hours=midnight/?hours=auto resolutions are
 					// unchanged and still reachable by a direct API call, just
 					// no longer in this dropdown.)
-					let WINDOW_HOURS = 24;
+					let WINDOW_HOURS = 4;
 					// If ?hours=auto is ever driven in (not from this dropdown
 					// any more), this holds the numeric hours the server
 					// resolved it to; null otherwise.
@@ -580,7 +589,7 @@
 					// Dominant Leg violet, Δ0 green, γ flip violet).
 					const COLOR_STORAGE_KEY = 'dankbit_tm_chart_colors';
 					const DEFAULT_COLORS = {
-						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', dominant: '#8e24aa', deltazero: '#2e7d32', gammaflip: '#7e57c2',
+						bcg: '#000000', bpg: '#000000', scg: '#fb8c00', spg: '#fb8c00', dominant: '#8e24aa', deltazero: '#2e7d32', gammaflip: '#7e57c2', gammapeak: '#d81b60',
 					};
 					let chartColors = Object.assign({}, DEFAULT_COLORS);
 					try {
@@ -687,6 +696,16 @@
 					function clearGammaFlipLines() {
 						gammaFlipPriceLines.forEach(l => series.removePriceLine(l));
 						gammaFlipPriceLines = [];
+					}
+					// Gamma Peak lines (magenta, dashed) — the up-to-2 strongest
+					// peaks/bottoms of that same combined taker-signed gamma
+					// curve, as of AS_OF_ISO (`latest.gamma_peaks`, each
+					// {price, value, leg} — see four_leg_gamma_json), same as
+					// /4l/<asset>'s own. Gated by the "Gamma Peak" checkbox.
+					let gammaPeakPriceLines = [];
+					function clearGammaPeakLines() {
+						gammaPeakPriceLines.forEach(l => series.removePriceLine(l));
+						gammaPeakPriceLines = [];
 					}
 					function clearDeltaZeroLines() {
 						deltaZeroPriceLines.forEach(l => series.removePriceLine(l));
@@ -839,10 +858,10 @@
 					}
 
 					// "Dominant Leg" checkbox (right after "Gamma Legs",
-					// CHECKED by default) — same plain client-side toggle
+					// unchecked by default) — same plain client-side toggle
 					// pattern. Ported from /4l/<asset> per product decision
 					// (2026-09-23), replacing this page's former AVG checkbox.
-					let SHOW_DOMINANT_LEG = true;
+					let SHOW_DOMINANT_LEG = false;
 					function onToggleDominantLeg() {
 						SHOW_DOMINANT_LEG = document.getElementById('dominant-leg-toggle').checked;
 						if (!SHOW_DOMINANT_LEG) {
@@ -852,15 +871,15 @@
 						}
 					}
 
-					// "Delta 0" checkbox (right after "Dominant Leg", CHECKED by
+					// "Delta 0" checkbox (right after "Dominant Leg", unchecked by
 					// default) — plain client-side show/hide flag for the Δ0
 					// lines. Unchecking clears them without a fetch; checking
 					// re-fetches via refreshFourLegGamma(). Ported from
 					// /4l/<asset> per product decision (2026-09-23).
-					// "Gamma Flip" checkbox (right after "Delta 0", CHECKED by
+					// "Gamma Flip" checkbox (right after "Delta 0", unchecked by
 					// default) — same plain client-side toggle pattern. Ported
 					// from /4l/<asset> per product decision (2026-09-23).
-					let SHOW_GAMMA_FLIP = true;
+					let SHOW_GAMMA_FLIP = false;
 					function onToggleGammaFlip() {
 						SHOW_GAMMA_FLIP = document.getElementById('gamma-flip-toggle').checked;
 						if (!SHOW_GAMMA_FLIP) {
@@ -870,7 +889,20 @@
 						}
 					}
 
-					let SHOW_DELTA_ZERO = true;
+					// "Gamma Peak" checkbox (right after "Gamma Flip", checked
+					// by default) — same plain client-side toggle pattern.
+					// Ported from /4l/<asset> per product decision (2026-09-29).
+					let SHOW_GAMMA_PEAK = true;
+					function onToggleGammaPeak() {
+						SHOW_GAMMA_PEAK = document.getElementById('gamma-peak-toggle').checked;
+						if (!SHOW_GAMMA_PEAK) {
+							clearGammaPeakLines();
+						} else {
+							refreshFourLegGamma();
+						}
+					}
+
+					let SHOW_DELTA_ZERO = false;
 					function onToggleDeltaZero() {
 						SHOW_DELTA_ZERO = document.getElementById('delta-zero-toggle').checked;
 						if (!SHOW_DELTA_ZERO) {
@@ -1096,6 +1128,7 @@
 							if (dominantLegPriceLine) { series.removePriceLine(dominantLegPriceLine); dominantLegPriceLine = null; }
 							clearDeltaZeroLines();
 							clearGammaFlipLines();
+							clearGammaPeakLines();
 							if (!latest) {
 								return;
 							}
@@ -1128,6 +1161,21 @@
 										lineStyle: LightweightCharts.LineStyle.Dotted,
 										axisLabelVisible: true, axisLabelColor: gfColor,
 										title: 'γ flip (taker): ' + sym(flip.below) + ' below / ' + sym(flip.above) + ' above',
+									}));
+								});
+							}
+
+							// Gamma Peaks — up to 2 strongest extrema of the same
+							// combined gamma curve, each labeled with the leg
+							// driving it, e.g. "γ peak LC | 471M".
+							if (SHOW_GAMMA_PEAK) {
+								const gpColor = chartColors.gammapeak;
+								(latest.gamma_peaks || []).forEach(pk => {
+									gammaPeakPriceLines.push(series.createPriceLine({
+										price: pk.price, color: gpColor, lineWidth: 2,
+										lineStyle: LightweightCharts.LineStyle.Dashed,
+										axisLabelVisible: true, axisLabelColor: gpColor,
+										title: 'γ peak ' + pk.leg + ' | ' + formatAbbreviated(pk.value),
 									}));
 								});
 							}

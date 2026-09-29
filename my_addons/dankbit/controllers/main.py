@@ -3248,7 +3248,16 @@ class ChartController(http.Controller):
             # Same interpolation as options.find_zero_crossings(), kept
             # inline because that helper returns bare prices only.
             # Empty list if it never crosses.
-            g_arr = np.asarray(gamma.portfolio_gamma(STs, trades, 0.05), dtype=float)
+            # Built from the 4 per-leg curves (their sum IS the combined
+            # curve, portfolio_gamma() being a plain signed sum per trade)
+            # so the Gamma Peak lines below can say which leg drives each
+            # peak without a second pass over the trades.
+            leg_curves = {}
+            for code, opt_type, direction in (("LC", "call", "buy"), ("LP", "put", "buy"),
+                                              ("SC", "call", "sell"), ("SP", "put", "sell")):
+                leg_trades = trades.filtered(lambda t: t.option_type == opt_type and t.direction == direction)
+                leg_curves[code] = np.asarray(gamma.portfolio_gamma(STs, leg_trades, 0.05), dtype=float)
+            g_arr = sum(leg_curves.values())
             gamma_flips = []
             for i in range(len(g_arr) - 1):
                 ga, gb = g_arr[i], g_arr[i + 1]
@@ -3260,6 +3269,23 @@ class ChartController(http.Controller):
                     "above": "positive" if gb > 0 else "negative",
                 })
             point["gamma_flips"] = gamma_flips
+            # Gamma Peaks — the 2 strongest extrema (by |gamma|) of that
+            # same combined taker-signed curve, drawn as /4l's "Gamma Peak"
+            # lines. Same peaks+bottoms (local extrema beyond 15% of max
+            # |gamma|) the /<instrument>/<hours> PNG marks with dashed lines
+            # (chart_png_hours, r=0.05). A peak (> 0) is long-gamma driven,
+            # a bottom (< 0) short-gamma driven; `leg` is whichever leg
+            # contributes most gamma of that sign at that price. Empty list
+            # when the curve has no such extremum.
+            extrema = self.find_gamma_peaks(STs, g_arr) + self.find_gamma_bottoms(STs, g_arr)
+            extrema.sort(key=lambda e: abs(e[1]), reverse=True)
+            gamma_peaks = []
+            for price, value in extrema[:2]:
+                i = int(np.argmin(np.abs(STs - price)))
+                pick = max if value > 0 else min
+                leg = pick(leg_curves, key=lambda c: leg_curves[c][i])
+                gamma_peaks.append({"price": price, "value": value, "leg": leg})
+            point["gamma_peaks"] = gamma_peaks
             points.append(point)
 
         # Max Pain — independent of `hours`/the trades Window above (see
