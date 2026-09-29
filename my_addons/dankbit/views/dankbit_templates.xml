@@ -328,6 +328,26 @@
 					.expiry-pricing-note { color:#777; font-size:10.5pt; padding:7px 10px 0; }
 					@media (max-width:760px) { .expiry-pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .expiry-trace-controls { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 					#mm-hedge-panel { position:fixed; top:calc(var(--tf-bar-bottom,36px) + 8px); right:72px; width:min(520px,calc(100vw - 100px)); max-height:calc(100vh - var(--tf-bar-bottom,36px) - 28px); display:none; flex-direction:column; overflow:auto; z-index:22; color:#292929; background:rgba(255,255,255,.98); border:1px solid #999; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,.25); font:12pt/1.45 "Segoe UI",Tahoma,Arial,sans-serif; }
+					#expiry-wave-panel { position:fixed; top:calc(var(--tf-bar-bottom,36px) + 8px); right:72px; width:min(980px,calc(100vw - 90px)); max-height:calc(100vh - var(--tf-bar-bottom,36px) - 28px); display:none; flex-direction:column; overflow:auto; z-index:23; color:#292929; background:rgba(255,255,255,.98); border:1px solid #999; border-radius:8px; box-shadow:0 4px 18px rgba(0,0,0,.25); font:11pt/1.4 "Segoe UI",Tahoma,Arial,sans-serif; }
+					.expiry-wave-head { display:flex; align-items:center; gap:8px; padding:10px 13px; border-bottom:1px solid #ddd; font-size:15pt; font-weight:700; }
+					.expiry-wave-head button { border:0; background:transparent; color:inherit; font-size:14pt; cursor:pointer; }
+					.expiry-wave-head .expiry-wave-settings-button { margin-left:auto; }
+					#expiry-wave-summary { padding:8px 13px; color:#666; border-bottom:1px solid #ddd; font-weight:600; }
+					#expiry-wave-svg { width:calc(100% - 24px); height:min(52vh,440px); min-height:300px; margin:9px 12px 4px; display:block; border:1px solid #ddd; border-radius:4px; background:#fff; }
+					.expiry-wave-svg text { font:12px monospace; fill:#666; }
+					.expiry-wave-svg .ew-grid { stroke:#ddd; stroke-width:1; }
+					.expiry-wave-svg .ew-now { stroke:#ef8c00; stroke-width:1.5; stroke-dasharray:4 4; }
+					.expiry-wave-svg .ew-node-label { font-size:11px; font-weight:700; }
+					#expiry-wave-settings { display:none; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; padding:8px 12px; border-bottom:1px solid #ddd; }
+					#expiry-wave-settings label { display:flex; align-items:center; gap:5px; color:#666; font-size:9.5pt; }
+					#expiry-wave-settings input[type="color"] { width:36px; height:26px; padding:0; border:0; }
+					#expiry-wave-settings input[type="number"], #expiry-wave-settings select { max-width:92px; min-height:26px; color:inherit; background:transparent; border:1px solid #aaa; border-radius:3px; }
+					#expiry-wave-nodes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; padding:6px 12px; }
+					.expiry-wave-node { padding:7px 9px; border:1px solid #ddd; border-left:3px solid #00838f; border-radius:4px; background:#fafafa; }
+					.expiry-wave-node b { display:inline-block; margin-right:7px; }
+					.expiry-wave-node small { display:block; margin-top:3px; color:#777; font-size:9pt; }
+					.expiry-wave-note { color:#777; font-size:9.5pt; padding:4px 12px 10px; }
+					@media (max-width:760px) { #expiry-wave-settings { grid-template-columns:repeat(2,minmax(0,1fr)); } #expiry-wave-nodes { grid-template-columns:1fr; } #expiry-wave-svg { height:48vh; min-height:260px; } }
 					.mm-hedge-head { display:flex; align-items:center; padding:11px 14px; border-bottom:1px solid #ddd; font-size:15pt; font-weight:700; }
 					.mm-hedge-head button { margin-left:auto; border:0; background:transparent; color:inherit; font-size:15pt; cursor:pointer; }
 					.mm-hedge-expiries { display:flex; flex-wrap:wrap; gap:6px 12px; padding:9px 13px; border-bottom:1px solid #ddd; font-size:10.5pt; }
@@ -471,6 +491,14 @@
 					body.dark .expiry-flow-card { background:#1b1b1b; border-color:#555; }
 					body.dark #expiry-pricing-svg { background:#111; border-color:#444; }
 					body.dark #mm-hedge-panel { color:#ddd; background:rgba(12,12,12,.98); border-color:#555; }
+					body.dark #expiry-wave-panel { color:#ddd; background:rgba(12,12,12,.98); border-color:#555; }
+					body.dark .expiry-wave-head, body.dark #expiry-wave-summary, body.dark #expiry-wave-settings { border-color:#444; }
+					body.dark #expiry-wave-svg { border-color:#444; background:#111; }
+					body.dark .expiry-wave-svg text { fill:#aaa; }
+					body.dark .expiry-wave-svg .ew-grid { stroke:#383838; }
+					body.dark .expiry-wave-node { background:#1b1b1b; border-color:#555; }
+					body.dark .expiry-wave-node small { color:#aaa; }
+					body.dark .expiry-wave-note { color:#aaa; }
 					body.dark .mm-hedge-head, body.dark .mm-hedge-expiries, body.dark #mm-hedge-summary { border-color:#444; }
 					body.dark .signal-bot-menu { background:rgba(20,20,20,0.98); border-color:#555; }
 					body.dark .signal-bot-menu button, body.dark .signal-bot-menu a { color:#ddd; }
@@ -573,6 +601,21 @@
 					<div id="mm-hedge-targets"/>
 					<div class="mm-hedge-note">One short-term and one structural target at most. Calculations are probabilistic and display-only; they do not feed Forecast or Signal Bot.</div>
 				</div>
+				<div id="expiry-wave-panel" t-if="show_gamma_point == 'false' and show_strike_gamma == 'false'">
+					<div class="expiry-wave-head"><span>Expiry Wave · Long-Term Scenario Path</span><button type="button" class="expiry-wave-settings-button" onclick="toggleExpiryWaveSettings()" title="Expiry Wave appearance settings">⚙</button><button type="button" onclick="closeExpiryWave()">&#10005;</button></div>
+					<div id="expiry-wave-settings">
+						<label>Path <input type="color" id="ew-path-color" value="#26a69a" onchange="saveExpiryWaveSettings()"/></label>
+						<label>Range <input type="color" id="ew-range-color" value="#26a69a" onchange="saveExpiryWaveSettings()"/></label>
+						<label>Style <select id="ew-path-style" onchange="saveExpiryWaveSettings()"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label>
+						<label>Width <input type="number" id="ew-path-width" min="1" max="5" value="3" onchange="saveExpiryWaveSettings()"/></label>
+						<label><input type="checkbox" id="ew-show-range" checked="checked" onchange="saveExpiryWaveSettings()"/>Scenario range</label>
+						<label><input type="checkbox" id="ew-show-labels" checked="checked" onchange="saveExpiryWaveSettings()"/>Expiry labels</label>
+					</div>
+					<div id="expiry-wave-summary">Waiting for analysis…</div>
+					<svg id="expiry-wave-svg" class="expiry-wave-svg" viewBox="0 0 1000 420" role="img" aria-label="Expiry Wave long-term scenario path"/>
+					<div id="expiry-wave-nodes"/>
+					<div class="expiry-wave-note">The central curve connects expiry Gamma levels in date order. The shaded range uses IV/Vega for width and Delta for asymmetry; Theta only reduces the estimated relevance of older trade flow. Public trades do not prove positions are still open or identify market makers. Expiry dates anchor the timeline, not promised price-touch dates. This module does not feed any other indicator engine.</div>
+				</div>
 				<div id="tf-bar">
 					<span class="tf-label">Timeframe:</span>
 					<select class="tf-btn" id="tf-select" onchange="setTf(this.value)">
@@ -604,6 +647,7 @@
 							Expiry Trace
 						</label>
 						<label class="toggle-label"><input type="checkbox" id="mm-hedge-toggle" onchange="onToggleMMHedge()"/>MM Hedge</label>
+						<label class="toggle-label"><input type="checkbox" id="expiry-wave-toggle" onchange="onToggleExpiryWave()"/>Expiry Wave</label>
 						<label class="toggle-label">
 							<input type="checkbox" id="zones-boxes-toggle" checked="checked" onchange="onToggleZonesBoxes()"/>
 							Zones
@@ -903,6 +947,18 @@
 						recent:{color:'#ffeb3b',style:'solid',width:2},
 						expiries:{},
 					};
+					const EXPIRY_WAVE_SETTINGS_KEY = 'dankbit_expiry_wave_settings_v1';
+					const DEFAULT_EXPIRY_WAVE_SETTINGS = { pathColor:'#26a69a', rangeColor:'#26a69a', pathStyle:'solid', pathWidth:3, showRange:true, showLabels:true };
+					let expiryWaveSettings = Object.assign({}, DEFAULT_EXPIRY_WAVE_SETTINGS);
+					try {
+						const saved = JSON.parse(localStorage.getItem(EXPIRY_WAVE_SETTINGS_KEY) || '{}');
+						if (/^#[0-9a-f]{6}$/i.test(saved.pathColor || '')) expiryWaveSettings.pathColor = saved.pathColor;
+						if (/^#[0-9a-f]{6}$/i.test(saved.rangeColor || '')) expiryWaveSettings.rangeColor = saved.rangeColor;
+						if (['solid','dashed','dotted'].includes(saved.pathStyle)) expiryWaveSettings.pathStyle = saved.pathStyle;
+						if (Number.isFinite(parseInt(saved.pathWidth, 10))) expiryWaveSettings.pathWidth = Math.max(1, Math.min(5, parseInt(saved.pathWidth, 10)));
+						if (typeof saved.showRange === 'boolean') expiryWaveSettings.showRange = saved.showRange;
+						if (typeof saved.showLabels === 'boolean') expiryWaveSettings.showLabels = saved.showLabels;
+					} catch (e) { /* Keep Expiry Wave defaults for malformed local settings. */ }
 					const EXPIRY_TRACE_SETTINGS_KEY='dankbit_expiry_trace_line_settings';
 					const DEFAULT_EXPIRY_TRACE_LINES={
 						BCG:{color:'#2e7d32',style:'dashed',width:2},
@@ -1008,6 +1064,7 @@
 					const EXPIRY_PRICING_URL = '/api/expiry-pricing/' + ASSET;
 					const EXPIRY_TRACE_EXPIRIES_URL = '/api/expiry-trace/expiries/' + ASSET;
 					const MM_HEDGE_URL = '/api/mm-hedge/' + ASSET;
+					const EXPIRY_WAVE_URL = '/api/expiry-wave/' + ASSET;
 					const BANDS_URL        = '/api/bands/' + ASSET;
 					const LIVE_BAND_URL    = '/api/live-band/' + ASSET;
 					const ZB_URL           = '/api/zones-box/' + ASSET;
@@ -1623,6 +1680,7 @@
 					let expiryPricingData = null;
 					let expiryTraceExpiriesLoaded = false;
 					let SHOW_MM_HEDGE=false, mmHedgeData=null, mmHedgePriceLines=[], mmSelectedExpiries=new Set();
+					let SHOW_EXPIRY_WAVE=false, expiryWaveData=null;
 					const EXPIRY_PRICING_SNAPSHOT_KEY='dankbit_expiry_pricing_snapshots_'+ASSET;
 
 					function expiryNumber(value, digits) {
@@ -1736,6 +1794,49 @@
 					function onMMHedgeSelectionChange(expiry){if(expiry==='auto'){mmSelectedExpiries.clear();}else{const box=document.querySelector('[data-mm-expiry="'+expiry+'"]');if(box?.checked)mmSelectedExpiries.add(expiry);else mmSelectedExpiries.delete(expiry);}safeRefresh('MM Hedge',refreshMMHedge);}
 					function closeMMHedge(){SHOW_MM_HEDGE=false;const toggle=document.getElementById('mm-hedge-toggle');if(toggle)toggle.checked=false;const panel=document.getElementById('mm-hedge-panel');if(panel)panel.style.display='none';clearMMHedgeLines();}
 					function onToggleMMHedge(){SHOW_MM_HEDGE=Boolean(document.getElementById('mm-hedge-toggle')?.checked);const panel=document.getElementById('mm-hedge-panel');if(panel)panel.style.display=SHOW_MM_HEDGE?'flex':'none';if(SHOW_MM_HEDGE)safeRefresh('MM Hedge',refreshMMHedge);else clearMMHedgeLines();}
+
+					function expiryWaveEscape(value){return String(value==null?'':value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+					function expiryWaveNumber(value,digits){const n=Number(value);return Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:digits==null?0:digits}):'—';}
+					function expiryWaveSigned(value,digits){const n=Number(value);return Number.isFinite(n)?(n>=0?'+':'−')+expiryWaveNumber(Math.abs(n),digits):'—';}
+					function expiryWaveDate(value,year){return value?new Date(value).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',...(year?{year:'2-digit'}:{})}).toUpperCase():'—';}
+					function expiryWavePath(points){
+						if(!points||points.length<2)return points?.length?'M '+points[0].x+' '+points[0].y:'';
+						const slopes=[];for(let i=0;i<points.length-1;i++){const dx=Math.max(1e-6,points[i+1].x-points[i].x);slopes.push((points[i+1].y-points[i].y)/dx);}
+						const tangent=new Array(points.length);tangent[0]=slopes[0];tangent[points.length-1]=slopes[slopes.length-1];
+						for(let i=1;i<points.length-1;i++){const a=slopes[i-1],b=slopes[i];tangent[i]=a*b<=0?0:(2*a*b)/(a+b);}
+						let d='M '+points[0].x.toFixed(2)+' '+points[0].y.toFixed(2);
+						for(let i=0;i<points.length-1;i++){const p=points[i],q=points[i+1],dx=q.x-p.x,s=slopes[i];let m0=tangent[i],m1=tangent[i+1];if(Math.abs(s)<1e-9){m0=0;m1=0;}else{const a=m0/s,b=m1/s,norm=a*a+b*b;if(norm>9){const factor=3/Math.sqrt(norm);m0=factor*a*s;m1=factor*b*s;}}const c1x=p.x+dx/3,c2x=q.x-dx/3,c1y=p.y+m0*dx/3,c2y=q.y-m1*dx/3;d+=' C '+c1x.toFixed(2)+' '+c1y.toFixed(2)+' '+c2x.toFixed(2)+' '+c2y.toFixed(2)+' '+q.x.toFixed(2)+' '+q.y.toFixed(2);}
+						return d;
+					}
+					function expiryWaveRgb(hex){const h=String(hex||'#26a69a').replace('#','');return 'rgb('+parseInt(h.slice(0,2),16)+','+parseInt(h.slice(2,4),16)+','+parseInt(h.slice(4,6),16)+')';}
+					function renderExpiryWave(){
+						const data=expiryWaveData,svg=document.getElementById('expiry-wave-svg'),summary=document.getElementById('expiry-wave-summary'),list=document.getElementById('expiry-wave-nodes');if(!svg||!summary||!list)return;
+						if(!data?.available||!Number.isFinite(Number(data.spot))||!(data.nodes||[]).length){summary.textContent='No weekly or monthly expiry nodes with usable options data were found.';svg.innerHTML='';list.replaceChildren();return;}
+						const source=data.nodes.slice().sort((a,b)=>new Date(a.expiry)-new Date(b.expiry)),nowMs=new Date(data.generated_at).getTime(),spot=Number(data.spot);
+						const points=[{time:nowMs,price:spot,range_low:spot,range_high:spot,kind:'NOW',expiry:data.generated_at},...source.map(n=>({time:new Date(n.expiry).getTime(),price:Number(n.price),range_low:Number(n.range_low),range_high:Number(n.range_high),kind:n.kind,expiry:n.expiry,node:n}))].filter(p=>Number.isFinite(p.time)&&Number.isFinite(p.price));
+						if(points.length<2){summary.textContent='Not enough valid expiry data to draw the scenario path.';svg.innerHTML='';list.replaceChildren();return;}
+						const W=1000,H=420,L=78,R=22,T=24,B=48,x0=points[0].time,x1=Math.max(points[points.length-1].time,x0+86400000);let minP=Math.min(...points.map(p=>p.range_low)),maxP=Math.max(...points.map(p=>p.range_high));const pad=Math.max((maxP-minP)*0.08,spot*0.015,1);minP=Math.max(0,minP-pad);maxP+=pad;if(maxP<=minP)maxP=minP+1;
+						const X=t=>L+(t-x0)/(x1-x0)*(W-L-R),Y=p=>T+(maxP-p)/(maxP-minP)*(H-T-B),main=points.map(p=>({x:X(p.time),y:Y(p.price)})),upper=points.map(p=>({x:X(p.time),y:Y(p.range_high)})),lower=points.map(p=>({x:X(p.time),y:Y(p.range_low)}));
+						const color=expiryWaveSettings.pathColor,rangeColor=expiryWaveSettings.rangeColor,strokeDash=expiryWaveSettings.pathStyle==='dashed'?'10 6':expiryWaveSettings.pathStyle==='dotted'?'2 5':'none';
+						let markup='';for(let i=0;i<=4;i++){const price=minP+(maxP-minP)*i/4,y=Y(price);markup+='<line class="ew-grid" x1="'+L+'" y1="'+y.toFixed(2)+'" x2="'+(W-R)+'" y2="'+y.toFixed(2)+'"/><text x="'+(L-8)+'" y="'+(y+4).toFixed(2)+'" text-anchor="end">'+expiryWaveNumber(price)+'</text>';}
+						for(let i=0;i<=5;i++){const time=x0+(x1-x0)*i/5,x=X(time),label=new Date(time).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short'}).toUpperCase();markup+='<line class="ew-grid" x1="'+x.toFixed(2)+'" y1="'+T+'" x2="'+x.toFixed(2)+'" y2="'+(H-B)+'"/><text x="'+x.toFixed(2)+'" y="'+(H-15)+'" text-anchor="middle">'+label+'</text>';}
+						const bandUpper=expiryWavePath(upper),bandLower=expiryWavePath(lower.slice().reverse()),lowerTail=bandLower.replace(/^M[^C]*/,'');const bandPath=bandUpper+' L '+lower[lower.length-1].x.toFixed(2)+' '+lower[lower.length-1].y.toFixed(2)+' '+lowerTail+' Z';
+						if(expiryWaveSettings.showRange)markup+='<path d="'+bandPath+'" fill="'+rangeColor+'" fill-opacity=".16" stroke="none"/>';
+						const path=expiryWavePath(main);markup+='<path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="'+expiryWaveSettings.pathWidth+'" stroke-linecap="round" stroke-linejoin="round"'+(strokeDash!=='none'?' stroke-dasharray="'+strokeDash+'"':'')+'/>';
+						const nowX=X(nowMs);markup+='<line class="ew-now" x1="'+nowX.toFixed(2)+'" y1="'+T+'" x2="'+nowX.toFixed(2)+'" y2="'+(H-B)+'"/><text x="'+Math.min(nowX+5,W-R-25).toFixed(2)+'" y="'+(T+13)+'" fill="#ef8c00">NOW</text>';
+						points.slice(1).forEach((p,i)=>{const x=X(p.time),y=Y(p.price),n=p.node,tag=n.kind==='YE'?'YE':n.kind;const tip=tag+' '+expiryWaveDate(n.expiry,true)+' · Gamma '+expiryWaveNumber(n.price,2)+' · Δ '+expiryWaveSigned(Number(n.delta_bias)*100,1)+'% · Θ/day '+expiryWaveSigned(n.theta_per_day,2)+' · Vega/IV pt '+expiryWaveSigned(n.vega_per_iv_point,2)+' · IV '+expiryWaveNumber(n.iv_percent,2)+'% · trades '+expiryWaveNumber(n.trade_count);markup+='<circle cx="'+x.toFixed(2)+'" cy="'+y.toFixed(2)+'" r="4.5" fill="'+color+'" stroke="#fff" stroke-width="1.5"><title>'+expiryWaveEscape(tip)+'</title></circle>';if(expiryWaveSettings.showLabels){const label=tag+' '+expiryWaveDate(n.expiry,false);markup+='<text class="ew-node-label" x="'+x.toFixed(2)+'" y="'+Math.max(T+16,y-10).toFixed(2)+'" text-anchor="middle" fill="'+color+'">'+expiryWaveEscape(label)+'</text>';}});
+						markup+='<circle cx="'+X(nowMs).toFixed(2)+'" cy="'+Y(spot).toFixed(2)+'" r="4" fill="#ef8c00"/>';
+						svg.innerHTML=markup;
+						const earliest=source.map(n=>n.first_seen).filter(Boolean).sort()[0],date=earliest?expiryWaveDate(earliest,true):'—',updated=new Date(data.generated_at).toLocaleTimeString('en-GB',{timeZone:'UTC',hour:'2-digit',minute:'2-digit'});
+						summary.textContent=source.length+' expiry nodes · '+expiryWaveNumber(data.trade_count)+' trades · history from '+date+' · spot '+expiryWaveNumber(spot,2)+' · updated '+updated+' UTC';
+						const kindColor={W:'#7e57c2',M:'#00838f',YE:'#c62828'};
+						list.innerHTML=source.map(n=>{const delta=Number(n.delta_bias)*100;const first=n.first_seen?expiryWaveDate(n.first_seen,true):'—';return '<div class="expiry-wave-node" style="border-left-color:'+(kindColor[n.kind]||'#00838f')+'"><b>'+expiryWaveEscape(n.kind)+' · '+expiryWaveEscape(expiryWaveDate(n.expiry,true))+'</b><strong>'+expiryWaveNumber(n.price,2)+'</strong><small>Δ lean '+expiryWaveSigned(delta,1)+'% · Θ/day '+expiryWaveSigned(n.theta_per_day,2)+' · Vega/IV pt '+expiryWaveSigned(n.vega_per_iv_point,2)+' · IV '+expiryWaveNumber(n.iv_percent,2)+'% · '+expiryWaveNumber(n.trade_count)+' trades · first '+expiryWaveEscape(first)+' · Θ retention '+expiryWaveNumber(n.theta_retention_percent,1)+'%</small></div>';}).join('');
+					}
+					async function refreshExpiryWave(){if(!SHOW_EXPIRY_WAVE||MINIMAL_CHART)return;const response=await fetch(EXPIRY_WAVE_URL);if(!response.ok)throw new Error('Expiry Wave HTTP '+response.status);expiryWaveData=await response.json();if(SHOW_EXPIRY_WAVE)renderExpiryWave();}
+					function onToggleExpiryWave(){SHOW_EXPIRY_WAVE=Boolean(document.getElementById('expiry-wave-toggle')?.checked);const panel=document.getElementById('expiry-wave-panel');if(panel)panel.style.display=SHOW_EXPIRY_WAVE?'flex':'none';if(SHOW_EXPIRY_WAVE)safeRefresh('Expiry Wave',refreshExpiryWave);}
+					function closeExpiryWave(){SHOW_EXPIRY_WAVE=false;const toggle=document.getElementById('expiry-wave-toggle');if(toggle)toggle.checked=false;const panel=document.getElementById('expiry-wave-panel');if(panel)panel.style.display='none';}
+					function toggleExpiryWaveSettings(){const settings=document.getElementById('expiry-wave-settings');if(!settings)return;const show=settings.style.display!=='grid';settings.style.display=show?'grid':'none';if(show){document.getElementById('ew-path-color').value=expiryWaveSettings.pathColor;document.getElementById('ew-range-color').value=expiryWaveSettings.rangeColor;document.getElementById('ew-path-style').value=expiryWaveSettings.pathStyle;document.getElementById('ew-path-width').value=expiryWaveSettings.pathWidth;document.getElementById('ew-show-range').checked=expiryWaveSettings.showRange;document.getElementById('ew-show-labels').checked=expiryWaveSettings.showLabels;}}
+					function saveExpiryWaveSettings(){const pathColor=document.getElementById('ew-path-color')?.value||expiryWaveSettings.pathColor,rangeColor=document.getElementById('ew-range-color')?.value||expiryWaveSettings.rangeColor,style=document.getElementById('ew-path-style')?.value,width=parseInt(document.getElementById('ew-path-width')?.value,10);expiryWaveSettings={pathColor:/^#[0-9a-f]{6}$/i.test(pathColor)?pathColor:DEFAULT_EXPIRY_WAVE_SETTINGS.pathColor,rangeColor:/^#[0-9a-f]{6}$/i.test(rangeColor)?rangeColor:DEFAULT_EXPIRY_WAVE_SETTINGS.rangeColor,pathStyle:['solid','dashed','dotted'].includes(style)?style:'solid',pathWidth:Math.max(1,Math.min(5,Number.isFinite(width)?width:3)),showRange:Boolean(document.getElementById('ew-show-range')?.checked),showLabels:Boolean(document.getElementById('ew-show-labels')?.checked)};localStorage.setItem(EXPIRY_WAVE_SETTINGS_KEY,JSON.stringify(expiryWaveSettings));if(SHOW_EXPIRY_WAVE&&expiryWaveData)renderExpiryWave();}
 
 					let nearestExpiryStr = null;
 					let lastTradeCount = 0;
@@ -3410,6 +3511,7 @@
 					setInterval(() => safeRefresh('Strategy Radar', refreshStrategyRadar), Math.max(REFRESH, 60000));
 					setInterval(() => { if(document.getElementById('expiry-trace-mode')?.value !== 'explorer') safeRefresh('Expiry Trace', refreshExpiryPricing); }, 900000);
 					setInterval(() => safeRefresh('MM Hedge', refreshMMHedge), 900000);
+					setInterval(() => safeRefresh('Expiry Wave', refreshExpiryWave), 900000);
 					setInterval(updateExpiryPricingCountdown, 1000);
 					// Bands polls on ZONES_BOX_REFRESH (not REFRESH) — its own
 					// underlying dankbit.bands rows only ever change once per
